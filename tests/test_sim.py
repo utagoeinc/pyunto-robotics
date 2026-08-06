@@ -1,0 +1,171 @@
+"""Simulation tests: the robot model, the office, and the velocity interface.
+
+These lock in the properties the demo depends on. If the humanoid stops standing, or its hands
+stop reaching a door handle, everything downstream breaks in confusing ways.
+"""
+
+from __future__ import annotations
+
+import math
+
+import mujoco
+import numpy as np
+import pytest
+
+from pyunto_robotics.sim.robot import Robot
+
+HANDLE_HEIGHT = 0.90  # office door handles; the arm geometry was designed around this
+
+
+@pytest.fixture(scope="module")
+def robot():
+    r = Robot("office.xml", keyframe="start")
+    yield r
+    r.close()
+
+
+def _tilt_degrees(quat: np.ndarray) -> float:
+    """Lean away from vertical, ignoring yaw (turning is not falling over)."""
+    rot = np.zeros(9)
+    mujoco.mju_quat2Mat(rot, quat)
+    up_z = rot.reshape(3, 3)[2, 2]
+    return math.degrees(math.acos(np.clip(up_z, -1.0, 1.0)))
+
+
+def test_office_loads_with_expected_structure():
+    r = Robot("office.xml", keyframe="start")
+    try:
+        names = {
+            mujoco.mj_id2name(r.model, mujoco.mjtObj.mjOBJ_BODY, i) for i in range(r.model.nbody)
+        }
+        assert {"door_workspace", "door_meeting", "door_pantry"} <= names
+        assert r.model.nu == 23  # 12 leg + 1 waist + 8 arm + 2 gripper
+    finally:
+        r.close()
+
+
+def test_robot_stands_without_falling(robot):
+    robot.reset("start")
+    robot.stand(3.0)
+    assert robot.position[2] > 0.7, "robot sank or fell through the floor"
+    assert _tilt_degrees(robot.data.qpos[3:7]) < 15.0, "robot toppled"
+
+
+def test_forward_command_moves_forward(robot):
+    """A +vx command must move the robot along its own heading, not a world axis."""
+    robot.reset("lobby")
+    start = robot.position.copy()
+    yaw = robot.yaw
+    for _ in range(100):
+        robot.step(vx=0.6)
+    moved = robot.position - start
+
+    travelled = math.hypot(moved[0], moved[1])
+    assert travelled > 0.8, f"barely moved: {travelled:.2f} m"
+    # Displacement should line up with the heading it started with.
+    heading = np.array([math.cos(yaw), math.sin(yaw)])
+    along = float(np.dot(moved[:2], heading))
+    assert along > 0.8 * travelled, "moved sideways instead of forward"
+
+
+def test_yaw_command_turns(robot):
+    robot.reset("start")
+    yaw0 = robot.yaw
+    for _ in range(50):
+        robot.step(wz=0.8)
+    delta = (robot.yaw - yaw0 + math.pi) % (2 * math.pi) - math.pi
+    assert delta > 0.3, f"did not turn left: {math.degrees(delta):.1f} deg"
+
+
+def test_zero_command_holds_position(robot):
+    robot.reset("start")
+    start = robot.position.copy()
+    for _ in range(100):
+        robot.step()
+    assert np.linalg.norm(robot.position - start) < 0.05, "drifted while commanded to hold"
+
+
+def test_camera_returns_rgb_and_metric_depth(robot):
+    robot.reset("start")
+    robot.stand(0.2)
+    obs = robot.look()
+
+    assert obs.rgb.dtype == np.uint8 and obs.rgb.shape[2] == 3
+    assert obs.depth.shape == obs.rgb.shape[:2]
+    assert np.isfinite(obs.depth).all(), "depth must never contain NaN/inf"
+    # Standing in the corridor there is always a wall within a few metres.
+    assert 0.05 < float(obs.depth.min()) < 5.0
+
+
+def test_bearing_sign_convention(robot):
+    """Left of centre must be a positive bearing; the nav code relies on this."""
+    obs = robot.look()
+    width = obs.rgb.shape[1]
+    assert robot.bearing_to_pixel(0) > 0
+    assert robot.bearing_to_pixel(width) < 0
+    assert abs(robot.bearing_to_pixel(width / 2)) < 1e-6
+
+
+def test_hand_can_reach_door_handle_height(robot):
+    """The whole demo depends on this: the gripper must get to ~0.90 m out in front."""
+    robot.reset("start")
+    robot.stand(0.2)
+
+    best_forward = -1.0
+    for pitch in np.linspace(-1.6, 0.2, 13):
+        for elbow in np.linspace(-1.8, 0.0, 13):
+            robot.set_arm("r", shoulder_pitch=float(pitch), shoulder_roll=0.0,
+                          shoulder_yaw=0.0, elbow=float(elbow))
+            for _ in range(20):
+                robot.step()
+            hand = robot.hand_position("r")
+            if abs(hand[2] - HANDLE_HEIGHT) < 0.06:
+                forward = np.dot((hand - robot.position)[:2],
+                                 [math.cos(robot.yaw), math.sin(robot.yaw)])
+                best_forward = max(best_forward, float(forward))
+
+    assert best_forward > 0.20, (
+        f"cannot reach a {HANDLE_HEIGHT} m handle far enough in front (best {best_forward:.3f} m)"
+    )
+
+
+def test_gripper_opens_and_closes(robot):
+    robot.reset("start")
+    joint = mujoco.mj_name2id(robot.model, mujoco.mjtObj.mjOBJ_JOINT, "grip_r1")
+    adr = robot.model.jnt_qposadr[joint]
+
+    robot.grip("r", 0.0)
+    for _ in range(60):
+        robot.step()
+    opened = float(robot.data.qpos[adr])
+
+    robot.grip("r", 1.0)
+    for _ in range(60):
+        robot.step()
+    closed = float(robot.data.qpos[adr])
+
+    assert closed > opened + 0.1, f"gripper did not close (open {opened:.3f}, closed {closed:.3f})"
+
+
+def test_closed_door_blocks_the_robot(robot):
+    """Walking into a closed door must not pass through it."""
+    robot.reset("start")
+    # Head straight at the meeting-room door.
+    for _ in range(200):
+        robot.step(vx=0.8)
+    assert robot.position[1] < 1.1, "robot walked through a closed door"
+
+
+def test_door_opens_when_pushed(robot):
+    """A modest torque must swing the door; too stiff and the arm could never do it."""
+    robot.reset("start")
+    joint = mujoco.mj_name2id(robot.model, mujoco.mjtObj.mjOBJ_JOINT, "door_2")
+    adr = robot.model.jnt_qposadr[joint]
+    dof = robot.model.jnt_dofadr[joint]
+
+    for _ in range(100):
+        robot.data.qfrc_applied[dof] = -5.0
+        robot.step()
+    angle = abs(math.degrees(float(robot.data.qpos[adr])))
+    robot.data.qfrc_applied[dof] = 0.0
+    assert angle > 20.0, f"door barely moved under 5 Nm: {angle:.1f} deg"

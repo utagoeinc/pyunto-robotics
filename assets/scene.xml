@@ -1,0 +1,39 @@
+<!--
+  Minimal world: floor + lights + the robot. Used for testing the robot on its own
+  (standing, gait tuning, reach checks) without the office around it.
+
+  For the actual demo use office.xml, which includes this robot in a multi-room building.
+-->
+<mujoco model="pyunto_scene">
+  <include file="pyunto_h1.xml"/>
+
+  <statistic center="0 0 0.7" extent="2.5"/>
+
+  <option timestep="0.005" iterations="50" solver="Newton" cone="elliptic"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.35 0.35 0.35" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="140" elevation="-20" offwidth="1280" offheight="960"/>
+    <map znear="0.02" zfar="30"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.5 0.6 0.72" rgb2="0.1 0.12 0.16"
+             width="512" height="640"/>
+    <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.30 0.32 0.35"
+             rgb2="0.38 0.40 0.43" width="512" height="512"/>
+    <material name="floor_mat" texture="floor_tex" texrepeat="8 8" texuniform="true"
+              reflectance="0.05"/>
+  </asset>
+
+  <worldbody>
+    <light name="key" pos="2 -2 4" dir="-0.4 0.4 -1" directional="true" diffuse="0.7 0.7 0.7"/>
+    <light name="fill" pos="-2 2 3" dir="0.4 -0.4 -1" directional="true" diffuse="0.3 0.3 0.3"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="floor_mat"
+          condim="6" friction="1.2 0.05 0.01"/>
+    <!-- Fixed viewpoints for debugging; the robot's own eye is head_cam. -->
+    <camera name="track" mode="trackcom" pos="2.2 -2.2 1.6" xyaxes="0.7 0.7 0 -0.3 0.3 0.9"/>
+    <camera name="front" pos="2.6 0 1.2" xyaxes="0 1 0 -0.35 0 0.94"/>
+  </worldbody>
+</mujoco>
