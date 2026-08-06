@@ -1,0 +1,28 @@
+# Secrets — never commit
+.env
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Model weights (downloaded on demand, GBs)
+models/
+*.safetensors
+*.gguf
+*.pt
+*.onnx
+
+# Runtime artifacts
+out/
+logs/
+*.png
+*.jpg
+*.mp4
+.token_cache.json
+
+# macOS
+.DS_Store

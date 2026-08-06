@@ -1,0 +1,50 @@
+[project]
+name = "pyunto-robotics"
+version = "0.1.0"
+description = "Natural-language controlled humanoid robot in a simulated office, driven by a Pyunto messaging account"
+requires-python = ">=3.12,<3.13"   # mlx-vlm supports up to 3.12 only
+
+dependencies = [
+    # Simulation
+    "mujoco>=3.11.0",
+    "numpy>=2.0",
+    # Pyunto integration
+    "requests>=2.31",
+    # [client] pulls in websocket-client, which the sync Socket.IO client needs for the
+    # websocket transport; without it engineio silently falls back to polling only.
+    "python-socketio[client,asyncio_client]>=5.16",
+    "aiohttp>=3.9",
+    "cryptography>=42.0",       # AES-256-GCM, matches iOS SymmetricCryptoService
+    "python-dotenv>=1.0",
+    # Imaging
+    "pillow>=10.3",
+]
+
+[project.optional-dependencies]
+# Local LLM/VLM on Apple Silicon. Split out because the weights are large.
+llm = [
+    "mlx>=0.32",
+    "mlx-vlm>=0.6.10",
+]
+# Phase 6: RL locomotion training (rollouts on CPU, gradient updates on MPS)
+train = [
+    "torch>=2.9",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyunto_robotics"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
