@@ -49,6 +49,20 @@ def _yaw_quat(yaw: float) -> np.ndarray:
     return np.array([math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)])
 
 
+def _slerp_to(current: np.ndarray, target: np.ndarray, t: float) -> np.ndarray:
+    """Move `current` a fraction `t` of the way toward `target`, normalised.
+
+    A plain lerp is fine here because the two orientations are always close: this only ever
+    corrects a small lean back to upright.
+    """
+    t = float(np.clip(t, 0.0, 1.0))
+    if np.dot(current, target) < 0.0:  # take the short way round
+        target = -target
+    blended = current * (1.0 - t) + target * t
+    norm = np.linalg.norm(blended)
+    return target if norm < 1e-9 else blended / norm
+
+
 class KinematicGait:
     """Moves the base kinematically and animates the legs to match.
 
@@ -75,12 +89,16 @@ class KinematicGait:
         lift_gain: float = 0.55,     # knee lift per m/s
         accel: float = 2.5,          # m/s^2 ramp, so commands do not snap
         yaw_accel: float = 6.0,      # rad/s^2
+        height_gain: float = 12.0,   # how hard to hold the torso at its standing height
+        upright_gain: float = 14.0,  # how hard to damp out pitch/roll
     ):
         self.step_freq = step_freq
         self.stride_gain = stride_gain
         self.lift_gain = lift_gain
         self.accel = accel
         self.yaw_accel = yaw_accel
+        self.height_gain = height_gain
+        self.upright_gain = upright_gain
 
         self._phase = 0.0
         self._vx = 0.0
@@ -152,24 +170,40 @@ class KinematicGait:
         lift = self.lift_gain * min(speed, 1.2)
         self._write_stance(model, data, swing, lift)
 
-        # Drive the base. qpos[0:3] position, qpos[3:7] orientation, qvel[0:6] twist.
-        yaw = _quat_yaw(data.qpos[3:7]) + self._wz * dt
+        # Drive the base by writing VELOCITY, never position.
+        #
+        # Setting qpos directly teleports the body one step at a time, which skips collision
+        # response entirely -- the robot walked through walls with 31 contacts active, because
+        # the solver's correction was overwritten the instant it was computed. Writing qvel
+        # instead lets MuJoCo integrate the motion, so contacts actually stop the robot while
+        # the gait keeps it upright.
+        yaw = _quat_yaw(data.qpos[3:7])
         cos_y, sin_y = math.cos(yaw), math.sin(yaw)
         # Body-frame command -> world frame.
         world_vx = self._vx * cos_y - self._vy * sin_y
         world_vy = self._vx * sin_y + self._vy * cos_y
 
-        data.qpos[0] += world_vx * dt
-        data.qpos[1] += world_vy * dt
-        data.qpos[2] = self._base_z
-        data.qpos[3:7] = _yaw_quat(yaw)
-
-        # Keep the reported velocity consistent with the motion we imposed, so anything reading
-        # qvel (sensors, logging, an RL observation later) sees the truth.
+        # Horizontal motion goes through qvel so the solver can stop it at a wall.
         data.qvel[0] = world_vx
         data.qvel[1] = world_vy
-        data.qvel[2] = 0.0
-        data.qvel[3] = data.qvel[4] = 0.0
+
+        # Hold the torso upright and at a constant height. This is what "cannot fall over"
+        # buys: vertical drift and lean are corrected every step, while horizontal motion stays
+        # under the solver's control so obstacles still matter.
+        data.qvel[2] += (self._base_z - data.qpos[2]) * self.height_gain
+        data.qvel[3] = 0.0
+        data.qvel[4] = 0.0
+
+        # Orientation is set outright: yaw follows the command exactly, pitch and roll are zero.
+        #
+        # Two reasons this is not left to the solver. The feet are planted by a scripted stance
+        # rather than stepping, so foot friction cancels a commanded spin almost entirely (0.8
+        # rad/s came out as 0.23). And blending toward the target only applies a fraction of it
+        # per step, which throttled turning to a quarter of what was asked for. Heading is also
+        # the one degree of freedom a wall has no business resisting, so overriding it costs
+        # nothing that collisions care about -- position, which is what walls act on, still goes
+        # through qvel above.
+        data.qpos[3:7] = _yaw_quat(yaw + self._wz * dt)
         data.qvel[5] = self._wz
 
 
