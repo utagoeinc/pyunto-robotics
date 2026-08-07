@@ -200,6 +200,30 @@ short of a door at x=-4. The test asserts the choice rather than the arrival.
 Plans need the step explicitly: `open(right) -> leave -> home -> open(left)`. The prompt tells
 Gemma 4 to emit it.
 
+### Why it walks along the wall
+
+The logs are full of `door is behind an obstacle; following the wall to the left`, and it looks
+wrong: the corridor is 2 m wide with 2.7 m of clear space down the middle, and the robot is
+scraping along the side of it.
+
+The cause is that it steers straight at the target from the moment it sees one. A door on the
+far side of the office is at a sharp angle, so heading for it takes the robot diagonally into
+the corridor wall long before it gets there -- measured hugging y=+0.75 against a wall at
+y=1.0, a 0.25 m gap. From there `clearance_ahead` is under the 0.55 m safety distance
+permanently, so it stays in wall-following for the rest of the trip. It arrives, but it arrives
+by grinding along the wall.
+
+A centring bias was written to fix it -- nudge the heading away from whichever side is closer,
+fading out on the final approach so a doorway is still reachable. It works as intended: mean
+corridor y goes from +0.75 to +0.02, dead centre. But walking the middle keeps all three doors
+in frame the whole way, and the tracker then swaps targets mid-approach, so "open the left door"
+arrives at the middle one. Gains from 0.9 down to 0.15 all traded one failure for another (3/3
+correct doors down to 1/3 or 2/3), and the change is not committed.
+
+Fixing it properly means tracking the chosen door by where it is in the world rather than by
+bearing, so a changing viewpoint cannot swap it. That is a different piece of work from a
+steering tweak.
+
 ## Notes on the Pyunto backend
 
 The server is Node/TypeScript + Express + Socket.IO (not FastAPI, despite older docs), and
