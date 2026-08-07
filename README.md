@@ -129,20 +129,31 @@ env-steps/s on CPU and MPS gradient updates are ~24× faster than CPU, putting 1
 within a few hours. MJX/JAX is *not* the route — `jax-metal` is unmaintained, and MJX is slower
 than plain MuJoCo for a single robot anyway.
 
-## Known limitation: multi-room errands
+## Opening doors: push and pull
 
-Gemma 4 breaks a multi-part instruction into the right steps -- 「右のドアを開けて…今度は一番左の
-部屋に」 plans as `open(right) -> leave -> open(left)` -- but the robot only gets back out of two
-rooms in three. Inside a room the open leaf fills the doorway and no other door is visible, so
-there is nothing for a reactive search to steer toward; `open_door` remembers the corridor side
-of the doorway and `leave` walks back to it, which works for the workspace and the meeting room
-but not reliably for the pantry.
+The robot can both push a door open and grasp the handle to pull it. Pulling came later, and
+the reason is worth recording: the first design could only push, because a push needs the hand
+somewhere on the leaf rather than precisely on a 3.6 cm handle. That was a reasonable
+simplification and a bad long-term choice -- a door pushed into a room swings across the way
+back out, so a push-only robot has no way to leave a room it entered.
 
-Signage above each doorway was tried first, so the way out could be found by sight alone. It
-made things worse: the extra geometry perturbed the approach enough that the robot stopped
-entering the left and right rooms at all, and it was reverted.
+The hardware was never the limitation. The gripper opens to 6.4 cm and closes to 4.2 cm against
+a 3.6 cm handle, with high-friction fingers and `condim=4`. It was simply never asked to grasp
+anything.
 
-Single-room instructions are unaffected and work for all three doors.
+A friction grasp does not hold in MuJoCo -- the fingers slip off long before the arm can swing
+a 20 kg leaf -- so a closed hand is modelled as a weld, which is standard practice. The
+relative pose is written into `eq_data` at the moment of contact; without that the solver
+enforces the compiled offset and the door teleports into the hand.
+
+### Known limitation
+
+Pulling works, and gets the robot out of the meeting room, but not reliably out of the
+workspace or the pantry: the door swings open (23-54 degrees, measured) but the robot does not
+always then step around the leaf and through. Entering all three rooms works 3/3.
+
+Multi-step instructions plan correctly with `--llm` -- 「右のドアを開けて…今度は一番左の部屋に」
+becomes `open(right) -> leave -> open(left)` -- but the middle step inherits this limitation.
 
 ## Notes on the Pyunto backend
 

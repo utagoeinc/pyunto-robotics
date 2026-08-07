@@ -85,13 +85,13 @@
         frictionloss is deliberately small - too much and the robot cannot push it open at all.
       -->
       <!--
-        Range is 0..+1.9, not -1.9..0. A negative angle swings the leaf toward -y, i.e. back
-        into the corridor and into the robot, so pushing from the corridor just jammed it
-        against its own limit. Positive opens into the room, away from the approach - which is
-        what makes "walk up and push" work at all.
+        Swings both ways: positive into the room, negative into the corridor. Originally this
+        was 0..+1.9, room-only, to suit a robot that could only push. That made every room a
+        trap - the leaf swings across the way back out - so the robot learned to pull instead
+        and the door has to be able to open toward it.
       -->
       <joint type="hinge" axis="0 0 1" damping="2.5" frictionloss="0.2" springref="0"
-             stiffness="0.8" range="0 1.9"/>
+             stiffness="0.8" range="-1.9 1.9"/>
       <!--
         density 240 gives a ~22 kg door leaf. Inheriting the robot's 900 made it 100 kg, which
         no arm could move. condim=3 keeps contact cheap; the panel never needs to spin in place.
@@ -270,6 +270,21 @@
     <geom name="reception" class="furniture" size="1.0 0.4 0.55" pos="2.5 -3.2 0.55"
           material="desk"/>
   </worldbody>
+
+  <!--
+    Grasp constraints, one per door, inactive until the robot closes its gripper on a handle.
+
+    A friction-only grasp is not realistic in MuJoCo: the fingers slip off a 3.6 cm handle long
+    before the arm can swing a 20 kg leaf. Welding the palm to the door while the hand is closed
+    is the standard way to model a firm grip, and it is what makes pulling a door possible at
+    all. Skills.pull_door writes the relative pose into eq_data at the moment of contact, so the
+    door stays exactly where it was grasped instead of snapping to a compiled offset.
+  -->
+  <equality>
+    <weld name="grasp_1" body1="palm_r" body2="door_workspace" active="false" solref="0.02 1"/>
+    <weld name="grasp_2" body1="palm_r" body2="door_meeting" active="false" solref="0.02 1"/>
+    <weld name="grasp_3" body1="palm_r" body2="door_pantry" active="false" solref="0.02 1"/>
+  </equality>
 
   <!--
     A door leaf always touches its own hinge-side jamb - that is what a hinge is. Excluding the

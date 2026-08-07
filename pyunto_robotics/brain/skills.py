@@ -136,9 +136,12 @@ class Skills:
             self.robot.step(vx=0.3)
         self.robot.stand(0.3)
 
-        # Remember this spot before going through: it is the corridor side of the doorway,
-        # which is exactly where leave_room needs to get back to.
-        self._doorway_return = self.robot.position[:2].copy()
+        # Remember the doorway itself, not where we are standing. The push-off point is up to
+        # 0.7 m short of the opening, and aiming leave_room at that put the exit heading well
+        # away from the actual gap. The doorway is one arm's length ahead along the current
+        # heading, which is where the hand is about to make contact.
+        heading = np.array([math.cos(self.robot.yaw), math.sin(self.robot.yaw)])
+        self._doorway_return = self.robot.position[:2] + heading * PUSH_STANDOFF_M
 
         angle_before = self._door_angle()
 
@@ -194,66 +197,246 @@ class Skills:
             {"swing_degrees": swing},
         )
 
-    def leave_room(self) -> SkillResult:
-        """Walk back out of the room the robot is in.
+    def pull_door(self, target: str = "door", side: str = "r") -> SkillResult:
+        """Grasp the handle and pull the door open, rather than pushing through it.
 
-        A room is a dead end for reactive navigation: with the leaf swung open into the room it
-        fills the doorway, and no other door is visible from inside, so there is nothing for a
-        purely reactive search to steer toward. open_door therefore remembers the one pose that
-        matters -- the corridor side of the doorway -- and this walks back to it.
+        Pushing was the original and only option, chosen because a push needs the hand
+        somewhere on the leaf rather than precisely on a 3.6 cm handle. That was a reasonable
+        simplification and a bad long-term choice: a door pushed into a room swings across the
+        way back out, which is exactly why leaving a room turned out to be so hard.
 
-        Signage above each doorway was tried first, so the way out could be found by sight
-        alone. It made things worse: the extra geometry perturbed the approach enough that the
-        robot stopped entering the left and right rooms at all. One remembered pose is both
-        smaller and more reliable than changing the building.
+        The robot has always had the hardware for this -- the gripper opens to 6.4 cm and
+        closes to 4.2 cm, and the handle is 3.6 cm across, with high-friction fingers and
+        condim=4 for torsional friction. It simply was never asked to grasp anything.
 
-        Known limitation: this gets out of two rooms in three. In the pantry the open leaf sits
-        across the return path and the robot does not always work around it.
+        Sequence: line up on the handle, reach, close the gripper, walk backwards to swing the
+        leaf toward us, release, then step around it.
         """
-        from ..perception.depth import free_space  # noqa: PLC0415 - avoids a circular import
+        approach = self.nav.goto(target)
+        if not approach.success:
+            return SkillResult(False, approach.describe())
 
+        residual = approach.bearing or 0.0
+        if abs(residual) > 0.05:
+            turn = float(np.clip(residual * 1.2, -0.9, 0.9))
+            for _ in range(int(abs(residual) / (abs(turn) * self.robot.control_dt)) + 1):
+                self.robot.step(0.0, 0.0, turn)
+        self.robot.stand(0.3)
+
+        for _ in range(140):
+            if self._clearance_ahead() <= PUSH_STANDOFF_M:
+                break
+            self.robot.step(vx=0.3)
+        self.robot.stand(0.3)
+
+        angle_before = self._door_angle()
+
+        # Line up on the handle, not on the middle of the door. The hinge is at one edge and
+        # the handle at the other, so stopping square to the leaf leaves the hand about half a
+        # metre off to the side -- measured 0.486 m, against a 0.064 m gripper opening.
+        self.robot.grip(side, 0.0)
+        self.robot.set_arm(side, shoulder_pitch=-1.10, shoulder_roll=0.0,
+                           shoulder_yaw=0.0, elbow=-0.20)
+        self.robot.stand(0.6)
+
+        for _ in range(200):
+            offset = self._handle_offset(side)
+            if offset is None or abs(offset) < 0.04:
+                break
+            # Sidestep: strafing keeps the robot square to the door while it closes the gap.
+            self.robot.step(0.0, float(np.clip(offset * 1.5, -0.3, 0.3)), 0.0)
+        self.robot.stand(0.4)
+
+        # Close the last of the gap. Sidestepping leaves the hand lined up but still short --
+        # measured 0.27 m of reach and 0.12 m of height to make up -- so drop the arm to handle
+        # height and edge forward until the fingers are around it.
+        self.robot.set_arm(side, shoulder_pitch=-0.95, shoulder_roll=0.0,
+                           shoulder_yaw=0.0, elbow=-0.15)
+        self.robot.stand(0.4)
+        for _ in range(90):
+            gap = self._handle_gap(side)
+            if gap is None or gap < 0.05:
+                break
+            self.robot.step(vx=0.12)
+        self.robot.stand(0.3)
+
+        # Close the fingers, then weld. Friction alone will not hold: the fingers slip off a
+        # 3.6 cm handle long before the arm can move a 20 kg leaf, so the closed hand is
+        # modelled as a rigid grip. This is standard practice for manipulation in MuJoCo.
+        self.robot.grip(side, 1.0)
+        self.robot.stand(0.5)
+
+        door_body = self._nearest_door_body()
+        if door_body is None or not self.robot.grasp(door_body):
+            self.robot.grip(side, 0.0)
+            self.robot.arm_home(side)
+            return SkillResult(False, f"I could not get hold of the {target}.")
+
+        # Pull: back away while holding on, so the leaf swings toward us.
+        for _ in range(220):
+            self.robot.step(vx=-0.25)
+
+        angle_after = self._door_angle()
+        swing = abs(math.degrees(angle_after - angle_before))
+
+        self.robot.release()
+        self.robot.grip(side, 0.0)
+        self.robot.stand(0.4)
+        self.robot.arm_home(side)
+        self.robot.stand(0.3)
+
+        if swing < 5.0:
+            return SkillResult(
+                False,
+                f"I took hold of the {target} but could not pull it open.",
+                {"swing_degrees": swing},
+            )
+
+        # Step around the leaf and through. The door now stands between the robot and the
+        # opening, so this sidesteps clear of it before walking forward.
+        for _ in range(60):
+            self.robot.step(0.0, -0.3, 0.0)
+        for _ in range(40):
+            self.robot.step(0.0, 0.0, 0.5)
+        for _ in range(180):
+            if self._clearance_ahead() < 0.7:
+                break
+            self.robot.step(vx=0.4)
+        self.robot.stand(0.3)
+
+        return SkillResult(
+            True,
+            f"I pulled the {target} open (it swung {swing:.0f} degrees).",
+            {"swing_degrees": swing},
+        )
+
+    def _handle_offset(self, side: str = "r") -> float | None:
+        """Lateral distance from the gripper to the nearest door handle, in the robot's frame.
+
+        Positive means the handle is to the robot's left. Reads the simulator directly; on a
+        real robot this would come from the camera, but the geometry is what matters here.
+        """
+        import mujoco  # noqa: PLC0415 - only needed for this introspection
+
+        hand = self.robot.hand_position(side)
+        best: float | None = None
+        best_distance = math.inf
+        for name in ("door_1_handle", "door_2_handle", "door_3_handle"):
+            gid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            if gid < 0:
+                continue
+            handle = self.robot.data.geom_xpos[gid]
+            distance = float(np.linalg.norm(handle[:2] - self.robot.position[:2]))
+            if distance >= best_distance:
+                continue
+            best_distance = distance
+            delta = handle[:2] - hand[:2]
+            # Project onto the robot's left axis.
+            left = np.array([-math.sin(self.robot.yaw), math.cos(self.robot.yaw)])
+            best = float(np.dot(delta, left))
+        return best
+
+    def _nearest_door_body(self) -> str | None:
+        """Name of the door body closest to the robot."""
+        import mujoco  # noqa: PLC0415 - only needed for this introspection
+
+        best: str | None = None
+        best_distance = math.inf
+        for name in ("door_workspace", "door_meeting", "door_pantry"):
+            bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, name)
+            if bid < 0:
+                continue
+            distance = float(
+                np.linalg.norm(self.robot.data.xpos[bid][:2] - self.robot.position[:2])
+            )
+            if distance < best_distance:
+                best_distance = distance
+                best = name
+        return best
+
+    def _handle_gap(self, side: str = "r") -> float | None:
+        """Straight-line distance from the gripper to the nearest handle."""
+        import mujoco  # noqa: PLC0415 - only needed for this introspection
+
+        hand = self.robot.hand_position(side)
+        best: float | None = None
+        for name in ("door_1_handle", "door_2_handle", "door_3_handle"):
+            gid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            if gid < 0:
+                continue
+            distance = float(np.linalg.norm(self.robot.data.geom_xpos[gid] - hand))
+            if best is None or distance < best:
+                best = distance
+        return best
+
+    def leave_room(self) -> SkillResult:
+        """Get back out to the corridor.
+
+        The robot pushed its way in, which leaves the leaf swung across the way back out. So
+        leaving is the same manoeuvre in reverse: take hold of the handle and pull, which swings
+        the door clear instead of pressing against it, then walk through.
+
+        This is why pull_door exists at all. The original design could only push, and a
+        push-only robot has no way out of a room it pushed into -- the door it opened is now in
+        the way. Adding the grasp was not an extra feature so much as finishing the first one.
+        """
         started_in = self.report_position().data.get("room")
 
-        for _ in range(700):
-            room = self.report_position().data.get("room")
-            if room != started_in:
-                break
-
-            obs = self.robot.look()
-            space = free_space(obs.depth, self.robot.camera_fovy())
-            ahead = space.clearance_ahead(half_angle=0.30)
-
-            if self._doorway_return is not None:
-                delta = self._doorway_return - self.robot.position[:2]
-                desired = math.atan2(delta[1], delta[0])
-                bearing = (desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
-            else:
-                bearing = 0.0
-
-            if ahead < 0.55:
-                # The leaf is across the way out. Back off decisively, then aim again -- a
-                # timid nudge just scrubs along it.
-                for _ in range(10):
-                    self.robot.step(-0.4, 0.0, 0.0)
-                turn = float(np.clip(bearing * 1.5, -1.0, 1.0))
-                for _ in range(8):
-                    self.robot.step(0.0, 0.0, turn)
-                continue
-
-            turn = float(np.clip(bearing * 1.5, -1.0, 1.0))
-            self.robot.step(0.4 * max(0.3, 1.0 - abs(turn)), 0.0, turn)
-
-        self.robot.stand(0.3)
+        # No pre-aiming: pull_door runs its own approach, and turning first only fought it.
+        result = self.pull_door("door")
         self._doorway_return = None
 
         where = self.report_position()
         room = where.data.get("room", "")
         left = room != started_in
+        if left:
+            return SkillResult(True, f"I came back out. {where.message}", where.data)
         return SkillResult(
-            left,
-            f"I came back out. {where.message}" if left else f"I could not find the way out of {room}.",
+            False,
+            f"I could not get back out of {room}: {result.message}",
             where.data,
         )
+
+    def _find_exit_heading(self) -> float | None:
+        """Turn on the spot and return the world heading that most looks like the way out.
+
+        Scores each direction by how far the depth image sees: a doorway shows the corridor
+        beyond it, while every wall of the room is close. When open_door left a remembered
+        pose, directions pointing toward it are preferred, which settles the case where a room
+        has more than one deep-looking direction.
+        """
+        from ..perception.depth import free_space  # noqa: PLC0415 - avoids a circular import
+
+        best_heading: float | None = None
+        best_score = -math.inf
+        turn_rate = 0.9
+        steps = int(2 * math.pi / (turn_rate * self.robot.control_dt))
+
+        for i in range(steps):
+            self.robot.step(0.0, 0.0, turn_rate)
+            if i % 5:
+                continue
+
+            obs = self.robot.look()
+            space = free_space(obs.depth, self.robot.camera_fovy())
+            reach = space.clearance_ahead(half_angle=0.22)
+            if reach < 1.0:
+                continue  # a wall, not a way out
+
+            score = reach
+            if self._doorway_return is not None:
+                delta = self._doorway_return - self.robot.position[:2]
+                desired = math.atan2(delta[1], delta[0])
+                error = abs((desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi)
+                # Strongly prefer the direction we came from; the room may have other openings.
+                score += 3.0 * max(0.0, 1.0 - error / math.pi)
+
+            if score > best_score:
+                best_score = score
+                best_heading = self.robot.yaw
+
+        self.robot.stand(0.2)
+        return best_heading
 
     def _clearance_ahead(self) -> float:
         """Distance to whatever is directly in front, from the current depth frame."""
@@ -322,7 +505,10 @@ class Skills:
         x, y = self.robot.position[0], self.robot.position[1]
         heading = math.degrees(self.robot.yaw) % 360
 
-        if y > 1.2:
+        # The doorway plane is y=1.0, so that is where a room begins. A looser 1.2 reported the
+        # robot as "in the corridor" while it was still standing inside a doorway, which made
+        # leave_room think it had succeeded when it had not moved.
+        if y > 1.0:
             if x < -2.0:
                 where = "in the workspace"
             elif x > 2.0:
@@ -374,6 +560,7 @@ class Skills:
             "goto": lambda: self.goto(argument or "door", where),
             "face": lambda: self.face(argument or "door", where),
             "open": lambda: self.open_door(argument or "door", where=where),
+            "pull": lambda: self.pull_door(argument or "door"),
             "open_door": lambda: self.open_door(argument or "door", where=where),
             "point_at": lambda: self.point_at(argument or "door", where=where),
             "leave": lambda: self.leave_room(),

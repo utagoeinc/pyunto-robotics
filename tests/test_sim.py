@@ -188,3 +188,40 @@ def test_door_opens_when_pushed(robot):
     angle = abs(math.degrees(float(robot.data.qpos[adr])))
     robot.data.qfrc_applied[dof] = 0.0
     assert angle > 20.0, f"door barely moved under 5 Nm: {angle:.1f} deg"
+
+
+def test_grasp_does_not_teleport_the_target(robot):
+    """Welding must freeze the CURRENT relative pose, not the one compiled into the model.
+
+    Without writing eq_data at the moment of contact, the solver enforces the compiled offset
+    and the door snaps into the robot's hand.
+    """
+    body = mujoco.mj_name2id(robot.model, mujoco.mjtObj.mjOBJ_BODY, "door_meeting")
+    before = robot.data.xpos[body].copy()
+
+    assert robot.grasp("door_meeting")
+    after = robot.data.xpos[body].copy()
+
+    assert np.linalg.norm(after - before) < 0.005, "door jumped when grasped"
+    robot.release()
+
+
+def test_grasp_rejects_unknown_bodies(robot):
+    assert not robot.grasp("no_such_body")
+
+
+def test_release_clears_every_grasp(robot):
+    robot.grasp("door_meeting")
+    robot.release()
+    assert not robot.data.eq_active.any() or all(
+        robot.model.eq_type[i] != mujoco.mjtEq.mjEQ_WELD or not robot.data.eq_active[i]
+        for i in range(robot.model.neq)
+    )
+
+
+def test_doors_swing_both_ways(robot):
+    """A door that only opens one way traps a robot that can only push."""
+    joint = mujoco.mj_name2id(robot.model, mujoco.mjtObj.mjOBJ_JOINT, "door_2")
+    low, high = robot.model.jnt_range[joint]
+    assert low < -1.0, "door cannot open toward the corridor, so it can never be pulled"
+    assert high > 1.0, "door cannot open into the room"

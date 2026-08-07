@@ -271,3 +271,15 @@ def test_rule_planner_still_answers_a_chained_instruction(planner):
     """Warning about it is not the same as refusing: it still returns its best single step."""
     plan = planner.plan("右のドアを開けて、その後、左の部屋に入って")
     assert plan.steps, "should still produce something rather than nothing"
+
+
+@pytest.mark.slow
+def test_pull_door_opens_it(skills):
+    """Pulling needs a real grasp: friction alone slips off a 3.6 cm handle."""
+    skills.robot.reset("lobby")
+    result = skills.pull_door("door")
+
+    assert result.ok, result.message
+    assert result.data["swing_degrees"] > 10
+    # Pulling swings the leaf toward the robot, so it should still be on the corridor side.
+    assert skills.robot.position[1] < 1.2

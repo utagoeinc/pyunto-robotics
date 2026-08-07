@@ -215,6 +215,63 @@ class Robot:
         lo, hi = self.model.actuator_ctrlrange[idx]
         self.data.ctrl[idx] = float(lo + (hi - lo) * np.clip(closed, 0.0, 1.0))
 
+    def grasp(self, body: str) -> bool:
+        """Weld the right palm to `body`, freezing the current relative pose.
+
+        A friction grasp does not hold in MuJoCo -- the fingers slip off a 3.6 cm handle long
+        before the arm can move a 20 kg door leaf -- so a firm grip is modelled as a weld. The
+        relative pose has to be written into eq_data at the moment of contact; without it the
+        solver enforces whatever offset was compiled in and the door teleports into the hand.
+
+        Returns False if there is no weld defined for that body.
+        """
+        eq = self._weld_for(body)
+        if eq is None:
+            return False
+
+        palm = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "palm_r")
+        target = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body)
+
+        # eq_data layout for a weld: [anchor(3), relpose(7: pos + quat), torquescale(1)].
+        # Express body2's frame in body1's frame, which is what the solver holds constant.
+        palm_pos, palm_quat = self.data.xpos[palm], self.data.xquat[palm]
+        target_pos, target_quat = self.data.xpos[target], self.data.xquat[target]
+
+        inv_palm = np.zeros(4)
+        mujoco.mju_negQuat(inv_palm, palm_quat)
+        rel_pos = np.zeros(3)
+        mujoco.mju_rotVecQuat(rel_pos, target_pos - palm_pos, inv_palm)
+        rel_quat = np.zeros(4)
+        mujoco.mju_mulQuat(rel_quat, inv_palm, target_quat)
+
+        self.model.eq_data[eq, 0:3] = 0.0        # anchor at body1's origin
+        self.model.eq_data[eq, 3:6] = rel_pos
+        self.model.eq_data[eq, 6:10] = rel_quat
+        self.model.eq_data[eq, 10] = 1.0         # torque scale
+        self.data.eq_active[eq] = 1
+        mujoco.mj_forward(self.model, self.data)
+        return True
+
+    def release(self) -> None:
+        """Drop whatever the right hand is welded to."""
+        for name in ("grasp_1", "grasp_2", "grasp_3"):
+            eq = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_EQUALITY, name)
+            if eq >= 0:
+                self.data.eq_active[eq] = 0
+        mujoco.mj_forward(self.model, self.data)
+
+    def _weld_for(self, body: str) -> int | None:
+        """The equality index whose weld targets `body`, if any."""
+        target = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body)
+        if target < 0:
+            return None
+        for i in range(self.model.neq):
+            if self.model.eq_type[i] != mujoco.mjtEq.mjEQ_WELD:
+                continue
+            if target in (self.model.eq_obj1id[i], self.model.eq_obj2id[i]):
+                return i
+        return None
+
     def hand_position(self, side: str = "r") -> np.ndarray:
         """World position of a gripper tip."""
         sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, f"grip_{side}")
