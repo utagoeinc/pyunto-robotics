@@ -155,6 +155,15 @@ class Robot:
 
         return Observation(rgb=rgb, depth=depth, position=self.position, yaw=self.yaw)
 
+    def camera_fovy(self, camera: str = "head_cam") -> float:
+        """Vertical field of view in degrees.
+
+        Always ask for it by name -- cam_fovy[0] is whichever camera happens to be declared
+        first in the scene, which is not the robot's.
+        """
+        cid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera)
+        return float(self.model.cam_fovy[cid])
+
     def camera_intrinsics(self, camera: str = "head_cam") -> tuple[float, float, float]:
         """(fx, cx, cy) in pixels, derived from the camera's vertical FOV."""
         cid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera)
