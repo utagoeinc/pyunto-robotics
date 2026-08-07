@@ -33,13 +33,34 @@ from ..sim.robot import Robot
 
 log = logging.getLogger(__name__)
 
+# How far a tracked target may jump between frames and still count as the same object.
+# The doors are ~43 degrees apart from the lobby, so this has to stay well under that.
+TRACK_GATE_RAD = 0.45
+
+# A target counts as reached only if it is also roughly ahead. Brushing past a door on the way
+# somewhere else puts it within arm's reach at 30-40 degrees off, which is not arriving at it.
+# 0.30 rad was picked by measurement, not taste: at 0.45 the robot accepted the middle door
+# seen edge-on at 27 degrees while walking to the right one, and at 0.22 it could never satisfy
+# the gate at all and wandered off.
+ARRIVE_BEARING_RAD = 0.30  # ~17 degrees
+
 
 class NavState(Enum):
     SEARCH = "search"
     APPROACH = "approach"
+    DETOUR = "detour"
     ARRIVED = "arrived"
     LOST = "lost"
     BLOCKED = "blocked"
+
+
+# Detour tuning. A target can be plainly visible with no route to it -- doors are seen across a
+# corridor long before the robot can walk to them -- and heading straight at one just presses it
+# into the intervening wall.
+DETOUR_TRIGGER_M = 0.75  # clearance below which a straight approach is judged blocked
+DETOUR_CLEAR_M = 1.6  # clearance above which the route ahead counts as open again
+DETOUR_MIN_STEPS = 40  # commit for at least this long, or it oscillates in and out
+DETOUR_MAX_STEPS = 320  # give up and re-search rather than circling forever
 
 
 @dataclass
@@ -115,6 +136,8 @@ class MaplessNavigator:
         fovy: float,
         size: tuple[int, int],
         prefer_bearing: float = 0.0,
+        where: str | None = None,
+        tracking: float | None = None,
     ) -> tuple[Detection, float, float] | None:
         """Pick a detection to chase and measure it.
 
@@ -124,31 +147,120 @@ class MaplessNavigator:
         score, which both settles that and matches what "the door" usually means -- the one
         being looked at, not one 44 degrees off to the side.
 
-        `prefer_bearing` biases the choice toward a target already being tracked, so an
-        approach does not switch horses halfway.
+        `tracking` is the bearing of the target already being chased. When set, the choice is
+        locked to that object rather than re-scored, which is what stops an approach switching
+        horses halfway.
+
+        `where` is a spatial qualifier from the instruction ("the door on the right"). When
+        present it OVERRIDES the default preference for whatever is straight ahead -- the whole
+        point of saying "the right one" is to pick something the robot would not have chosen.
         """
-        best: tuple[Detection, float, float] | None = None
-        best_score = -math.inf
+        measured: list[tuple[Detection, float, float]] = []
         for det in detections:
             u, v = det.pixel(*size)
             offset = target_offset(depth, u, v, fovy, size)
             if offset is None:
                 continue
             bearing, distance = offset
-            # Nearer is better; straight ahead is better; already-tracked is better.
+            measured.append((det, bearing, distance))
+
+        if not measured:
+            return None
+
+        if where:
+            return self._pick_by_qualifier(measured, where)
+
+        if tracking is not None:
+            # Already committed to one candidate: re-acquire the SAME one by proximity to where
+            # it was last seen, and do not reconsider. Scoring afresh each frame let the
+            # straight-ahead term outweigh the tracking term, so a door picked at 43 degrees was
+            # abandoned for whatever sat in the middle of the frame - which is exactly how "the
+            # door on the left" ended up opening the centre door.
+            nearest = min(measured, key=lambda m: abs(m[1] - tracking))
+            # Only accept it if it plausibly is the same object; otherwise treat as lost.
+            return nearest if abs(nearest[1] - tracking) < TRACK_GATE_RAD else None
+
+        best: tuple[Detection, float, float] | None = None
+        best_score = -math.inf
+        for candidate in measured:
+            _, bearing, distance = candidate
+            # Nearer is better; straight ahead is better.
             score = -distance - 2.0 * abs(bearing) - 1.5 * abs(bearing - prefer_bearing)
             if score > best_score:
                 best_score = score
-                best = (det, bearing, distance)
+                best = candidate
         return best
+
+    @staticmethod
+    def _pick_by_qualifier(
+        measured: list[tuple[Detection, float, float]], where: str
+    ) -> tuple[Detection, float, float] | None:
+        """Choose among several candidates using a spatial word from the instruction.
+
+        Left/right are from the ROBOT's point of view, which is also the viewer's when looking
+        at the camera feed. Bearing is positive to the left, so "left" is the largest bearing.
+        """
+        if where == "left":
+            return max(measured, key=lambda m: m[1])
+        if where == "right":
+            return min(measured, key=lambda m: m[1])
+        if where == "middle":
+            return min(measured, key=lambda m: abs(m[1]))
+        if where == "nearest":
+            return min(measured, key=lambda m: m[2])
+        if where == "far":
+            return max(measured, key=lambda m: m[2])
+        return None
+
+    # -- detouring ----------------------------------------------------------------
+
+    @staticmethod
+    def _openest_side(space: FreeSpace) -> float:
+        """Which flank has more room: positive for left, negative for right."""
+        left = space.ranges[space.bearings > 0.25]
+        right = space.ranges[space.bearings < -0.25]
+        left_room = float(left.max(initial=0.0))
+        right_room = float(right.max(initial=0.0))
+        return left_room - right_room
+
+    def _wall_follow(self, space: FreeSpace, side: float) -> tuple[float, float, float]:
+        """One control command that slides along an obstacle toward `side`.
+
+        Returns (vx, vy, wz). The robot turns toward the open flank while creeping forward,
+        which walks it around a corner instead of stalling against it.
+        """
+        ahead = space.clearance_ahead(half_angle=0.30)
+
+        # Aim at the most open bearing on the chosen side.
+        mask = (space.bearings > 0.1) if side > 0 else (space.bearings < -0.1)
+        if mask.any():
+            candidates = space.bearings[mask]
+            room = space.ranges[mask]
+            aim = float(candidates[int(np.argmax(room))])
+        else:
+            aim = side * 0.8
+
+        turn = float(np.clip(aim * self.turn_gain, -1.2, 1.2))
+        # Back off if genuinely nose-first into something, otherwise keep edging forward.
+        if ahead < self.safety_distance * 0.8:
+            return -0.15, 0.0, turn
+        speed = 0.35 if abs(turn) < 0.8 else 0.18
+        return speed, 0.0, turn
 
     # -- steering -----------------------------------------------------------------
 
-    def _avoid(self, space: FreeSpace, desired_turn: float) -> tuple[float, float]:
+    def _avoid(
+        self, space: FreeSpace, desired_turn: float, target_bearing: float = 0.0
+    ) -> tuple[float, float]:
         """Blend the desired heading with what the depth image says is safe.
 
         Returns (speed_scale, turn). Speed is cut as obstacles close in, and if the way ahead
-        is genuinely blocked the turn is overridden toward open space.
+        is genuinely blocked the robot steers along the obstacle rather than stopping dead.
+
+        The "steer along" part matters for anything not in a straight line from here. Heading
+        directly at a door on the far side of a corridor walks the robot into the partition
+        between them; it has to slide along the wall until the doorway opens up. Without this
+        it just parks against the wall with the target in sight and never arrives.
         """
         ahead = space.clearance_ahead(half_angle=0.35)
 
@@ -159,19 +271,49 @@ class MaplessNavigator:
             scale = (ahead - self.safety_distance) / (self.safety_distance * 1.5)
             return max(0.25, scale), desired_turn
 
-        # Too close to keep going: turn toward whatever opening exists.
-        escape = space.best_bearing(prefer=desired_turn, min_range=self.safety_distance * 2.0)
+        # Blocked ahead. The target may be visible straight through a wall -- doors are seen
+        # across a corridor long before there is a route to them -- so steering by the target's
+        # bearing here just presses the robot into the obstruction. Commit to the open
+        # direction instead, and only use the target to break ties between equally open sides.
+        escape = space.best_bearing(prefer=0.0, min_range=self.safety_distance * 1.6)
         if escape is None:
-            return 0.0, 0.0
-        return 0.0, float(np.clip(escape * self.turn_gain, -1.2, 1.2))
+            # Nothing open at all: rotate on the spot toward the target and try again.
+            return 0.0, float(np.clip(math.copysign(0.8, target_bearing or 1.0), -1.2, 1.2))
+
+        # A near-zero escape heading means "forward is the most open direction", which cannot
+        # be true when we already know the way ahead is blocked. That happens when the opening
+        # is off to one side but only slightly further than the wall in front. Force a real
+        # commitment to whichever flank is genuinely clearer.
+        if abs(escape) < 0.25:
+            left = float(space.ranges[space.bearings > 0.3].max(initial=0.0))
+            right = float(space.ranges[space.bearings < -0.3].max(initial=0.0))
+            escape = 0.7 if left >= right else -0.7
+
+        turn = float(np.clip(escape * self.turn_gain, -1.2, 1.2))
+        # Creep forward while turning so the robot slides past the obstruction rather than
+        # spinning in place next to it.
+        crawl = 0.3 if abs(escape) < 0.9 else 0.12
+        return crawl, turn
 
     # -- the loop -----------------------------------------------------------------
 
-    def goto(self, target: str, max_steps: int = 900, search_steps: int = 260) -> NavResult:
+    def goto(
+        self,
+        target: str,
+        max_steps: int = 2000,
+        search_steps: int = 260,
+        where: str | None = None,
+    ) -> NavResult:
         """Find `target` and walk to it.
 
         max_steps bounds the whole attempt; search_steps bounds how long the initial
-        look-around lasts before giving up.
+        look-around lasts before giving up. `where` picks between identical candidates
+        ("the door on the right").
+
+        The step budget has to cover detours, not just the straight-line walk: reaching a door
+        on the far side of the office means following a wall around, which took ~1400 steps
+        where the direct approach took 350. At the old 900 the robot ran out of budget
+        mid-detour and reported the target lost after having correctly found it.
         """
         state = NavState.SEARCH
         steps = 0
@@ -179,6 +321,8 @@ class MaplessNavigator:
         last_seen: tuple[Detection, float, float] | None = None
         lost_frames = 0
         detections: list[Detection] = []
+        detour_side = 1.0
+        detour_steps = 0
 
         log.info("navigating to %r", target)
 
@@ -190,8 +334,16 @@ class MaplessNavigator:
                 detections, space, fovy, size, depth = self._observe(target)
                 # Bias toward whatever we were already chasing so the choice does not
                 # jump between identical targets mid-approach.
-                prefer = last_seen[1] if last_seen is not None else 0.0
-                located = self._locate(detections, depth, fovy, size, prefer_bearing=prefer)
+                # Apply the qualifier only on the first sighting. After that the target is
+                # tracked by continuity: it drifts toward the centre of the frame as the robot
+                # turns to face it, so re-picking "the rightmost" every frame would keep
+                # handing off to the next door along.
+                if last_seen is None:
+                    located = self._locate(detections, depth, fovy, size, where=where)
+                else:
+                    located = self._locate(
+                        detections, depth, fovy, size, tracking=last_seen[1]
+                    )
             else:
                 located = last_seen
 
@@ -215,11 +367,14 @@ class MaplessNavigator:
                 if located is None:
                     lost_frames += 1
                     if lost_frames > 12:
-                        # It may just be out of frame; sweep again rather than fail outright.
+                        # Out of frame. Sweep again, and re-apply the qualifier when we do:
+                        # dropping it here would re-acquire whichever door is most convenient
+                        # rather than the one that was asked for.
                         log.info("lost sight of %s, searching again", target)
                         state = NavState.SEARCH
                         searched = 0
                         lost_frames = 0
+                        last_seen = None
                         continue
                     located = last_seen
                     if located is None:
@@ -231,7 +386,10 @@ class MaplessNavigator:
 
                 _, bearing, distance = located
 
-                if distance <= self.arrive_distance:
+                # Arriving means the target is close AND roughly in front. Close-but-sideways is
+                # what you get brushing past a door on the way to another one -- accepting that
+                # stopped the robot next to the middle door while walking to the right one.
+                if distance <= self.arrive_distance and abs(bearing) <= ARRIVE_BEARING_RAD:
                     log.info("arrived at %s (%.2f m)", target, distance)
                     self.robot.stand(0.3)
                     return NavResult(
@@ -239,8 +397,20 @@ class MaplessNavigator:
                         steps=steps, detections=detections,
                     )
 
+                # A wall between here and a visible target means the straight line is not the
+                # route. Switch to following the obstacle instead of grinding against it.
+                if space.clearance_ahead(half_angle=0.30) < DETOUR_TRIGGER_M:
+                    detour_side = 1.0 if self._openest_side(space) >= 0 else -1.0
+                    detour_steps = 0
+                    state = NavState.DETOUR
+                    log.info(
+                        "%s is behind an obstacle; following the wall to the %s",
+                        target, "left" if detour_side > 0 else "right",
+                    )
+                    continue
+
                 turn = float(np.clip(bearing * self.turn_gain, -1.2, 1.2))
-                scale, turn = self._avoid(space, turn)
+                scale, turn = self._avoid(space, turn, target_bearing=bearing)
 
                 if scale == 0.0 and turn == 0.0:
                     return NavResult(
@@ -254,15 +424,54 @@ class MaplessNavigator:
                 self.robot.step(speed, 0.0, turn)
                 # Re-measure the distance we are closing on next refresh.
                 last_seen = (located[0], bearing, max(0.0, distance - speed * self.robot.control_dt))
+                continue
+
+            if state is NavState.DETOUR:
+                detour_steps += 1
+
+                # Give up detouring rather than orbiting the building forever.
+                if detour_steps > DETOUR_MAX_STEPS:
+                    log.info("detour exhausted, searching again")
+                    state = NavState.SEARCH
+                    searched = 0
+                    last_seen = None
+                    continue
+
+                # Rejoin the direct approach once the way ahead genuinely opens up -- but only
+                # after committing for a while, or it flips between the two every other frame.
+                ahead = space.clearance_ahead(half_angle=0.30)
+                if detour_steps > DETOUR_MIN_STEPS and ahead > DETOUR_CLEAR_M:
+                    if located is not None:
+                        log.info("route ahead is clear, resuming approach")
+                        state = NavState.APPROACH
+                        last_seen = located
+                        continue
+                    # Target not in frame but the way is open. Re-search WITHOUT the qualifier:
+                    # having walked around an obstacle, "the rightmost door" no longer names the
+                    # same door it did from the starting point, and re-applying it hands the
+                    # robot off to a different one. Continuity of the tracked object is what
+                    # matters now, so the sweep re-acquires whatever is closest ahead.
+                    state = NavState.SEARCH
+                    searched = 0
+                    last_seen = None
+                    where = None
+                    continue
+
+                # Track the wall: steer toward the chosen side while keeping some clearance in
+                # front, so the robot slides along the obstruction rather than into it.
+                self.robot.step(*self._wall_follow(space, detour_side))
 
         return NavResult(NavState.LOST, target, steps=steps)
 
-    def face(self, target: str, max_steps: int = 200) -> NavResult:
+    def face(self, target: str, max_steps: int = 200, where: str | None = None) -> NavResult:
         """Turn to put the target dead ahead, without walking anywhere."""
-        tracked = 0.0
+        tracked: float | None = None
         for step in range(max_steps):
             detections, _, fovy, size, depth = self._observe(target)
-            located = self._locate(detections, depth, fovy, size, prefer_bearing=tracked)
+            if tracked is None:
+                located = self._locate(detections, depth, fovy, size, where=where)
+            else:
+                located = self._locate(detections, depth, fovy, size, tracking=tracked)
             if located is None:
                 self.robot.step(0.0, 0.0, 0.6)
                 continue

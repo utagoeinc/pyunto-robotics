@@ -33,13 +33,22 @@ ACTIONS = ("goto", "face", "open", "point_at", "look_around", "describe", "where
 
 @dataclass(frozen=True)
 class Step:
-    """One action in a plan."""
+    """One action in a plan.
+
+    `where` carries a spatial qualifier -- "the door on the RIGHT" -- which matters whenever
+    several instances of the same object are in view. The office has three identical doors, so
+    dropping it would silently send the robot to whichever one happened to score best.
+    """
 
     action: str
     argument: str | None = None
+    where: str | None = None  # "left" | "right" | "middle" | "nearest" | "far"
 
     def __str__(self) -> str:
-        return f"{self.action}({self.argument or ''})"
+        target = self.argument or ""
+        if self.where:
+            target = f"{self.where} {target}".strip()
+        return f"{self.action}({target})"
 
 
 @dataclass
@@ -87,12 +96,28 @@ _VERBS: tuple[tuple[str, tuple[str, ...]], ...] = (
               "行って", "移動して", "近づいて", "向かって")),
 )
 
+# Spatial qualifiers that pick between several instances of the same object.
+_QUALIFIERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("left", ("leftmost", "left-hand", "on the left", "to the left", "left",
+              "一番左", "左端", "左側", "左の", "左")),
+    ("right", ("rightmost", "right-hand", "on the right", "to the right", "right",
+               "一番右", "右端", "右側", "右の", "右")),
+    ("middle", ("middle", "centre", "center", "in the middle", "central",
+                "真ん中", "中央", "まんなか", "中程")),
+    ("far", ("furthest", "farthest", "far", "at the end", "一番奥", "奥の", "奥")),
+    ("nearest", ("nearest", "closest", "this one", "一番近い", "手前の", "手前")),
+)
+
 _GREETINGS = ("hello", "hi", "hey", "こんにちは", "はじめまして", "やあ", "おはよう", "こんばんは")
 
 # Words to drop when salvaging an unrecognised target from an instruction.
 _FILLER = frozenset(
     {"go", "to", "the", "a", "an", "walk", "move", "head", "come", "approach",
-     "please", "now", "at", "toward", "towards", "face", "look", "point", "and", "then"}
+     "please", "now", "at", "toward", "towards", "face", "look", "point", "and", "then",
+     # Qualifiers travel on Step.where, so leaving them in the target text would produce
+     # nonsense like goto("right purple giraffe").
+     "left", "right", "middle", "centre", "center", "nearest", "closest", "furthest", "far",
+     "leftmost", "rightmost", "on", "in", "of"}
 )
 
 
@@ -117,24 +142,25 @@ class RulePlanner:
 
         verb = self._verb(text)
         obj = self._object(text)
+        where = self._qualifier(text)
 
         if verb == "open":
             # "open" with no object named is unambiguous in this office: it means a door.
-            return Plan([Step("open", obj or "door")])
+            return Plan([Step("open", obj or "door", where)])
         if verb in ("goto", "face", "point_at"):
             if obj is None:
                 # Do not silently substitute a door. "go to the purple giraffe" has a clear
                 # target that simply is not something the robot knows, and pretending it said
                 # "door" would send it walking off on the wrong errand.
                 target = _unknown_target(text) or "door"
-                return Plan([Step(verb, target)])
-            return Plan([Step(verb, obj)])
+                return Plan([Step(verb, target, where)])
+            return Plan([Step(verb, obj, where)])
         if verb in ("look_around", "describe", "where"):
             return Plan([Step(verb)])
 
         # No verb, but a nameable object -- "the meeting room door" almost certainly means go.
         if obj:
-            return Plan([Step("goto", obj)])
+            return Plan([Step("goto", obj, where)])
 
         if any(g in text for g in _GREETINGS):
             return Plan([], reply="Hello. Tell me where to go or what to open.")
@@ -153,6 +179,20 @@ class RulePlanner:
             if any(p in text for p in patterns):
                 return action
         return None
+
+    @staticmethod
+    def _qualifier(text: str) -> str | None:
+        """Pull out a spatial qualifier, longest phrase first.
+
+        Ordering matters: "on the left" has to beat the bare "left" inside it, and 「一番左」
+        has to beat 「左」, or the match is right but for the wrong reason.
+        """
+        best: tuple[int, str] | None = None
+        for name, phrases in _QUALIFIERS:
+            for phrase in phrases:
+                if phrase in text and (best is None or len(phrase) > best[0]):
+                    best = (len(phrase), name)
+        return best[1] if best else None
 
     @staticmethod
     def _object(text: str) -> str | None:

@@ -50,18 +50,21 @@ class Skills:
 
     # -- navigation ---------------------------------------------------------------
 
-    def goto(self, target: str) -> SkillResult:
-        """Walk to something the camera can find."""
-        result = self.nav.goto(target)
+    def goto(self, target: str, where: str | None = None) -> SkillResult:
+        """Walk to something the camera can find.
+
+        `where` picks between identical candidates: "the door on the right".
+        """
+        result = self.nav.goto(target, where=where)
         return SkillResult(
             ok=result.success,
             message=result.describe(),
             data={"distance": result.distance, "state": result.state.value},
         )
 
-    def face(self, target: str) -> SkillResult:
+    def face(self, target: str, where: str | None = None) -> SkillResult:
         """Turn to look straight at something."""
-        result = self.nav.face(target)
+        result = self.nav.face(target, where=where)
         if result.success:
             return SkillResult(True, f"I am now facing the {target}.",
                                {"distance": result.distance})
@@ -89,7 +92,9 @@ class Skills:
 
     # -- manipulation -------------------------------------------------------------
 
-    def open_door(self, target: str = "door", side: str = "r") -> SkillResult:
+    def open_door(
+        self, target: str = "door", side: str = "r", where: str | None = None
+    ) -> SkillResult:
         """Walk up to a door and push it open.
 
         A push, not a handle turn. Pushing needs the hand somewhere on the leaf rather than
@@ -102,13 +107,20 @@ class Skills:
         # Stop within arm's length. The arm reaches ~0.43 m in front of the base at handle
         # height (measured by sweeping the shoulder/elbow range), so the default 0.85 m
         # stand-off leaves the hand half a metre short of the door.
-        approach = self.nav.goto(target)
+        approach = self.nav.goto(target, where=where)
         if not approach.success:
             return SkillResult(False, approach.describe())
 
-        facing = self.nav.face(target)
-        if not facing.success:
-            return SkillResult(False, f"I reached the {target} but could not square up to it.")
+        # Square up using the bearing goto already measured, rather than calling face().
+        # face() re-runs detection from scratch, and next to a door the neighbouring one is
+        # often the better-looking candidate -- which is how "open the left door" ended up
+        # walking back to the middle one after correctly arriving at the left.
+        residual = approach.bearing or 0.0
+        if abs(residual) > 0.05:
+            turn = float(np.clip(residual * 1.2, -0.9, 0.9))
+            for _ in range(int(abs(residual) / (abs(turn) * self.robot.control_dt)) + 1):
+                self.robot.step(0.0, 0.0, turn)
+        self.robot.stand(0.3)
 
         # Close the remaining gap until the door is within reach.
         for _ in range(140):
@@ -132,7 +144,14 @@ class Skills:
             self.robot.step(vx=0.35)
 
         angle_after = self._door_angle()
-        swing = abs(math.degrees(angle_after - angle_before))
+        # Judge on how far the door ends up open, not on how much THIS push added. Squeezing
+        # past a door on the way to it can already have swung it (a detour nudged the pantry
+        # door 35 degrees open before the arm ever touched it), and measuring only the delta
+        # then reports a door standing wide open as "it did not open".
+        swing = max(
+            abs(math.degrees(angle_after)),
+            abs(math.degrees(angle_after - angle_before)),
+        )
 
         if swing < 5.0:
             self.robot.arm_home(side)
@@ -184,9 +203,9 @@ class Skills:
                     best_angle = float(self.robot.data.qpos[self.robot.model.jnt_qposadr[joint]])
         return best_angle
 
-    def point_at(self, target: str, side: str = "r") -> SkillResult:
+    def point_at(self, target: str, side: str = "r", where: str | None = None) -> SkillResult:
         """Turn toward something and raise an arm at it."""
-        facing = self.nav.face(target)
+        facing = self.nav.face(target, where=where)
         if not facing.success:
             return SkillResult(False, f"I could not find a {target} to point at.")
         self.robot.set_arm(side, shoulder_pitch=-1.35, shoulder_roll=0.0,
@@ -264,16 +283,18 @@ class Skills:
                 return name
         return argument
 
-    def run(self, action: str, argument: str | None = None) -> SkillResult:
+    def run(
+        self, action: str, argument: str | None = None, where: str | None = None
+    ) -> SkillResult:
         """Execute one planner-issued action."""
         if action in ("goto", "face", "open", "open_door", "point_at"):
             argument = self._normalise_target(argument)
         handlers = {
-            "goto": lambda: self.goto(argument or "door"),
-            "face": lambda: self.face(argument or "door"),
-            "open": lambda: self.open_door(argument or "door"),
-            "open_door": lambda: self.open_door(argument or "door"),
-            "point_at": lambda: self.point_at(argument or "door"),
+            "goto": lambda: self.goto(argument or "door", where),
+            "face": lambda: self.face(argument or "door", where),
+            "open": lambda: self.open_door(argument or "door", where=where),
+            "open_door": lambda: self.open_door(argument or "door", where=where),
+            "point_at": lambda: self.point_at(argument or "door", where=where),
             "look_around": lambda: self.look_around(),
             "describe": lambda: self.describe_view(),
             "where": lambda: self.report_position(),
@@ -282,5 +303,5 @@ class Skills:
         handler = handlers.get(action)
         if handler is None:
             return SkillResult(False, f"I do not know how to '{action}'.")
-        log.info("skill: %s(%s)", action, argument or "")
+        log.info("skill: %s(%s%s)", action, f"{where} " if where else "", argument or "")
         return handler()

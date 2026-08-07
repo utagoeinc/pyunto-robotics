@@ -190,3 +190,57 @@ def test_open_door_end_to_end(skills):
     assert skills.robot.position[1] > 1.0, (
         f"did not pass through the doorway (y={skills.robot.position[1]:.2f}, started {start_y:.2f})"
     )
+
+
+# -- spatial qualifiers ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message,action,where",
+    [
+        ("右の会議室のドアを開けて", "open", "right"),
+        ("左のドアを開けて", "open", "left"),
+        ("真ん中のドアまで行って", "goto", "middle"),
+        ("一番右のドアを開けて", "open", "right"),
+        ("左端のドア", "goto", "left"),
+        ("open the right door", "open", "right"),
+        ("the door on the left", "goto", "left"),
+        ("go to the middle door", "goto", "middle"),
+        ("ドアを開けて", "open", None),  # no qualifier given
+    ],
+)
+def test_spatial_qualifiers_are_captured(planner, message, action, where):
+    """"the door on the RIGHT" has to survive planning; three doors look identical."""
+    plan = planner.plan(message)
+    assert plan.steps
+    assert plan.steps[0].action == action
+    assert plan.steps[0].where == where
+
+
+def test_qualifier_is_not_left_in_the_target_text(planner):
+    """Qualifiers travel on Step.where, not glued onto the object name."""
+    step = planner.plan("go to the right purple giraffe").steps[0]
+    assert step.where == "right"
+    assert "right" not in (step.argument or "")
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "where,expected_x",
+    [("left", -4.0), ("right", 4.0), ("middle", 0.0)],
+)
+def test_qualifier_selects_the_right_door(skills, where, expected_x):
+    """The end of the chain: a spatial word has to land the robot at that specific door.
+
+    Doors are at x = -4, 0, +4. Reaching the wrong one is a silent failure - the robot
+    reports success either way - so this asserts on position, not on the reply.
+    """
+    skills.robot.reset("lobby")
+    result = skills.run("open", "door", where)
+
+    assert result.ok, result.message
+    assert abs(skills.robot.position[0] - expected_x) < 2.0, (
+        f"asked for the {where} door (x={expected_x}) but ended at "
+        f"x={skills.robot.position[0]:.2f}"
+    )
+    assert skills.robot.position[1] > 1.0, "did not get through the doorway"
