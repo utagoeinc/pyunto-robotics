@@ -166,18 +166,14 @@ Two details that mattered:
   pantry the robot ends up pressed against the door with chest, thigh and foot while the depth
   camera still reads 1.8 m ahead: the door is beside it, not in front.
 
-**Known limitation: this gets out of the workspace and the meeting room, not the pantry.**
+Getting out of the last room needed one more thing: the doors are spring-loaded, so a robot
+that stops in the opening gets squeezed -- measured closing from 21 degrees to 13 while it
+stood there. Backing off and strafing only ever lost ground. The fix is to brace an arm against
+the leaf and keep walking, which turns the robot into its own doorstop; the door gives way and
+it goes through. It also keeps pushing for a moment after contact breaks, because stopping the
+instant the leaf lets go leaves it still in the opening for the spring to close on again.
 
-The cause is upstream of leaving. The robot enters the pantry 1.38 m off to the side of its
-doorway, against 0.2-0.3 m for the other two, because it is still 51 degrees off square when it
-starts pushing and so goes through at an angle. Coming back out from there means threading a
-0.98 m opening diagonally, and it wedges against the leaf and the jamb every time -- measured
-in contact at chest, thigh and foot while the depth camera still reported 1.8 m ahead, because
-the door is beside it rather than in front.
-
-Squaring to the doorway before pushing fixes the pantry (1.38 m down to 0.29 m) and breaks the
-other two rooms, which stop entering at all. That trade is not worth making, so it was reverted
-and the failure documented instead. Entering all three rooms works 3/3.
+All three rooms: entered 3/3, left 3/3.
 
 Multi-step instructions plan correctly with `--llm` -- 「右のドアを開けて…今度は一番左の部屋に」
 becomes `open(right) -> leave -> open(left)` -- and the middle step now succeeds for two of the

@@ -454,30 +454,22 @@ class Skills:
         for _ in range(400):
             delta = target - self.robot.position[:2]
             distance = float(np.linalg.norm(delta))
-            if distance < 0.25:
+            # Only stop early once we are actually out. Reaching the remembered pose is not the
+            # same as having left: the robot got within 0.09 m of the threshold and stopped
+            # there, still inside, with the spring closing the door on it.
+            if distance < 0.25 and self.report_position().data.get("room") != started_in:
                 break
             desired = math.atan2(delta[1], delta[0])
             error = (desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
             turn = float(np.clip(error * 1.4, -0.9, 0.9))
             self.robot.step(0.35 * max(0.4, 1.0 - abs(turn)), 0.0, turn)
 
-            # Still fouling the leaf. Reverse FIRST, then strafe: the robot is wedged between
-            # the door and the jamb, and the old escape kept a small forward component that
-            # drove it further in. Measured 906 escape attempts in the pantry with no progress.
+            # Fouling the leaf. The spring is closing the door onto the robot -- measured
+            # going from 21 to 13 degrees while it stood in the gap -- so the answer is to
+            # hold the door open, not to squeeze past a shrinking opening. Put an arm out
+            # against it and keep walking; the leaf gives way and the robot goes through.
             if self._touching_door():
-                for _ in range(16):
-                    self.robot.step(-0.4, 0.0, 0.0)
-                    if not self._touching_door():
-                        break
-                # Then move sideways, trying both ways: which side is free depends on which
-                # way the door swung, and guessing wrong wedges it harder.
-                for direction in (1.0, -1.0):
-                    if not self._touching_door():
-                        break
-                    for _ in range(16):
-                        self.robot.step(0.0, direction * 0.35, 0.0)
-                        if not self._touching_door():
-                            break
+                self._hold_door_open()
 
         self.robot.stand(0.3)
         self._doorway_return = None
@@ -491,6 +483,31 @@ class Skills:
             f"I came back out. {where.message}" if left else f"I could not get back out of {room}.",
             where.data,
         )
+
+    def _hold_door_open(self, side: str = "r", steps: int = 90) -> None:
+        """Brace an arm against the leaf and push on through.
+
+        The spring returns each door to closed, so a robot that stops in the opening gets
+        squeezed: measured closing from 21 degrees to 13 while it stood there. Backing off and
+        strafing only ever loses ground. Extending an arm turns the robot into a doorstop --
+        the leaf presses against the forearm instead of the torso, and forward motion swings
+        it back open.
+        """
+        self.robot.set_arm(side, shoulder_pitch=-1.15, shoulder_roll=0.0,
+                           shoulder_yaw=0.0, elbow=-0.15)
+        self.robot.grip(side, 0.2)
+        self.robot.stand(0.3)
+        # Keep pushing for a moment after contact breaks. Stopping the instant the leaf lets go
+        # leaves the robot still in the opening, where the spring closes it again -- it reached
+        # 0.11 m short of the threshold that way and got squeezed a second time.
+        clear_for = 0
+        for _ in range(steps):
+            self.robot.step(0.3, 0.0, 0.0)
+            clear_for = clear_for + 1 if not self._touching_door() else 0
+            if clear_for > 25:
+                break
+        self.robot.arm_home(side)
+        self.robot.stand(0.2)
 
     def _touching_door(self) -> bool:
         """True when any part of the robot is in contact with a door leaf or its frame."""

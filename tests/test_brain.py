@@ -286,13 +286,13 @@ def test_pull_door_opens_it(skills):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("where", ["left", "middle"])
+@pytest.mark.parametrize("where", ["left", "middle", "right"])
 def test_leave_room_returns_to_the_corridor(skills, where):
     """Getting out of a room needs a planned manoeuvre, not the reactive controller.
 
-    Only the two rooms this currently manages are asserted. The pantry is a known failure --
-    the robot ends up pressed against the leaf 0.2 m short of the threshold -- and asserting it
-    here would just encode a bug as expected behaviour.
+    All three rooms, including the pantry, which used to fail: the spring closes the door onto
+    a robot standing in the opening, so it has to brace an arm against the leaf and push
+    through rather than back off.
     """
     skills.robot.reset("lobby")
     skills.run("open", "door", where)
