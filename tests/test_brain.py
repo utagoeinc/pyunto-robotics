@@ -244,3 +244,30 @@ def test_qualifier_selects_the_right_door(skills, where, expected_x):
         f"x={skills.robot.position[0]:.2f}"
     )
     assert skills.robot.position[1] > 1.0, "did not get through the doorway"
+
+
+@pytest.mark.parametrize(
+    "message,chained",
+    [
+        ("右のドアを開けて中に入って、その後、廊下に出て、今度は、一番左の部屋に入って", True),
+        ("open the right door then the left one", True),
+        ("go to the desk. after that, look around", True),
+        ("右のドアを開けて", False),
+        ("open the door", False),
+        ("look around", False),
+    ],
+)
+def test_multi_step_instructions_are_recognised(message, chained):
+    """RulePlanner silently does the wrong single thing on a chained instruction.
+
+    Callers need to know that before running it, so they can warn or switch to the LLM.
+    """
+    from pyunto_robotics.brain.planner import looks_multi_step
+
+    assert looks_multi_step(message) is chained
+
+
+def test_rule_planner_still_answers_a_chained_instruction(planner):
+    """Warning about it is not the same as refusing: it still returns its best single step."""
+    plan = planner.plan("右のドアを開けて、その後、左の部屋に入って")
+    assert plan.steps, "should still produce something rather than nothing"

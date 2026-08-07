@@ -136,13 +136,43 @@ def _unknown_target(text: str) -> str | None:
     return " ".join(remainder) if remainder else None
 
 
+# Words that join one action to the next. Their presence means the instruction has more parts
+# than a single verb-object match can represent.
+_SEQUENCERS = (
+    "その後", "そのあと", "それから", "次に", "つぎに", "今度は", "こんどは", "してから",
+    "then", "after that", "afterwards", "next,", "and then",
+)
+
+
+def looks_multi_step(message: str) -> bool:
+    """True when an instruction chains several actions together.
+
+    RulePlanner can only ever produce one step, so on a chained instruction it silently
+    returns the wrong one -- 「右のドアを開けて…今度は一番左の部屋に」 came out as
+    open(left door), having dropped the first half. Callers use this to warn that --llm is
+    needed rather than letting the robot confidently do the wrong thing.
+    """
+    text = message.lower()
+    return any(word in text for word in _SEQUENCERS)
+
+
 class RulePlanner:
-    """Plans by matching verbs and objects. No model, no latency, no surprises."""
+    """Plans by matching verbs and objects. No model, no latency, no surprises.
+
+    One step only: it scans the whole message once for a verb and an object. A chained
+    instruction is beyond it by construction -- see `looks_multi_step`.
+    """
 
     def plan(self, message: str) -> Plan:
         text = message.lower().strip()
         if not text:
             return Plan([], reply="I did not catch that.")
+
+        if looks_multi_step(message):
+            log.warning(
+                "this instruction chains several actions; RulePlanner can only do the first. "
+                "Use LLMPlanner (--llm) for multi-step instructions."
+            )
 
         verb = self._verb(text)
         obj = self._object(text)

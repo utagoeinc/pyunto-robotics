@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -27,7 +28,11 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pyunto_robotics.agent import RobotAgent  # noqa: E402
-from pyunto_robotics.brain.planner import LLMPlanner, RulePlanner  # noqa: E402
+from pyunto_robotics.brain.planner import (  # noqa: E402
+    LLMPlanner,
+    RulePlanner,
+    looks_multi_step,
+)
 from pyunto_robotics.comms.auth import AuthError, Session  # noqa: E402
 from pyunto_robotics.comms.client import PyuntoClient  # noqa: E402
 from pyunto_robotics.comms.keys import RawSpaceKeyProvider  # noqa: E402
@@ -53,8 +58,11 @@ def _open_viewer(robot: Robot, args) -> object | None:
 
     if sys.platform == "darwin" and getattr(mujoco.viewer, "_MJPYTHON", None) is None:
         launcher = Path(sys.executable).with_name("mjpython")
+        # shlex.quote each argument: instructions contain spaces and Japanese punctuation,
+        # so an unquoted suggestion cannot be pasted back in.
+        argv = " ".join(shlex.quote(a) for a in sys.argv[1:])
         print("\nThe simulator window needs mjpython on macOS. Run:")
-        print(f"    {launcher} {sys.argv[0]} {' '.join(sys.argv[1:])}".rstrip())
+        print(f"    {launcher} {sys.argv[0]} {argv}".rstrip())
         return None
 
     viewer = mujoco.viewer.launch_passive(robot.model, robot.data)
@@ -102,6 +110,13 @@ def main() -> int:
 
     grounder = VLMGrounder() if args.vlm else ColorGrounder()
     planner = LLMPlanner() if args.llm else RulePlanner()
+
+    # A chained instruction under the rule matcher silently does the wrong single thing.
+    if args.say and not args.llm and looks_multi_step(args.say):
+        print(
+            "\nNote: that instruction has several parts, and the rule planner only does one.\n"
+            "      Add --llm to plan it with Gemma 4."
+        )
     print(f"planner : {type(planner).__name__}")
     print(f"grounder: {type(grounder).__name__}")
 

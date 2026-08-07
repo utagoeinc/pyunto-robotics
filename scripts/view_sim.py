@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -108,11 +109,13 @@ def main() -> int:
         launcher = mjpython if mjpython.exists() else Path("mjpython")
         # Keep the paths as the user typed them so the suggestion is copy-pasteable.
         script = sys.argv[0]
-        args = " ".join(sys.argv[1:])
+        # shlex.quote each argument: instructions contain spaces and Japanese punctuation,
+        # so an unquoted suggestion cannot be pasted back in.
+        quoted = " ".join(shlex.quote(a) for a in sys.argv[1:])
         print("\nThe interactive viewer needs mjpython on macOS. Run:")
-        print(f"    {launcher} {script} {args}".rstrip())
+        print(f"    {launcher} {script} {quoted}".rstrip())
         print("\nOr save stills instead, which works under plain python:")
-        print(f"    {sys.executable} {script} --shot out.png {args}".rstrip())
+        print(f"    {sys.executable} {script} --shot out.png {quoted}".rstrip())
         robot.close()
         return 1
 

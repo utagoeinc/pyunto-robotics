@@ -43,6 +43,11 @@ ships with the mujoco wheel, sets that up.)
 ./.venv/bin/mjpython scripts/run_robot.py --view --say "右のドアを開けて"
 ./.venv/bin/mjpython scripts/view_sim.py --say "左のドアを開けて"     # same thing, sim-only
 
+# Chained instructions need --llm: the rule matcher only ever produces one step, and will
+# silently do the wrong one. It prints a warning when it spots a chained instruction.
+./.venv/bin/mjpython scripts/run_robot.py --view --llm \
+    --say "右のドアを開けて、その後、一番左の部屋に入って"
+
 # Headless: no window, just the result
 ./.venv/bin/python scripts/run_robot.py --say "オフィスのドアを開けて"
 ./.venv/bin/python scripts/run_robot.py --llm --say "会議室のドアを開けて中に入って"
