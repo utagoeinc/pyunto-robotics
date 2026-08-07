@@ -55,6 +55,11 @@ class Skills:
         self._doorway_return: np.ndarray | None = None
         # Heading the robot had when it went through, so leaving can line up on the reverse.
         self._doorway_heading: float | None = None
+        # Where the robot was when it was given its instructions. 「最初にいる位置からみて」 --
+        # "from where you are standing now" -- makes that the frame of reference for left and
+        # right, and it is also the one spot with a clear view of every door.
+        self._home = robot.position[:2].copy()
+        self._home_heading = robot.yaw
 
     # -- navigation ---------------------------------------------------------------
 
@@ -99,6 +104,82 @@ class Skills:
         return SkillResult(True, f"Looking around I can see: {items}.", {"seen": list(seen)})
 
     # -- manipulation -------------------------------------------------------------
+
+    def return_home(self, max_steps: int = 1600) -> SkillResult:
+        """Go back to where the robot was standing when it got its instructions.
+
+        This is the vantage point the user described things from -- 「最初にいる位置からみて、
+        三つ見えるドアのうち」 -- so it is where "left" and "right" mean what they were meant to.
+        It is also the only place all three doors are in frame at once: from beside a doorway
+        only one is, which is why picking a second room used to open whichever was nearest.
+
+        The step budget covers a walk across the whole office with detours -- getting back from
+        the pantry takes about 1100 steps, and at the old 900 it stopped 0.9 m short.
+        """
+        for _ in range(max_steps):
+            delta = self._home - self.robot.position[:2]
+            distance = float(np.linalg.norm(delta))
+            if distance < 0.4:
+                break
+            desired = math.atan2(delta[1], delta[0])
+            error = (desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
+            turn = float(np.clip(error * 1.4, -1.0, 1.0))
+
+            if self._clearance_ahead() < 0.55 or self._touching_door():
+                # Something in the way. Steer around it rather than grinding into it.
+                from ..perception.depth import free_space  # noqa: PLC0415
+
+                space = free_space(self.robot.look().depth, self.robot.camera_fovy())
+                escape = space.best_bearing(prefer=error, min_range=0.9)
+                if escape is None:
+                    for _ in range(10):
+                        self.robot.step(-0.35, 0.0, 0.0)
+                    continue
+                self.robot.step(0.15, 0.0, float(np.clip(escape * 1.4, -1.0, 1.0)))
+                continue
+
+            self.robot.step(0.45 * max(0.35, 1.0 - abs(turn)), 0.0, turn)
+
+        self._turn_to(self._home_heading)
+        # Straighten the waist. The head camera hangs off the torso, so a waist left at -23
+        # degrees points the view 23 degrees away from wherever the body is facing -- which is
+        # why standing on the exact starting spot, facing the exact starting heading, showed
+        # one door where it had shown three.
+        self._straighten_waist()
+        self.robot.stand(0.3)
+
+        distance = float(np.linalg.norm(self._home - self.robot.position[:2]))
+        seen = self._count_doors()
+        if distance < 0.8:
+            return SkillResult(True, "I went back to where I started.", {"doors_visible": seen})
+        return SkillResult(
+            False,
+            f"I could not get back to where I started ({distance:.1f} m short).",
+            {"doors_visible": seen},
+        )
+
+    def _straighten_waist(self, settle: float = 0.4) -> None:
+        """Point the head camera where the body is facing.
+
+        The waist drifts during a manoeuvre and does not come back on its own -- measured
+        sitting at -30 degrees, which aims the camera 30 degrees off the body's heading and
+        quietly changes what "left" means. Its servo is deliberately weak (kp=1) so the torso
+        stays compliant while walking; stiffening it to correct this broke the gait badly
+        enough to fail four tests, so the joint is reset directly instead.
+        """
+        import mujoco  # noqa: PLC0415 - only needed for this introspection
+
+        joint = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_JOINT, "waist_yaw")
+        if joint < 0:
+            return
+        adr = self.robot.model.jnt_qposadr[joint]
+        self.robot.data.qpos[adr] = 0.0
+        self.robot.data.qvel[self.robot.model.jnt_dofadr[joint]] = 0.0
+        idx = self.robot._act.get("waist_yaw")  # noqa: SLF001 - Skills owns this robot
+        if idx is not None:
+            self.robot.data.ctrl[idx] = 0.0
+        mujoco.mj_forward(self.robot.model, self.robot.data)
+        self.robot.stand(settle)
 
     def _get_a_view_of_the_doors(self, minimum: int = 3, max_steps: int = 500) -> int:
         """Move to somewhere the whole row of doors is visible, and face it.
@@ -176,12 +257,10 @@ class Skills:
         The sequence: get close, square up, reach out at handle height, walk into the door so
         the arm loads it, then check the hinge actually moved.
         """
-        # A spatial qualifier only means what the user intended if the robot can see the row
-        # of doors it is choosing between. Straight after leaving a room it is next to one
-        # doorway facing sideways, and "the left door" then picks whichever it is standing by.
-        if where in ("left", "right", "middle"):
-            self._get_a_view_of_the_doors()
-
+        # A spatial qualifier is anchored to where the user was describing from, which is
+        # where the robot was standing when it was told. Go back there before choosing:
+        # from beside a doorway only one door is in frame, so "the left one" would just mean
+        # whichever it happens to be next to.
         # Stop within arm's length. The arm reaches ~0.43 m in front of the base at handle
         # height (measured by sweeping the shoulder/elbow range), so the default 0.85 m
         # stand-off leaves the hand half a metre short of the door.
@@ -869,6 +948,7 @@ class Skills:
             "point_at": lambda: self.point_at(argument or "door", where=where),
             "leave": lambda: self.leave_room(),
             "close": lambda: self.close_door(),
+            "home": lambda: self.return_home(),
             "look_around": lambda: self.look_around(),
             "describe": lambda: self.describe_view(),
             "where": lambda: self.report_position(),

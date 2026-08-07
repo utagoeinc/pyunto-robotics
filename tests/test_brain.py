@@ -311,3 +311,45 @@ def test_leave_room_without_a_memory_says_so(skills):
     result = skills.leave_room()
     assert not result.ok
     assert "remember" in result.message
+
+
+@pytest.mark.slow
+def test_returning_home_aims_at_the_far_door():
+    """Going back to the start is what makes a second "leftmost" mean the leftmost.
+
+    Asserts the direction, not arrival. From beside a doorway only one door is in frame, so
+    without going home the robot opens whichever it is next to -- it ends up around x=+4.
+    After going home it heads for the far side. Actually reaching and opening that door is
+    still unreliable, so this checks the choice rather than the outcome.
+    """
+    robot = Robot("office.xml", keyframe="lobby")
+    try:
+        skills = Skills(robot, ColorGrounder())
+        assert skills.run("open", "door", "right").ok
+        assert skills.leave_room().ok
+        assert skills.return_home().ok
+
+        skills.run("open", "door", "left")
+        assert robot.position[0] < 0.0, (
+            f"headed for the wrong side: x={robot.position[0]:.2f}, expected negative"
+        )
+    finally:
+        robot.close()
+
+
+@pytest.mark.slow
+def test_return_home_goes_back_to_the_start():
+    import numpy as np
+
+    robot = Robot("office.xml", keyframe="lobby")
+    try:
+        skills = Skills(robot, ColorGrounder())
+        home = skills._home.copy()
+        skills.run("open", "door", "middle")
+        skills.leave_room()
+        result = skills.return_home()
+
+        assert result.ok, result.message
+        assert float(np.linalg.norm(robot.position[:2] - home)) < 1.0
+    finally:
+        robot.close()

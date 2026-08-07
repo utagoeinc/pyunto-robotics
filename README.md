@@ -175,26 +175,30 @@ instant the leaf lets go leaves it still in the opening for the spring to close 
 
 All three rooms: entered 3/3, left 3/3.
 
-### Known limitation: choosing a second room after leaving the first
+### Choosing a second room: go back to where you were told
 
-「右のドアを開けて…今度は一番左の部屋に」 plans correctly and the first two steps work, but the
-third opens whichever door is nearest rather than the leftmost one.
+「最初にいる位置からみて、三つ見えるドアのうち、右のドアを…今度は一番左の部屋に」 names its own
+frame of reference, and the robot now uses it. `return_home` walks back to where it was standing
+when it got the instruction, which is both what the user was describing from and the only spot
+with all three doors in frame.
 
-"left" and "right" are relative to what the camera can see, and after leaving a room the robot
-stands beside one doorway with the door it just came through filling the view. Measured: one
-door visible from y=0.9, two from y=0.67, all three only from the middle of the corridor.
-Repositioning to somewhere with a clear view was tried several ways -- backing off (the gait
-barely reverses, 0.28 m in 60 steps), turning and walking (drifts 0.12 m sideways per pass,
-into a corner after twenty), driving to a fixed viewpoint (blocked by the lobby divider).
+Without it the robot opens whichever door it happens to be beside. Measured: one door visible
+from y=0.9, two from y=0.67, all three only from the starting position. So "the leftmost" from
+next to the pantry means the meeting room.
 
-`close_door` exists and helps, but usually leaves the leaf 20-40 degrees open: swinging it shut
-needs about a metre of clearance the robot cannot get straight after coming through. Stiffening
-the closer made leaving a room fail instead -- the door shuts on the robot mid-exit, 3/3 down
-to 2/3 -- so that was reverted.
+One subtlety cost a while: standing on the exact starting spot facing the exact starting
+heading still showed one door instead of three. The waist joint had drifted to -30 degrees and
+stayed there -- the head camera hangs off the torso, so the view was aimed 30 degrees away from
+where the body pointed. Its servo is deliberately weak (kp=1) so the torso stays compliant while
+walking, and stiffening it to fix this broke the gait badly enough to fail four tests, so the
+joint is reset directly instead.
 
-Multi-step instructions plan correctly with `--llm` -- 「右のドアを開けて…今度は一番左の部屋に」
-becomes `open(right) -> leave -> open(left)` -- and the middle step now succeeds for two of the
-three rooms.
+**Known limitation:** going home reliably aims the robot at the correct side of the office, but
+reaching and opening that far door afterwards is not yet dependable -- it stops around x=-2.9,
+short of a door at x=-4. The test asserts the choice rather than the arrival.
+
+Plans need the step explicitly: `open(right) -> leave -> home -> open(left)`. The prompt tells
+Gemma 4 to emit it.
 
 ## Notes on the Pyunto backend
 
