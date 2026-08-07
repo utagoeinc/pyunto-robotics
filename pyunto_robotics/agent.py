@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .brain.planner import Plan, RulePlanner
@@ -49,12 +50,16 @@ class RobotAgent:
         client: PyuntoClient | None = None,
         planner: RulePlanner | None = None,
         max_steps_per_message: int = 4,
+        on_idle: Callable[[], None] | None = None,
     ):
         self.robot = robot
         self.skills = Skills(robot, grounder)
         self.client = client
         self.planner = planner or RulePlanner()
         self.max_steps_per_message = max_steps_per_message
+        # Called repeatedly while waiting for work. Used to keep a viewer window responsive;
+        # it runs on the same thread as the simulation, which is where MuJoCo needs it.
+        self.on_idle = on_idle
 
         self._work: queue.Queue[IncomingMessage] = queue.Queue()
         self._busy = threading.Event()
@@ -128,8 +133,12 @@ class RobotAgent:
         """Drain the instruction queue on the calling thread until stopped."""
         while not self._stop.is_set():
             try:
-                message = self._work.get(timeout=0.5)
+                # Short timeout so `on_idle` still runs while nothing is queued -- that hook is
+                # what keeps a simulator window redrawing between instructions.
+                message = self._work.get(timeout=0.05)
             except queue.Empty:
+                if self.on_idle is not None:
+                    self.on_idle()
                 continue
 
             self._busy.set()

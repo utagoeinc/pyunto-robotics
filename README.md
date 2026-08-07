@@ -33,28 +33,37 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e '.[llm]'
 
 ## Run it
 
-```bash
-# One instruction, no network - the quickest way to see the whole thing work
-./.venv/bin/python scripts/run_robot.py --say "オフィスのドアを開けて"
+**To watch the robot, launch with `mjpython`, not `python`.** Everything works under plain
+`python` too, but headless -- the simulation runs and reports back in text with no window.
+(macOS binds the viewer to the Cocoa event loop on the main thread, and only `mjpython`, which
+ships with the mujoco wheel, sets that up.)
 
-# Same, planned by Gemma 4 E2B running locally
+```bash
+# Watch it carry out one instruction
+./.venv/bin/mjpython scripts/run_robot.py --view --say "右のドアを開けて"
+./.venv/bin/mjpython scripts/view_sim.py --say "左のドアを開けて"     # same thing, sim-only
+
+# Headless: no window, just the result
+./.venv/bin/python scripts/run_robot.py --say "オフィスのドアを開けて"
 ./.venv/bin/python scripts/run_robot.py --llm --say "会議室のドアを開けて中に入って"
 
 # Connected: listen on Pyunto and act on whatever you message
-./.venv/bin/python scripts/run_robot.py
-./.venv/bin/python scripts/run_robot.py --join INVITE_CODE   # first time, to join your space
+./.venv/bin/mjpython scripts/run_robot.py --view          # with a window
+./.venv/bin/python scripts/run_robot.py                   # without
+./.venv/bin/python scripts/run_robot.py --join INVITE_CODE  # first time, to join your space
 ```
+
+`--speed` sets playback rate (default 3x; `--speed 1` is real time). A trip to a far door
+takes over a minute at 1x.
 
 Other tools:
 
 ```bash
-# Interactive viewer. On macOS this MUST be mjpython (ships with the mujoco wheel) --
-# the viewer needs the Cocoa event loop on the main thread.
-./.venv/bin/mjpython scripts/view_sim.py --walk
-
+./.venv/bin/mjpython scripts/view_sim.py --walk        # canned route: ignores the camera,
+                                                       # only checks the gait and collisions
 ./.venv/bin/python scripts/view_sim.py --shot out.png  # stills; plain python is fine
 ./.venv/bin/python scripts/test_comms.py --listen      # Pyunto connection only
-./.venv/bin/python -m pytest tests/ -q                 # 99 tests
+./.venv/bin/python -m pytest tests/ -q                 # 112 tests
 ```
 
 ## What it understands
@@ -64,6 +73,7 @@ English and Japanese, via pattern matching (instant) or Gemma 4 (open-vocabulary
 | You say | It does |
 |---|---|
 | 「オフィスのドアを開けて」 / "open the door" | walks over and pushes it open |
+| 「右のドアを開けて」 / "open the door on the left" | picks that specific door of the three |
 | 「ドアまで行って」 / "go to the whiteboard" | navigates to it |
 | 「周りを見て」 / "look around" | turns in place, reports what it saw |
 | 「何が見える？」 / "what do you see" | describes the current view |
@@ -106,6 +116,7 @@ detection still cannot walk the robot into a wall.
 | Camera depth 224×224 | 0.6–0.9 ms |
 | Gemma 4 E2B load / plan | 2.4 s / 0.11–0.27 s |
 | Full "open the door" run | ~350 control steps, ~1 s wall clock |
+| Detour to a far door | ~1400 control steps |
 
 RL locomotion training is viable here despite the lack of CUDA: rollouts collect at ~72k
 env-steps/s on CPU and MPS gradient updates are ~24× faster than CPU, putting 100–200M steps
