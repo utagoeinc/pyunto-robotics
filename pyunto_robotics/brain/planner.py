@@ -89,6 +89,23 @@ _VERBS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 _GREETINGS = ("hello", "hi", "hey", "こんにちは", "はじめまして", "やあ", "おはよう", "こんばんは")
 
+# Words to drop when salvaging an unrecognised target from an instruction.
+_FILLER = frozenset(
+    {"go", "to", "the", "a", "an", "walk", "move", "head", "come", "approach",
+     "please", "now", "at", "toward", "towards", "face", "look", "point", "and", "then"}
+)
+
+
+def _unknown_target(text: str) -> str | None:
+    """Recover the noun from an instruction naming something the robot does not know.
+
+    Keeps "purple giraffe" out of the door-shaped hole, so the failure the user gets back
+    names what they actually asked for.
+    """
+    words = [w.strip(".,!?\"'") for w in text.split()]
+    remainder = [w for w in words if w and w.lower() not in _FILLER]
+    return " ".join(remainder) if remainder else None
+
 
 class RulePlanner:
     """Plans by matching verbs and objects. No model, no latency, no surprises."""
@@ -102,9 +119,16 @@ class RulePlanner:
         obj = self._object(text)
 
         if verb == "open":
+            # "open" with no object named is unambiguous in this office: it means a door.
             return Plan([Step("open", obj or "door")])
         if verb in ("goto", "face", "point_at"):
-            return Plan([Step(verb, obj or "door")])
+            if obj is None:
+                # Do not silently substitute a door. "go to the purple giraffe" has a clear
+                # target that simply is not something the robot knows, and pretending it said
+                # "door" would send it walking off on the wrong errand.
+                target = _unknown_target(text) or "door"
+                return Plan([Step(verb, target)])
+            return Plan([Step(verb, obj)])
         if verb in ("look_around", "describe", "where"):
             return Plan([Step(verb)])
 
