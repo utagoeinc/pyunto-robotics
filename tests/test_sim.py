@@ -147,13 +147,31 @@ def test_gripper_opens_and_closes(robot):
     assert closed > opened + 0.1, f"gripper did not close (open {opened:.3f}, closed {closed:.3f})"
 
 
-def test_closed_door_blocks_the_robot(robot):
-    """Walking into a closed door must not pass through it."""
+def test_robot_cannot_pass_a_door_without_moving_it(robot):
+    """The leaf is solid: getting to the far side requires actually swinging it.
+
+    Walking into it torso-first does open it - the door is unlatched and light, so that is
+    correct physics, not a bug. What must never happen is passing through while the hinge
+    stays at zero, which would mean the collision was skipped entirely.
+    """
     robot.reset("start")
-    # Head straight at the meeting-room door.
+    robot.arm_home("r")
+    robot.arm_home("l")
+    joint = mujoco.mj_name2id(robot.model, mujoco.mjtObj.mjOBJ_JOINT, "door_2")
+    adr = robot.model.jnt_qposadr[joint]
+
+    # Track the peak, not the final angle: the spring starts closing the door the moment the
+    # robot stops leaning on it, so by the end of the run it has already swung back.
+    peak_swing = 0.0
     for _ in range(200):
         robot.step(vx=0.8)
-    assert robot.position[1] < 1.1, "robot walked through a closed door"
+        peak_swing = max(peak_swing, abs(math.degrees(float(robot.data.qpos[adr]))))
+
+    if robot.position[1] > 1.15:  # it got through
+        assert peak_swing > 20.0, (
+            f"passed the doorway (y={robot.position[1]:.2f}) without the door ever opening "
+            f"(peak {peak_swing:.1f} deg) - collision was missed"
+        )
 
 
 def test_door_opens_when_pushed(robot):
@@ -163,8 +181,9 @@ def test_door_opens_when_pushed(robot):
     adr = robot.model.jnt_qposadr[joint]
     dof = robot.model.jnt_dofadr[joint]
 
+    # Positive torque swings the leaf into the room; the range is 0..+1.9.
     for _ in range(100):
-        robot.data.qfrc_applied[dof] = -5.0
+        robot.data.qfrc_applied[dof] = 5.0
         robot.step()
     angle = abs(math.degrees(float(robot.data.qpos[adr])))
     robot.data.qfrc_applied[dof] = 0.0

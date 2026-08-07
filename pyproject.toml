@@ -48,3 +48,7 @@ target-version = "py312"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: drives the full simulator end to end (deselect with -m 'not slow')",
+    "llm: needs the local Gemma weights on disk",
+]

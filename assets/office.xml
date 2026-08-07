@@ -84,8 +84,14 @@
         damping smooths the swing; a weak spring returns the door to closed.
         frictionloss is deliberately small - too much and the robot cannot push it open at all.
       -->
+      <!--
+        Range is 0..+1.9, not -1.9..0. A negative angle swings the leaf toward -y, i.e. back
+        into the corridor and into the robot, so pushing from the corridor just jammed it
+        against its own limit. Positive opens into the room, away from the approach - which is
+        what makes "walk up and push" work at all.
+      -->
       <joint type="hinge" axis="0 0 1" damping="2.5" frictionloss="0.2" springref="0"
-             stiffness="0.8" range="-1.9 0"/>
+             stiffness="0.8" range="0 1.9"/>
       <!--
         density 240 gives a ~22 kg door leaf. Inheriting the robot's 900 made it 100 kg, which
         no arm could move. condim=3 keeps contact cheap; the panel never needs to spin in place.
