@@ -84,6 +84,24 @@ def main() -> int:
         robot.close()
         return 1
 
+    # On macOS the viewer needs the Cocoa event loop on the main thread, which only the
+    # mjpython launcher (shipped with the mujoco wheel) sets up. Detect it the same way
+    # mujoco.viewer does -- sys.executable still reads "python3" under mjpython, so checking
+    # the interpreter name would wrongly reject a correct invocation.
+    launched_by_mjpython = getattr(mujoco.viewer, "_MJPYTHON", None) is not None
+    if sys.platform == "darwin" and not launched_by_mjpython:
+        mjpython = Path(sys.executable).with_name("mjpython")
+        launcher = mjpython if mjpython.exists() else Path("mjpython")
+        # Keep the paths as the user typed them so the suggestion is copy-pasteable.
+        script = sys.argv[0]
+        args = " ".join(sys.argv[1:])
+        print("\nThe interactive viewer needs mjpython on macOS. Run:")
+        print(f"    {launcher} {script} {args}".rstrip())
+        print("\nOr save stills instead, which works under plain python:")
+        print(f"    {sys.executable} {script} --shot out.png {args}".rstrip())
+        robot.close()
+        return 1
+
     print("\nopening viewer - close the window to stop")
     with mujoco.viewer.launch_passive(robot.model, robot.data) as viewer:
         start = time.time()

@@ -48,8 +48,11 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e '.[llm]'
 Other tools:
 
 ```bash
-./.venv/bin/python scripts/view_sim.py --walk          # watch it walk (interactive viewer)
-./.venv/bin/python scripts/view_sim.py --shot out.png  # save an overview + eye view
+# Interactive viewer. On macOS this MUST be mjpython (ships with the mujoco wheel) --
+# the viewer needs the Cocoa event loop on the main thread.
+./.venv/bin/mjpython scripts/view_sim.py --walk
+
+./.venv/bin/python scripts/view_sim.py --shot out.png  # stills; plain python is fine
 ./.venv/bin/python scripts/test_comms.py --listen      # Pyunto connection only
 ./.venv/bin/python -m pytest tests/ -q                 # 99 tests
 ```
@@ -138,6 +141,8 @@ The server is Node/TypeScript + Express + Socket.IO (not FastAPI, despite older 
   Socket.IO gets its own.
 - `python-socketio` needs the `[client]` extra for `websocket-client`, or the sync client
   silently falls back to polling and the websocket transport fails.
+- **The interactive viewer needs `mjpython` on macOS**, not `python`. Note that `sys.executable`
+  still reports `python3` under mjpython, so detect it via `mujoco.viewer._MJPYTHON` instead.
 
 ## Layout
 
