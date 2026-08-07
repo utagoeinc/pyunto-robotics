@@ -461,17 +461,23 @@ class Skills:
             turn = float(np.clip(error * 1.4, -0.9, 0.9))
             self.robot.step(0.35 * max(0.4, 1.0 - abs(turn)), 0.0, turn)
 
-            # Still fouling the leaf. Try both ways out rather than guessing: strafe one way,
-            # and if that does not break contact, strafe the other. In a doorway the free side
-            # depends on which way the door swung, and picking wrong wedges the robot harder.
+            # Still fouling the leaf. Reverse FIRST, then strafe: the robot is wedged between
+            # the door and the jamb, and the old escape kept a small forward component that
+            # drove it further in. Measured 906 escape attempts in the pantry with no progress.
             if self._touching_door():
-                for direction in (1.0, -1.0):
-                    for _ in range(14):
-                        self.robot.step(0.05, direction * 0.3, 0.0)
-                        if not self._touching_door():
-                            break
+                for _ in range(16):
+                    self.robot.step(-0.4, 0.0, 0.0)
                     if not self._touching_door():
                         break
+                # Then move sideways, trying both ways: which side is free depends on which
+                # way the door swung, and guessing wrong wedges it harder.
+                for direction in (1.0, -1.0):
+                    if not self._touching_door():
+                        break
+                    for _ in range(16):
+                        self.robot.step(0.0, direction * 0.35, 0.0)
+                        if not self._touching_door():
+                            break
 
         self.robot.stand(0.3)
         self._doorway_return = None
