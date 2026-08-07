@@ -283,3 +283,31 @@ def test_pull_door_opens_it(skills):
     assert result.data["swing_degrees"] > 10
     # Pulling swings the leaf toward the robot, so it should still be on the corridor side.
     assert skills.robot.position[1] < 1.2
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("where", ["left", "middle"])
+def test_leave_room_returns_to_the_corridor(skills, where):
+    """Getting out of a room needs a planned manoeuvre, not the reactive controller.
+
+    Only the two rooms this currently manages are asserted. The pantry is a known failure --
+    the robot ends up pressed against the leaf 0.2 m short of the threshold -- and asserting it
+    here would just encode a bug as expected behaviour.
+    """
+    skills.robot.reset("lobby")
+    skills.run("open", "door", where)
+    assert skills.robot.position[1] > 1.0, "did not get into the room to begin with"
+
+    result = skills.leave_room()
+
+    assert result.ok, result.message
+    assert skills.robot.position[1] < 1.0, "still inside the room"
+
+
+def test_leave_room_without_a_memory_says_so(skills):
+    """Leaving depends on the pose recorded on the way in; without it, say so plainly."""
+    skills.robot.reset("start")
+    skills._doorway_return = None
+    result = skills.leave_room()
+    assert not result.ok
+    assert "remember" in result.message

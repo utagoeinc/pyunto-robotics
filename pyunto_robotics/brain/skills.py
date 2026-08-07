@@ -53,6 +53,8 @@ class Skills:
         # there is nothing for a purely reactive search to home in on. One remembered pose is
         # a much smaller concession than building a map.
         self._doorway_return: np.ndarray | None = None
+        # Heading the robot had when it went through, so leaving can line up on the reverse.
+        self._doorway_heading: float | None = None
 
     # -- navigation ---------------------------------------------------------------
 
@@ -136,12 +138,12 @@ class Skills:
             self.robot.step(vx=0.3)
         self.robot.stand(0.3)
 
-        # Remember the doorway itself, not where we are standing. The push-off point is up to
-        # 0.7 m short of the opening, and aiming leave_room at that put the exit heading well
-        # away from the actual gap. The doorway is one arm's length ahead along the current
-        # heading, which is where the hand is about to make contact.
-        heading = np.array([math.cos(self.robot.yaw), math.sin(self.robot.yaw)])
-        self._doorway_return = self.robot.position[:2] + heading * PUSH_STANDOFF_M
+        # Remember where we are STANDING, which is the corridor side of the threshold -- that
+        # is where leaving has to get back to. Recording the doorway itself (one arm's length
+        # ahead) put the target inside the room: measured (4.54, 1.27) for a doorway at y=1.0,
+        # so "returning" to it never left the pantry.
+        self._doorway_return = self.robot.position[:2].copy()
+        self._doorway_heading = self.robot.yaw
 
         angle_before = self._door_angle()
 
@@ -413,32 +415,148 @@ class Skills:
         return best
 
     def leave_room(self) -> SkillResult:
-        """Get back out to the corridor.
+        """Get back out to the corridor by retracing the way in.
 
-        The robot pushed its way in, which leaves the leaf swung across the way back out. So
-        leaving is the same manoeuvre in reverse: take hold of the handle and pull, which swings
-        the door clear instead of pressing against it, then walk through.
+        This is the one manoeuvre in the system that is planned rather than reactive, and it has
+        to be. In a doorway the robot has under 0.5 m of clearance in every direction, so the
+        obstacle-avoiding controller that works everywhere else has no single-step move that
+        improves anything -- forward is the leaf, back is the room. It just oscillates.
 
-        This is why pull_door exists at all. The original design could only push, and a
-        push-only robot has no way out of a room it pushed into -- the door it opened is now in
-        the way. Adding the grasp was not an extra feature so much as finishing the first one.
+        So this executes a fixed sequence instead, using the pose open_door recorded on the way
+        through: turn to face back the way we came, pull the door clear if it is in the way,
+        then drive to the remembered spot without re-planning. Short, blind, and reliable,
+        which is what a doorway needs.
         """
         started_in = self.report_position().data.get("room")
+        if self._doorway_return is None:
+            return SkillResult(False, "I do not remember how I came in.")
 
-        # No pre-aiming: pull_door runs its own approach, and turning first only fought it.
-        result = self.pull_door("door")
+        target = self._doorway_return.copy()
+
+        # 1. Face back toward the corridor.
+        delta = target - self.robot.position[:2]
+        heading = math.atan2(delta[1], delta[0])
+        self._turn_to(heading)
+
+        # 2. The leaf swung into the room when we pushed in, so it is now between us and the
+        #    opening. Pull it clear if we are up against it.
+        #
+        #    Test contact, not forward clearance. In the pantry the robot ends up pressed
+        #    against the leaf with chest, thigh and foot while the depth camera still reports
+        #    1.8 m ahead -- the door is beside it, not in front -- so a clearance check misses
+        #    exactly the case this exists for.
+        if self._touching_door() or self._clearance_ahead() < 1.0:
+            self._pull_leaf_clear()
+            self._turn_to(heading)
+
+        # 3. Drive to the remembered pose. Deliberately not re-planning: the reactive
+        #    controller cannot navigate a doorway, and the route is only a metre or two.
+        for _ in range(400):
+            delta = target - self.robot.position[:2]
+            distance = float(np.linalg.norm(delta))
+            if distance < 0.25:
+                break
+            desired = math.atan2(delta[1], delta[0])
+            error = (desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
+            turn = float(np.clip(error * 1.4, -0.9, 0.9))
+            self.robot.step(0.35 * max(0.4, 1.0 - abs(turn)), 0.0, turn)
+
+            # Still fouling the leaf. Try both ways out rather than guessing: strafe one way,
+            # and if that does not break contact, strafe the other. In a doorway the free side
+            # depends on which way the door swung, and picking wrong wedges the robot harder.
+            if self._touching_door():
+                for direction in (1.0, -1.0):
+                    for _ in range(14):
+                        self.robot.step(0.05, direction * 0.3, 0.0)
+                        if not self._touching_door():
+                            break
+                    if not self._touching_door():
+                        break
+
+        self.robot.stand(0.3)
         self._doorway_return = None
+        self._doorway_heading = None
 
         where = self.report_position()
         room = where.data.get("room", "")
         left = room != started_in
-        if left:
-            return SkillResult(True, f"I came back out. {where.message}", where.data)
         return SkillResult(
-            False,
-            f"I could not get back out of {room}: {result.message}",
+            left,
+            f"I came back out. {where.message}" if left else f"I could not get back out of {room}.",
             where.data,
         )
+
+    def _touching_door(self) -> bool:
+        """True when any part of the robot is in contact with a door leaf or its frame."""
+        import mujoco  # noqa: PLC0415 - only needed for this introspection
+
+        robot_parts = (
+            "torso", "pelvis", "uarm", "farm", "palm", "fing", "thigh", "shin", "foot",
+            "head", "neck", "visor", "chest",
+        )
+        for c in range(self.robot.data.ncon):
+            contact = self.robot.data.contact[c]
+            n1 = str(mujoco.mj_id2name(self.robot.model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1))
+            n2 = str(mujoco.mj_id2name(self.robot.model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2))
+            door_side = "door" in n1 or "door" in n2 or "frame" in n1 or "frame" in n2
+            robot_side = any(p in n1 for p in robot_parts) or any(p in n2 for p in robot_parts)
+            if door_side and robot_side:
+                return True
+        return False
+
+    def _turn_to(self, heading: float, max_steps: int = 220) -> None:
+        """Rotate on the spot to a world heading."""
+        for _ in range(max_steps):
+            error = (heading - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
+            if abs(error) < 0.05:
+                break
+            self.robot.step(0.0, 0.0, float(np.clip(error * 1.6, -1.0, 1.0)))
+        self.robot.stand(0.2)
+
+    def _pull_leaf_clear(self, side: str = "r") -> bool:
+        """Grasp whatever door is in front and pull it out of the way.
+
+        Unlike pull_door this does no navigation -- the robot is already at the doorway and
+        letting the navigator loose here is what causes it to wander back into the room.
+        """
+        door = self._nearest_door_body()
+        if door is None:
+            return False
+
+        self.robot.grip(side, 0.0)
+        self.robot.set_arm(side, shoulder_pitch=-1.05, shoulder_roll=0.0,
+                           shoulder_yaw=0.0, elbow=-0.20)
+        self.robot.stand(0.5)
+
+        # Line up on the handle, then close the last of the gap.
+        for _ in range(120):
+            offset = self._handle_offset(side)
+            if offset is None or abs(offset) < 0.05:
+                break
+            self.robot.step(0.0, float(np.clip(offset * 1.5, -0.25, 0.25)), 0.0)
+        for _ in range(60):
+            gap = self._handle_gap(side)
+            if gap is None or gap < 0.12:
+                break
+            self.robot.step(vx=0.1)
+        self.robot.stand(0.3)
+
+        self.robot.grip(side, 1.0)
+        self.robot.stand(0.4)
+        if not self.robot.grasp(door):
+            self.robot.grip(side, 0.0)
+            self.robot.arm_home(side)
+            return False
+
+        # Drag it aside: reverse and turn at once so the leaf sweeps away from the opening.
+        for _ in range(120):
+            self.robot.step(-0.25, 0.0, 0.35)
+
+        self.robot.release()
+        self.robot.grip(side, 0.0)
+        self.robot.arm_home(side)
+        self.robot.stand(0.3)
+        return True
 
     def _find_exit_heading(self) -> float | None:
         """Turn on the spot and return the world heading that most looks like the way out.

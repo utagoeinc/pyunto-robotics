@@ -146,22 +146,33 @@ a 20 kg leaf -- so a closed hand is modelled as a weld, which is standard practi
 relative pose is written into `eq_data` at the moment of contact; without that the solver
 enforces the compiled offset and the door teleports into the hand.
 
-### Known limitation
+### Leaving a room is planned, not reactive
 
-Pulling reliably opens the door -- 28 degrees from the corridor, 23-54 from inside a room,
-measured -- and gets the robot out of the meeting room. It does not reliably get it out of the
-workspace or the pantry. The door opens; the robot then fails to thread the gap between the
-swung leaf and the jamb, and ends up drifting back into the room.
+`leave_room` is the one manoeuvre here that runs a fixed sequence instead of steering frame by
+frame, and it has to be. In a doorway the robot has under 0.5 m of clearance in every
+direction, so the obstacle-avoiding controller that works everywhere else has no single-step
+move that improves anything -- forward is the leaf, back is the room, and it just oscillates.
 
-The cause is understood and is not the grasp: in the doorway the robot has under 0.5 m of
-clearance in every direction, which puts it permanently in obstacle-avoidance and leaves the
-reactive controller with no move that improves things. It needs a manoeuvre planned over more
-than one frame -- back up, line up on the gap, then commit -- which is a different kind of
-control from everything else here.
+Instead `open_door` records the pose on the corridor side of the threshold as it goes through,
+and leaving replays it: turn to face back, pull the leaf clear if the robot is against it, then
+drive to the remembered spot without re-planning. Short, blind, and reliable.
 
-Entering all three rooms works 3/3. Multi-step instructions plan correctly with `--llm` --
-「右のドアを開けて…今度は一番左の部屋に」 becomes `open(right) -> leave -> open(left)` -- but the
-middle step inherits this limitation.
+Two details that mattered:
+
+- The recorded pose is where the robot was *standing*, not the doorway itself. Recording the
+  doorway put the target at y=1.27 for a threshold at y=1.0 -- inside the room -- so returning
+  to it never left.
+- Whether the leaf is in the way is decided by *contact*, not by forward clearance. In the
+  pantry the robot ends up pressed against the door with chest, thigh and foot while the depth
+  camera still reads 1.8 m ahead: the door is beside it, not in front.
+
+**Known limitation: this gets out of the workspace and the meeting room, not the pantry.** There
+the robot stops 0.2 m short of the threshold, wedged against the leaf. Entering all three rooms
+works 3/3.
+
+Multi-step instructions plan correctly with `--llm` -- 「右のドアを開けて…今度は一番左の部屋に」
+becomes `open(right) -> leave -> open(left)` -- and the middle step now succeeds for two of the
+three rooms.
 
 ## Notes on the Pyunto backend
 
