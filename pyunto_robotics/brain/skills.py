@@ -100,6 +100,70 @@ class Skills:
 
     # -- manipulation -------------------------------------------------------------
 
+    def _get_a_view_of_the_doors(self, minimum: int = 3, max_steps: int = 500) -> int:
+        """Move to somewhere the whole row of doors is visible, and face it.
+
+        "left" and "right" are relative to what the robot can see, so they only mean what the
+        user intended if the robot can see the doors it is choosing between. Straight after
+        leaving a room it stands a metre from one doorway facing sideways, and asking for "the
+        left door" there picks the one it is standing next to.
+
+        Measured: from y=0.9, right at the thresholds, only one door fits in frame; from
+        y=0.67 two do; all three need y=0 or the lobby. Seeing only two is worse than
+        useless -- standing by the pantry, "left" then means the meeting room rather than
+        the workspace -- so this insists on all three by default.
+
+        Returns how many doors ended up visible.
+        """
+        best = self._count_doors()
+        if best >= minimum:
+            return best
+
+        # Face the doors. They are all on the north wall, so turning to look that way is the
+        # one piece of layout knowledge this needs.
+        self._turn_to(math.pi / 2)
+        best = max(best, self._count_doors())
+
+        # Then go and stand where the whole row is visible: the middle of the lobby, looking
+        # north. Two things rule out anywhere nearer. A door left standing open fills the view
+        # from a metre away, and the robot has just opened one. And the corridor is long
+        # enough that from one end the far door is outside a 75-degree field of view.
+        #
+        # This drives to a fixed spot rather than searching for one. Searching was tried: each
+        # pass drifted 0.12 m sideways, and twenty passes later the robot was in the east
+        # corner with no doors in sight at all.
+        viewpoint = np.array([0.0, -2.2])
+        for _ in range(max_steps):
+            delta = viewpoint - self.robot.position[:2]
+            if float(np.linalg.norm(delta)) < 0.4:
+                break
+            desired = math.atan2(delta[1], delta[0])
+            error = (desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
+            turn = float(np.clip(error * 1.5, -1.0, 1.0))
+            self.robot.step(0.4 * max(0.35, 1.0 - abs(turn)), 0.0, turn)
+
+        self._turn_to(math.pi / 2)
+        self.robot.stand(0.2)
+        return self._count_doors()
+
+    def _count_doors(self, min_confidence: float = 0.25, min_separation: float = 0.08) -> int:
+        """How many distinct doors are in view.
+
+        Colour matching splits one door into several slivers when a frame edge catches the
+        light, and a low-confidence sliver at the edge of frame is enough to make the robot
+        think it can see the whole row when it cannot. Drop faint detections and merge ones
+        that sit on top of each other.
+        """
+        detections = [
+            d for d in self.grounder.find(self.robot.look().rgb, "door")
+            if d.confidence >= min_confidence
+        ]
+        distinct: list[float] = []
+        for det in sorted(detections, key=lambda d: d.x):
+            if not distinct or det.x - distinct[-1] > min_separation:
+                distinct.append(det.x)
+        return len(distinct)
+
     def open_door(
         self, target: str = "door", side: str = "r", where: str | None = None
     ) -> SkillResult:
@@ -112,6 +176,12 @@ class Skills:
         The sequence: get close, square up, reach out at handle height, walk into the door so
         the arm loads it, then check the hinge actually moved.
         """
+        # A spatial qualifier only means what the user intended if the robot can see the row
+        # of doors it is choosing between. Straight after leaving a room it is next to one
+        # doorway facing sideways, and "the left door" then picks whichever it is standing by.
+        if where in ("left", "right", "middle"):
+            self._get_a_view_of_the_doors()
+
         # Stop within arm's length. The arm reaches ~0.43 m in front of the base at handle
         # height (measured by sweeping the shoulder/elbow range), so the default 0.85 m
         # stand-off leaves the hand half a metre short of the door.
@@ -484,6 +554,56 @@ class Skills:
             where.data,
         )
 
+    def close_door(self, side: str = "r") -> SkillResult:
+        """Pull the nearest door shut behind us.
+
+        Worth doing for its own sake, and it keeps the corridor usable: a door left standing
+        open fills the view from close by, and the robot has to see the row of doors to make
+        sense of "the left one".
+
+        The spring already pulls each door toward closed, so this only has to stand clear and
+        wait -- there is no need to grasp and haul.
+
+        Known limitation: this usually leaves the door 20-40 degrees open rather than shut. The
+        leaf needs about a metre of clearance to swing through, and the robot cannot reliably
+        get that far from a doorway it has just come through. Stiffening the closer so it shuts
+        faster was tried and made things worse: the door then closes on the robot while it is
+        still leaving, and getting out of a room dropped from 3/3 to 2/3.
+        """
+        import mujoco  # noqa: PLC0415 - only needed for this introspection
+
+        door = self._nearest_door_body()
+        if door is None:
+            return SkillResult(False, "There is no door here to close.")
+
+        bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, door)
+        joint = self.robot.model.body_jntadr[bid]
+        adr = self.robot.model.jnt_qposadr[joint]
+        before = abs(math.degrees(float(self.robot.data.qpos[adr])))
+
+        # Stand clear so the leaf has room to swing, then let the spring do the work.
+        self.robot.arm_home(side)
+        for _ in range(50):
+            self.robot.step(-0.25, 0.35, 0.0)
+        self.robot.stand(0.3)
+        # Then wait. The doors swing both ways, so a leaf released from 80 degrees overshoots
+        # through the closed position and comes back -- measured -87, -54, +19, then settling
+        # at +1 after about eight seconds. Waiting only for the first crossing catches it
+        # mid-swing and reports a door that is closing as one that failed to close.
+        for _ in range(10):
+            self.robot.stand(1.0)
+            if abs(math.degrees(float(self.robot.data.qpos[adr]))) < 8.0:
+                break
+
+        after = abs(math.degrees(float(self.robot.data.qpos[adr])))
+        if after < 12.0:
+            return SkillResult(True, "I closed the door behind me.", {"angle": after})
+        return SkillResult(
+            False,
+            f"The door did not swing shut ({after:.0f} degrees still open).",
+            {"angle_before": before, "angle": after},
+        )
+
     def _hold_door_open(self, side: str = "r", steps: int = 90) -> None:
         """Brace an arm against the leaf and push on through.
 
@@ -748,6 +868,7 @@ class Skills:
             "open_door": lambda: self.open_door(argument or "door", where=where),
             "point_at": lambda: self.point_at(argument or "door", where=where),
             "leave": lambda: self.leave_room(),
+            "close": lambda: self.close_door(),
             "look_around": lambda: self.look_around(),
             "describe": lambda: self.describe_view(),
             "where": lambda: self.report_position(),

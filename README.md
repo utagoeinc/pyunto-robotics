@@ -175,6 +175,23 @@ instant the leaf lets go leaves it still in the opening for the spring to close 
 
 All three rooms: entered 3/3, left 3/3.
 
+### Known limitation: choosing a second room after leaving the first
+
+「右のドアを開けて…今度は一番左の部屋に」 plans correctly and the first two steps work, but the
+third opens whichever door is nearest rather than the leftmost one.
+
+"left" and "right" are relative to what the camera can see, and after leaving a room the robot
+stands beside one doorway with the door it just came through filling the view. Measured: one
+door visible from y=0.9, two from y=0.67, all three only from the middle of the corridor.
+Repositioning to somewhere with a clear view was tried several ways -- backing off (the gait
+barely reverses, 0.28 m in 60 steps), turning and walking (drifts 0.12 m sideways per pass,
+into a corner after twenty), driving to a fixed viewpoint (blocked by the lobby divider).
+
+`close_door` exists and helps, but usually leaves the leaf 20-40 degrees open: swinging it shut
+needs about a metre of clearance the robot cannot get straight after coming through. Stiffening
+the closer made leaving a room fail instead -- the door shuts on the robot mid-exit, 3/3 down
+to 2/3 -- so that was reverted.
+
 Multi-step instructions plan correctly with `--llm` -- 「右のドアを開けて…今度は一番左の部屋に」
 becomes `open(right) -> leave -> open(left)` -- and the middle step now succeeds for two of the
 three rooms.
