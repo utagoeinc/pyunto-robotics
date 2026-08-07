@@ -292,17 +292,10 @@ class Skills:
                 {"swing_degrees": swing},
             )
 
-        # Step around the leaf and through. The door now stands between the robot and the
-        # opening, so this sidesteps clear of it before walking forward.
-        for _ in range(60):
-            self.robot.step(0.0, -0.3, 0.0)
-        for _ in range(40):
-            self.robot.step(0.0, 0.0, 0.5)
-        for _ in range(180):
-            if self._clearance_ahead() < 0.7:
-                break
-            self.robot.step(vx=0.4)
-        self.robot.stand(0.3)
+        # Step around the leaf and through. A fixed sidestep-turn-walk left the robot facing
+        # away from the doorway entirely (measured: ended up at +8 degrees, east, with the
+        # opening behind it to the west), so this steers by where the opening actually is.
+        self._walk_through_doorway()
 
         return SkillResult(
             True,
@@ -335,6 +328,56 @@ class Skills:
             left = np.array([-math.sin(self.robot.yaw), math.cos(self.robot.yaw)])
             best = float(np.dot(delta, left))
         return best
+
+    def _walk_through_doorway(self, steps: int = 320, until_room_changes: bool = True) -> None:
+        """After pulling, sidestep clear of the leaf and walk out through the opening.
+
+        Aims at the remembered doorway pose when there is one -- that is the corridor side of
+        the opening, recorded on the way in -- and otherwise at whatever direction the depth
+        image says is most open. Either way it steers each step rather than replaying a fixed
+        sequence, because the robot's pose after a pull depends on how far the door swung.
+        """
+        from ..perception.depth import free_space  # noqa: PLC0415 - avoids a circular import
+
+        # Back off just enough to unload the leaf. A longer reverse pushed the robot deeper
+        # into the room than it started -- measured y=1.22 going to 1.55 in the workspace,
+        # away from a doorway at y=1.0.
+        for _ in range(8):
+            self.robot.step(-0.3, 0.0, 0.0)
+        self.robot.stand(0.2)
+
+        # Stop on having actually changed rooms, not on proximity to the remembered pose.
+        # Distance is a poor test here: the robot ends up hemmed in by the leaf right at the
+        # threshold, so a tight tolerance never triggers and a loose one fires while still
+        # inside.
+        started_in = self.report_position().data.get("room")
+
+        for _ in range(steps):
+            if until_room_changes and self.report_position().data.get("room") != started_in:
+                break
+
+            obs = self.robot.look()
+            space = free_space(obs.depth, self.robot.camera_fovy())
+
+            if self._doorway_return is not None:
+                delta = self._doorway_return - self.robot.position[:2]
+                desired = math.atan2(delta[1], delta[0])
+                bearing = (desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
+            else:
+                bearing = space.best_bearing(prefer=0.0, min_range=1.0) or 0.0
+
+            ahead = space.clearance_ahead(half_angle=0.28)
+            turn = float(np.clip(bearing * 1.5, -1.0, 1.0))
+
+            if ahead < 0.55:
+                # Something in the way -- most likely the leaf. Strafe rather than turn: in a
+                # doorway there is no room to swing round, and the gap is usually just to one
+                # side. Sidestep toward whichever side the target is on.
+                self.robot.step(0.05, math.copysign(0.3, bearing or 1.0), 0.0)
+                continue
+
+            self.robot.step(0.4 * max(0.35, 1.0 - abs(turn)), 0.0, turn)
+        self.robot.stand(0.3)
 
     def _nearest_door_body(self) -> str | None:
         """Name of the door body closest to the robot."""

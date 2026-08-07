@@ -148,12 +148,20 @@ enforces the compiled offset and the door teleports into the hand.
 
 ### Known limitation
 
-Pulling works, and gets the robot out of the meeting room, but not reliably out of the
-workspace or the pantry: the door swings open (23-54 degrees, measured) but the robot does not
-always then step around the leaf and through. Entering all three rooms works 3/3.
+Pulling reliably opens the door -- 28 degrees from the corridor, 23-54 from inside a room,
+measured -- and gets the robot out of the meeting room. It does not reliably get it out of the
+workspace or the pantry. The door opens; the robot then fails to thread the gap between the
+swung leaf and the jamb, and ends up drifting back into the room.
 
-Multi-step instructions plan correctly with `--llm` -- 「右のドアを開けて…今度は一番左の部屋に」
-becomes `open(right) -> leave -> open(left)` -- but the middle step inherits this limitation.
+The cause is understood and is not the grasp: in the doorway the robot has under 0.5 m of
+clearance in every direction, which puts it permanently in obstacle-avoidance and leaves the
+reactive controller with no move that improves things. It needs a manoeuvre planned over more
+than one frame -- back up, line up on the gap, then commit -- which is a different kind of
+control from everything else here.
+
+Entering all three rooms works 3/3. Multi-step instructions plan correctly with `--llm` --
+「右のドアを開けて…今度は一番左の部屋に」 becomes `open(right) -> leave -> open(left)` -- but the
+middle step inherits this limitation.
 
 ## Notes on the Pyunto backend
 
