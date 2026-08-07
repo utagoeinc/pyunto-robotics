@@ -28,7 +28,9 @@ from dataclasses import dataclass
 log = logging.getLogger(__name__)
 
 # Verbs the skill layer understands. The planner may only emit these.
-ACTIONS = ("goto", "face", "open", "point_at", "look_around", "describe", "where", "report")
+ACTIONS = (
+    "goto", "face", "open", "leave", "point_at", "look_around", "describe", "where", "report",
+)
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,8 @@ _OBJECTS: dict[str, tuple[str, ...]] = {
 # in "go open the door", or the robot does the wrong thing for a perfectly clear instruction.
 _VERBS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("open", ("open", "push open", "開けて", "開けろ", "あけて", "開いて")),
+    ("leave", ("leave the room", "come back out", "go back out", "exit the room",
+               "廊下に出て", "部屋を出て", "出て来て", "戻って")),
     ("look_around", ("look around", "explore", "scan", "見回して", "周りを見て",
                      "まわりを見て", "あたりを見て", "探索")),
     ("describe", ("what do you see", "describe", "what can you see", "何が見える",
@@ -155,7 +159,7 @@ class RulePlanner:
                 target = _unknown_target(text) or "door"
                 return Plan([Step(verb, target, where)])
             return Plan([Step(verb, obj, where)])
-        if verb in ("look_around", "describe", "where"):
+        if verb in ("look_around", "describe", "where", "leave"):
             return Plan([Step(verb)])
 
         # No verb, but a nameable object -- "the meeting room door" almost certainly means go.
@@ -208,23 +212,41 @@ class RulePlanner:
 # LLM planning
 # --------------------------------------------------------------------------------------
 
-_PLANNER_PROMPT = """You control a humanoid robot in an office with a corridor, a workspace, a \
-meeting room and a pantry, connected by doors.
+_PLANNER_PROMPT = """You control a humanoid robot in an office. A corridor runs along the \
+south side. Off it, behind three doors, are three rooms: the workspace (left), the meeting \
+room (middle), and the pantry (right).
 
 Available actions:
   goto <object>      walk to something (door, whiteboard, desk, table, monitor, plant, fridge)
   face <object>      turn to look at something
-  open <object>      walk to a door and push it open
+  open <object>      walk to a door, push it open, and go through
+  leave              come back out of the room the robot is in, into the corridor
   point_at <object>  point at something
   look_around        turn in place and report what is visible
   describe           say what is currently in view
   where              report which room the robot is in
   report <text>      say something to the user
 
+Each step may also carry "where" to pick between identical objects. Use it whenever the user
+says which one they mean:
+  "left" | "right" | "middle" | "nearest" | "far"
+
+Rules:
+- Only ever use the object names listed above. There is no "corridor" or "room" object; a room
+  is entered by opening its door, so "go into the left room" is {{"action": "open",
+  "argument": "door", "where": "left"}}.
+- "open" already walks there and goes through, so never follow it with a goto for the same door.
+- From inside a room no other door is visible, so ALWAYS use "leave" before opening a
+  different door. "go into the right room, then the left room" is:
+  open right -> leave -> open left.
+- Break a multi-part instruction into one step per action, in the order the user said them.
+
 The user said: "{message}"
 
-Reply with ONLY a JSON array of steps, no other text. Example:
-[{{"action": "open", "argument": "door"}}]
+Reply with ONLY a JSON array of steps, no other text. Examples:
+[{{"action": "open", "argument": "door", "where": "right"}}]
+[{{"action": "open", "argument": "door", "where": "right"}}, \
+{{"action": "open", "argument": "door", "where": "left"}}]
 
 If the request is just conversation, reply with:
 [{{"action": "report", "argument": "<your reply>"}}]"""
@@ -316,5 +338,13 @@ def parse_plan(text: str) -> list[Step]:
             log.warning("planner emitted unknown action %r, skipping", action)
             continue
         argument = entry.get("argument")
-        steps.append(Step(action, str(argument) if argument else None))
+        # Accept a spatial qualifier either as its own field or folded into the argument, since
+        # models do both no matter how the prompt asks.
+        where = entry.get("where") or entry.get("which") or entry.get("position")
+        where = str(where).strip().lower() if where else None
+        if where not in (None, "left", "right", "middle", "nearest", "far"):
+            where = None
+        if where is None and argument:
+            where = RulePlanner._qualifier(str(argument).lower())
+        steps.append(Step(action, str(argument) if argument else None, where))
     return steps

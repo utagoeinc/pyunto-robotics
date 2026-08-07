@@ -47,6 +47,12 @@ class Skills:
         self.robot = robot
         self.grounder = grounder
         self.nav = navigator or MaplessNavigator(robot, grounder)
+        # Where the robot stood just before pushing through a doorway, so it can get back out.
+        # Navigation is otherwise memoryless, and a room is a dead end without this: from
+        # inside, the open door shows only its edge and no other door is visible at all, so
+        # there is nothing for a purely reactive search to home in on. One remembered pose is
+        # a much smaller concession than building a map.
+        self._doorway_return: np.ndarray | None = None
 
     # -- navigation ---------------------------------------------------------------
 
@@ -130,6 +136,10 @@ class Skills:
             self.robot.step(vx=0.3)
         self.robot.stand(0.3)
 
+        # Remember this spot before going through: it is the corridor side of the doorway,
+        # which is exactly where leave_room needs to get back to.
+        self._doorway_return = self.robot.position[:2].copy()
+
         angle_before = self._door_angle()
 
         # Best forward reach at handle height, found by sweeping the joint ranges:
@@ -162,8 +172,18 @@ class Skills:
                 {"swing_degrees": swing},
             )
 
-        # Walk through while it is open, then let the arm relax.
-        for _ in range(120):
+        # Walk through while it is open -- but only as far as being through. A fixed 120 steps
+        # at 0.45 m/s carried the robot over a metre past the doorway and wedged it into the
+        # far corner of the pantry, with 0.31 m of clearance in every direction and no way to
+        # manoeuvre back out.
+        # Walk a fixed distance first to clear the doorway itself -- the swinging leaf keeps
+        # the measured clearance low, so checking it too early stops the robot in the opening.
+        for _ in range(90):
+            self.robot.step(vx=0.45)
+        # Then continue only while there is room, so it does not end up wedged in a corner.
+        for _ in range(75):
+            if self._clearance_ahead() < 0.9:
+                break
             self.robot.step(vx=0.45)
         self.robot.arm_home(side)
         self.robot.stand(0.4)
@@ -172,6 +192,67 @@ class Skills:
             True,
             f"I opened the {target} and went through (it swung {swing:.0f} degrees).",
             {"swing_degrees": swing},
+        )
+
+    def leave_room(self) -> SkillResult:
+        """Walk back out of the room the robot is in.
+
+        A room is a dead end for reactive navigation: with the leaf swung open into the room it
+        fills the doorway, and no other door is visible from inside, so there is nothing for a
+        purely reactive search to steer toward. open_door therefore remembers the one pose that
+        matters -- the corridor side of the doorway -- and this walks back to it.
+
+        Signage above each doorway was tried first, so the way out could be found by sight
+        alone. It made things worse: the extra geometry perturbed the approach enough that the
+        robot stopped entering the left and right rooms at all. One remembered pose is both
+        smaller and more reliable than changing the building.
+
+        Known limitation: this gets out of two rooms in three. In the pantry the open leaf sits
+        across the return path and the robot does not always work around it.
+        """
+        from ..perception.depth import free_space  # noqa: PLC0415 - avoids a circular import
+
+        started_in = self.report_position().data.get("room")
+
+        for _ in range(700):
+            room = self.report_position().data.get("room")
+            if room != started_in:
+                break
+
+            obs = self.robot.look()
+            space = free_space(obs.depth, self.robot.camera_fovy())
+            ahead = space.clearance_ahead(half_angle=0.30)
+
+            if self._doorway_return is not None:
+                delta = self._doorway_return - self.robot.position[:2]
+                desired = math.atan2(delta[1], delta[0])
+                bearing = (desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
+            else:
+                bearing = 0.0
+
+            if ahead < 0.55:
+                # The leaf is across the way out. Back off decisively, then aim again -- a
+                # timid nudge just scrubs along it.
+                for _ in range(10):
+                    self.robot.step(-0.4, 0.0, 0.0)
+                turn = float(np.clip(bearing * 1.5, -1.0, 1.0))
+                for _ in range(8):
+                    self.robot.step(0.0, 0.0, turn)
+                continue
+
+            turn = float(np.clip(bearing * 1.5, -1.0, 1.0))
+            self.robot.step(0.4 * max(0.3, 1.0 - abs(turn)), 0.0, turn)
+
+        self.robot.stand(0.3)
+        self._doorway_return = None
+
+        where = self.report_position()
+        room = where.data.get("room", "")
+        left = room != started_in
+        return SkillResult(
+            left,
+            f"I came back out. {where.message}" if left else f"I could not find the way out of {room}.",
+            where.data,
         )
 
     def _clearance_ahead(self) -> float:
@@ -295,6 +376,7 @@ class Skills:
             "open": lambda: self.open_door(argument or "door", where=where),
             "open_door": lambda: self.open_door(argument or "door", where=where),
             "point_at": lambda: self.point_at(argument or "door", where=where),
+            "leave": lambda: self.leave_room(),
             "look_around": lambda: self.look_around(),
             "describe": lambda: self.describe_view(),
             "where": lambda: self.report_position(),

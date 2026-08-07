@@ -74,6 +74,7 @@ English and Japanese, via pattern matching (instant) or Gemma 4 (open-vocabulary
 |---|---|
 | 「オフィスのドアを開けて」 / "open the door" | walks over and pushes it open |
 | 「右のドアを開けて」 / "open the door on the left" | picks that specific door of the three |
+| 「右のドアを開けて、その後左の部屋に」 | multi-step, with Gemma 4 (see limitation below) |
 | 「ドアまで行って」 / "go to the whiteboard" | navigates to it |
 | 「周りを見て」 / "look around" | turns in place, reports what it saw |
 | 「何が見える？」 / "what do you see" | describes the current view |
@@ -122,6 +123,21 @@ RL locomotion training is viable here despite the lack of CUDA: rollouts collect
 env-steps/s on CPU and MPS gradient updates are ~24× faster than CPU, putting 100–200M steps
 within a few hours. MJX/JAX is *not* the route — `jax-metal` is unmaintained, and MJX is slower
 than plain MuJoCo for a single robot anyway.
+
+## Known limitation: multi-room errands
+
+Gemma 4 breaks a multi-part instruction into the right steps -- 「右のドアを開けて…今度は一番左の
+部屋に」 plans as `open(right) -> leave -> open(left)` -- but the robot only gets back out of two
+rooms in three. Inside a room the open leaf fills the doorway and no other door is visible, so
+there is nothing for a reactive search to steer toward; `open_door` remembers the corridor side
+of the doorway and `leave` walks back to it, which works for the workspace and the meeting room
+but not reliably for the pantry.
+
+Signage above each doorway was tried first, so the way out could be found by sight alone. It
+made things worse: the extra geometry perturbed the approach enough that the robot stopped
+entering the left and right rooms at all, and it was reverted.
+
+Single-room instructions are unaffected and work for all three doors.
 
 ## Notes on the Pyunto backend
 
