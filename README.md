@@ -223,6 +223,25 @@ degrees across a 0.98 m gap does not fit through it.
 is not yet dependable. The tracked position is dropped during a long detour and the robot
 re-acquires a nearer door. The test asserts the choice rather than the arrival.
 
+### Why the robot still walks near the wall
+
+It heads straight at its target from first sighting, so a door across the office is approached
+diagonally and the robot ends up alongside the corridor wall -- measured at mean y=+0.26 in a
+corridor whose centre is y=0. That reads badly and it is why the logs are full of
+`following the wall`.
+
+A centring bias to fix it was written twice and abandoned twice. It works as steering: mean
+corridor y goes from +0.26 to -0.16. But walking down the middle keeps all three doors in frame
+the whole way, and with per-frame position estimates 0.1-0.34 m noisy the tracked anchor creeps
+from one door to the next -- traced sliding from the left door to the middle one over a dozen
+frames. Picking a named door drops from 3/3 to 1/3. Gains from 0.5 down to 0, gates from 2.0 m
+down to 0.5 m, and smoothing the anchor were all tried; none separated the two effects.
+
+Hugging the wall is, perversely, what makes the current tracking reliable: it narrows the view
+so only the target door is in it. Fixing the walking properly means giving the tracker
+something stronger than a noisy point estimate to hold onto -- recognising a specific door
+rather than a position -- which is a perception change, not a steering one.
+
 ## Notes on the Pyunto backend
 
 The server is Node/TypeScript + Express + Socket.IO (not FastAPI, despite older docs), and
