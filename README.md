@@ -200,29 +200,28 @@ short of a door at x=-4. The test asserts the choice rather than the arrival.
 Plans need the step explicitly: `open(right) -> leave -> home -> open(left)`. The prompt tells
 Gemma 4 to emit it.
 
-### Why it walks along the wall
+### Tracking a chosen target by where it is, not where it looks
 
-The logs are full of `door is behind an obstacle; following the wall to the left`, and it looks
-wrong: the corridor is 2 m wide with 2.7 m of clear space down the middle, and the robot is
-scraping along the side of it.
+The navigator used to follow a target by its bearing, and swapped doors whenever the view
+changed. It now records where the target is in the world and re-acquires it by position, which
+a changing viewpoint cannot disturb.
 
-The cause is that it steers straight at the target from the moment it sees one. A door on the
-far side of the office is at a sharp angle, so heading for it takes the robot diagonally into
-the corridor wall long before it gets there -- measured hugging y=+0.75 against a wall at
-y=1.0, a 0.25 m gap. From there `clearance_ahead` is under the 0.55 m safety distance
-permanently, so it stays in wall-following for the rest of the trip. It arrives, but it arrives
-by grinding along the wall.
+Making that work turned up a systematic error worth recording. MuJoCo's depth buffer holds
+distance *along the view axis*, not distance to the point, and `target_offset` was using it
+directly. For anything off-centre those differ by 1/cos(bearing): three doors at 4.0, 5.66 and
+5.66 m all read as 3.90 m, so the two at 45 degrees landed 1.76 m from where they actually
+were. `free_space` had always corrected for this in its clearance columns; `target_offset`
+never had. With the correction the estimates come out 0.10-0.34 m from ground truth, and
+picking a named door went from 2/3 to 3/3.
 
-A centring bias was written to fix it -- nudge the heading away from whichever side is closer,
-fading out on the final approach so a doorway is still reachable. It works as intended: mean
-corridor y goes from +0.75 to +0.02, dead centre. But walking the middle keeps all three doors
-in frame the whole way, and the tracker then swaps targets mid-approach, so "open the left door"
-arrives at the middle one. Gains from 0.9 down to 0.15 all traded one failure for another (3/3
-correct doors down to 1/3 or 2/3), and the change is not committed.
+The other fix was squaring up to a doorway *before* pushing rather than after. Approaching the
+left door leaves the robot at 167 degrees for an opening that faces 90, and a body turned 80
+degrees across a 0.98 m gap does not fit through it.
 
-Fixing it properly means tracking the chosen door by where it is in the world rather than by
-bearing, so a changing viewpoint cannot swap it. That is a different piece of work from a
-steering tweak.
+**Known limitation:** resolving "the leftmost door" from the starting viewpoint is now correct
+-- it picks the door at x=-3.6 rather than whichever is nearest -- but walking there afterwards
+is not yet dependable. The tracked position is dropped during a long detour and the robot
+re-acquires a nearer door. The test asserts the choice rather than the arrival.
 
 ## Notes on the Pyunto backend
 

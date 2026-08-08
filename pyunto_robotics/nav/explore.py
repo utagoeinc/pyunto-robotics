@@ -33,9 +33,15 @@ from ..sim.robot import Robot
 
 log = logging.getLogger(__name__)
 
-# How far a tracked target may jump between frames and still count as the same object.
-# The doors are ~43 degrees apart from the lobby, so this has to stay well under that.
-TRACK_GATE_RAD = 0.45
+# How far a tracked target may appear to move between frames and still count as the same
+# object, in metres. Tracking is done in world coordinates rather than by bearing: a target's
+# bearing changes fast as the robot turns or crosses a room, so a bearing window either loses
+# a near target or lets a far one hop to its neighbour. Its position does not move at all.
+# The doors are 4 m apart, so a 2 m gate cannot confuse one for its neighbour. It has to be
+# this wide because the estimate is noisy: depth samples the face of the leaf rather than the
+# doorway, and the error swings with viewpoint -- measured the estimate for one door moving
+# 0.72 m in a single approach step.
+TRACK_GATE_M = 2.0
 
 # A target counts as reached only if it is also roughly ahead. Brushing past a door on the way
 # somewhere else puts it within arm's reach at 30-40 degrees off, which is not arriving at it.
@@ -60,7 +66,9 @@ class NavState(Enum):
 DETOUR_TRIGGER_M = 0.75  # clearance below which a straight approach is judged blocked
 DETOUR_CLEAR_M = 1.6  # clearance above which the route ahead counts as open again
 DETOUR_MIN_STEPS = 40  # commit for at least this long, or it oscillates in and out
-DETOUR_MAX_STEPS = 320  # give up and re-search rather than circling forever
+# Long enough to get round a wall and back on course. Crossing the office to the far door with
+# a door standing open on the way takes several detours, and at 320 the budget ran out mid-way.
+DETOUR_MAX_STEPS = 500
 
 
 @dataclass
@@ -129,6 +137,18 @@ class MaplessNavigator:
         space = free_space(obs.depth, fovy)
         return detections, space, fovy, (width, height), obs.depth
 
+    def _world_position(self, bearing: float, distance: float) -> np.ndarray:
+        """Where a detection sits in the world, from its bearing and range.
+
+        This is what makes tracking stable. A door does not move; only the robot's view of it
+        does, so comparing positions survives the viewpoint changing while comparing bearings
+        does not.
+        """
+        heading = self.robot.yaw + bearing
+        return self.robot.position[:2] + distance * np.array(
+            [math.cos(heading), math.sin(heading)]
+        )
+
     def _locate(
         self,
         detections: list[Detection],
@@ -137,7 +157,7 @@ class MaplessNavigator:
         size: tuple[int, int],
         prefer_bearing: float = 0.0,
         where: str | None = None,
-        tracking: float | None = None,
+        tracking: np.ndarray | None = None,
     ) -> tuple[Detection, float, float] | None:
         """Pick a detection to chase and measure it.
 
@@ -147,9 +167,9 @@ class MaplessNavigator:
         score, which both settles that and matches what "the door" usually means -- the one
         being looked at, not one 44 degrees off to the side.
 
-        `tracking` is the bearing of the target already being chased. When set, the choice is
-        locked to that object rather than re-scored, which is what stops an approach switching
-        horses halfway.
+        `tracking` is the world position of the target already being chased. When set, the
+        choice is locked to whatever is nearest that spot rather than re-scored, which is what
+        stops an approach switching horses halfway.
 
         `where` is a spatial qualifier from the instruction ("the door on the right"). When
         present it OVERRIDES the default preference for whatever is straight ahead -- the whole
@@ -171,14 +191,23 @@ class MaplessNavigator:
             return self._pick_by_qualifier(measured, where)
 
         if tracking is not None:
-            # Already committed to one candidate: re-acquire the SAME one by proximity to where
-            # it was last seen, and do not reconsider. Scoring afresh each frame let the
-            # straight-ahead term outweigh the tracking term, so a door picked at 43 degrees was
-            # abandoned for whatever sat in the middle of the frame - which is exactly how "the
-            # door on the left" ended up opening the centre door.
-            nearest = min(measured, key=lambda m: abs(m[1] - tracking))
+            # Already committed to one candidate: re-acquire the SAME one by where it is in the
+            # world, and do not reconsider. Scoring afresh each frame let the straight-ahead
+            # term outweigh the tracking term, so a door picked at 43 degrees was abandoned for
+            # whatever sat in the middle of the frame -- which is exactly how "the door on the
+            # left" ended up opening the centre door.
+            best_match: tuple[Detection, float, float] | None = None
+            best_error = math.inf
+            for candidate in measured:
+                _, bearing, distance = candidate
+                error = float(
+                    np.linalg.norm(self._world_position(bearing, distance) - tracking)
+                )
+                if error < best_error:
+                    best_error = error
+                    best_match = candidate
             # Only accept it if it plausibly is the same object; otherwise treat as lost.
-            return nearest if abs(nearest[1] - tracking) < TRACK_GATE_RAD else None
+            return best_match if best_error < TRACK_GATE_M else None
 
         best: tuple[Detection, float, float] | None = None
         best_score = -math.inf
@@ -300,7 +329,7 @@ class MaplessNavigator:
     def goto(
         self,
         target: str,
-        max_steps: int = 2000,
+        max_steps: int = 3000,
         search_steps: int = 260,
         where: str | None = None,
     ) -> NavResult:
@@ -319,6 +348,8 @@ class MaplessNavigator:
         steps = 0
         searched = 0
         last_seen: tuple[Detection, float, float] | None = None
+        # World position of the door being chased, so a changing viewpoint cannot swap it.
+        tracked_at: np.ndarray | None = None
         lost_frames = 0
         detections: list[Detection] = []
         detour_side = 1.0
@@ -338,12 +369,13 @@ class MaplessNavigator:
                 # tracked by continuity: it drifts toward the centre of the frame as the robot
                 # turns to face it, so re-picking "the rightmost" every frame would keep
                 # handing off to the next door along.
-                if last_seen is None:
+                # Once a door has been chosen, re-acquire it by where it is in the world.
+                # The qualifier only applies to the first sighting: after that the robot may
+                # have moved somewhere "leftmost" means a different door.
+                if tracked_at is None:
                     located = self._locate(detections, depth, fovy, size, where=where)
                 else:
-                    located = self._locate(
-                        detections, depth, fovy, size, tracking=last_seen[1]
-                    )
+                    located = self._locate(detections, depth, fovy, size, tracking=tracked_at)
             else:
                 located = last_seen
 
@@ -356,6 +388,7 @@ class MaplessNavigator:
                     )
                     state = NavState.APPROACH
                     last_seen = located
+                    tracked_at = self._world_position(bearing, distance)
                     continue
                 if searched > search_steps:
                     return NavResult(NavState.SEARCH, target, steps=steps)
@@ -375,6 +408,7 @@ class MaplessNavigator:
                         searched = 0
                         lost_frames = 0
                         last_seen = None
+                        tracked_at = None
                         continue
                     located = last_seen
                     if located is None:
@@ -383,6 +417,7 @@ class MaplessNavigator:
                 else:
                     lost_frames = 0
                     last_seen = located
+                    tracked_at = self._world_position(located[1], located[2])
 
                 _, bearing, distance = located
 
@@ -435,6 +470,7 @@ class MaplessNavigator:
                     state = NavState.SEARCH
                     searched = 0
                     last_seen = None
+                    tracked_at = None
                     continue
 
                 # Rejoin the direct approach once the way ahead genuinely opens up -- but only
@@ -446,15 +482,15 @@ class MaplessNavigator:
                         state = NavState.APPROACH
                         last_seen = located
                         continue
-                    # Target not in frame but the way is open. Re-search WITHOUT the qualifier:
-                    # having walked around an obstacle, "the rightmost door" no longer names the
-                    # same door it did from the starting point, and re-applying it hands the
-                    # robot off to a different one. Continuity of the tracked object is what
-                    # matters now, so the sweep re-acquires whatever is closest ahead.
+                    # Target not in frame but the way is open. Keep the tracked world position:
+                    # it names the door we chose, and a position does not stop being right just
+                    # because the robot walked round a wall. (The qualifier alone would --
+                    # "the rightmost door" means something different from the far side of the
+                    # office -- which is why this used to discard it and end up at whichever
+                    # door was nearest.)
                     state = NavState.SEARCH
                     searched = 0
                     last_seen = None
-                    where = None
                     continue
 
                 # Track the wall: steer toward the chosen side while keeping some clearance in
@@ -465,7 +501,7 @@ class MaplessNavigator:
 
     def face(self, target: str, max_steps: int = 200, where: str | None = None) -> NavResult:
         """Turn to put the target dead ahead, without walking anywhere."""
-        tracked: float | None = None
+        tracked: np.ndarray | None = None
         for step in range(max_steps):
             detections, _, fovy, size, depth = self._observe(target)
             if tracked is None:
@@ -476,7 +512,7 @@ class MaplessNavigator:
                 self.robot.step(0.0, 0.0, 0.6)
                 continue
             _, bearing, distance = located
-            tracked = bearing
+            tracked = self._world_position(bearing, distance)
             if abs(bearing) < 0.06:
                 self.robot.stand(0.2)
                 return NavResult(

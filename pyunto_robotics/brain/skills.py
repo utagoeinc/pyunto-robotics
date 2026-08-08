@@ -25,7 +25,10 @@ log = logging.getLogger(__name__)
 
 # How close to stand before reaching for a door. The arm reaches ~0.43 m in front of the base
 # at handle height, so anything beyond this leaves the hand short of the leaf.
-PUSH_STANDOFF_M = 0.62
+# Ranges became accurate once the depth buffer's axial distance was converted to true range,
+# so the robot now stops where it actually intended to -- which turned out to be a couple of
+# centimetres too far back to get through. 0.55 puts the hand on the leaf again.
+PUSH_STANDOFF_M = 0.55
 
 
 @dataclass
@@ -126,16 +129,15 @@ class Skills:
             turn = float(np.clip(error * 1.4, -1.0, 1.0))
 
             if self._clearance_ahead() < 0.55 or self._touching_door():
-                # Something in the way. Steer around it rather than grinding into it.
-                from ..perception.depth import free_space  # noqa: PLC0415
-
-                space = free_space(self.robot.look().depth, self.robot.camera_fovy())
-                escape = space.best_bearing(prefer=error, min_range=0.9)
-                if escape is None:
-                    for _ in range(10):
-                        self.robot.step(-0.35, 0.0, 0.0)
-                    continue
-                self.robot.step(0.15, 0.0, float(np.clip(escape * 1.4, -1.0, 1.0)))
+                # Something in the way, most likely the door just opened. Turn to face home
+                # first, then push through: creeping around it drove the robot further onto the
+                # leaf (clearance 0.41 to 0.17 over 300 steps), and reversing blindly pushed it
+                # back into the room it had just left.
+                self._turn_to(desired, max_steps=80)
+                for _ in range(20):
+                    self.robot.step(0.3, 0.0, 0.0)
+                    if not self._touching_door() and self._clearance_ahead() > 0.7:
+                        break
                 continue
 
             self.robot.step(0.45 * max(0.35, 1.0 - abs(turn)), 0.0, turn)
@@ -279,6 +281,12 @@ class Skills:
                 self.robot.step(0.0, 0.0, turn)
         self.robot.stand(0.3)
 
+        # Square up to the doorway before closing in. Approaching a door at an angle -- the
+        # left one is reached at 167 degrees for an opening that faces 90 -- means pushing
+        # through sideways, and a body turned 80 degrees across a 0.98 m gap does not fit.
+        # All the doorways are on the north wall, which is the one piece of layout this uses.
+        self._turn_to(math.pi / 2 if self.robot.position[1] < 1.0 else -math.pi / 2)
+
         # Close the remaining gap until the door is within reach.
         for _ in range(140):
             space = self._clearance_ahead()
@@ -295,6 +303,15 @@ class Skills:
         self._doorway_heading = self.robot.yaw
 
         angle_before = self._door_angle()
+
+        # Push with the arm on the hinge side, so the other one stays clear of the jamb as the
+        # robot walks through. The handle is on the far edge from the hinge, so reaching across
+        # with the near arm keeps the body out of the opening.
+        handle_offset = self._handle_offset(side)
+        if handle_offset is not None and handle_offset > 0.15:
+            side = "l"  # handle is to the left; use the left arm
+        elif handle_offset is not None and handle_offset < -0.15:
+            side = "r"
 
         # Best forward reach at handle height, found by sweeping the joint ranges:
         # shoulder pitch -1.10, elbow -0.20 puts the gripper 0.43 m ahead at z=1.03.
@@ -620,7 +637,15 @@ class Skills:
             if self._touching_door():
                 self._hold_door_open()
 
+        # Get clear of the leaf before finishing. Ending the manoeuvre still in contact leaves
+        # whatever runs next -- return_home, another door -- starting from 0.17 m of clearance
+        # with nowhere to go.
+        for _ in range(40):
+            if not self._touching_door() and self._clearance_ahead() > 0.7:
+                break
+            self.robot.step(-0.35, 0.25, 0.0)
         self.robot.stand(0.3)
+
         self._doorway_return = None
         self._doorway_heading = None
 

@@ -94,11 +94,15 @@ def free_space(
     return FreeSpace(bearings=bearings, ranges=ranges)
 
 
-def depth_at(depth: np.ndarray, u: float, v: float, patch: int = 5) -> float | None:
-    """Median depth in a small patch around a pixel.
+def depth_at(
+    depth: np.ndarray, u: float, v: float, patch: int = 5, percentile: float = 50.0
+) -> float | None:
+    """Depth in a small patch around a pixel.
 
-    A single pixel lands on an edge often enough to matter; the median of a patch is what
-    makes "how far is that door" answerable in practice.
+    A single pixel lands on an edge often enough to matter, so this samples a patch. The
+    percentile chooses what to take from it: 50 (the median) is right for a surface seen
+    face-on, but for something seen at an angle the patch straddles both the target and
+    whatever is in front of it, and the median then reports the nearer thing.
     """
     h, w = depth.shape
     x, y = int(round(u)), int(round(v))
@@ -109,7 +113,7 @@ def depth_at(depth: np.ndarray, u: float, v: float, patch: int = 5) -> float | N
     valid = window[(window > MIN_VALID_M) & np.isfinite(window)]
     if valid.size == 0:
         return None
-    return float(np.median(valid))
+    return float(np.percentile(valid, percentile))
 
 
 def target_offset(
@@ -123,11 +127,20 @@ def target_offset(
 
     This is the bridge from vision to motion: a vision model says "the door is here in the
     image", and this turns that into something `step(vx, vy, wz)` can chase.
+
+    MuJoCo's depth buffer holds distance along the view axis, not distance to the point. For
+    anything off-centre those differ by 1/cos(bearing), and at 45 degrees that is a factor of
+    1.4: three doors 4.0, 5.66 and 5.66 m away all read as 3.90 m. Dividing by cos recovers
+    the true range, which is what makes a world-coordinate track land on the right door.
+
+    free_space already did this for its clearance columns; target_offset did not, and that was
+    the whole reason tracking a door by position kept locking onto its neighbour.
     """
     w, h = image_size
-    distance = depth_at(depth, u, v)
-    if distance is None:
+    axial = depth_at(depth, u, v, patch=9, percentile=70.0)
+    if axial is None:
         return None
     focal = (h / 2.0) / math.tan(math.radians(fovy_deg) / 2.0)
     bearing = -math.atan2(u - w / 2.0, focal)
+    distance = axial / max(math.cos(bearing), 1e-3)
     return bearing, distance
