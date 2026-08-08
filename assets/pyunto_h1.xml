@@ -96,6 +96,20 @@
           -->
           <camera name="head_cam" pos="0.075 0 0.01" xyaxes="0 -1 0 0 0 1" fovy="75"/>
           <site name="head_cam_site" pos="0.075 0 0.01" size="0.008" rgba="1 0 0 0.6"/>
+          <!--
+            Two more head cameras, each turned 60 degrees out. With a 90-degree field of view
+            apiece they overlap head_cam and between them cover about 180 degrees, which is
+            what it takes to notice a wall the robot is walking alongside: a forward camera
+            sees 75 degrees, and the wall being scraped is at 90.
+
+            Mounted on the head rather than the torso so turning to look also turns them, and
+            so that anything behind can be checked by turning the head rather than by adding
+            more cameras.
+
+            Used for depth only. They exist to measure gaps, not to recognise anything.
+          -->
+          <camera name="look_left" pos="0.04 0.05 0.01" xyaxes="0.866 -0.5 0 0 0 1" fovy="90"/>
+          <camera name="look_right" pos="0.04 -0.05 0.01" xyaxes="-0.866 -0.5 0 0 0 1" fovy="90"/>
         </body>
 
         <!-- ================= ARMS ================= -->

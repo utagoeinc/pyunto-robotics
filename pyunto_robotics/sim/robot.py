@@ -155,6 +155,22 @@ class Robot:
 
         return Observation(rgb=rgb, depth=depth, position=self.position, yaw=self.yaw)
 
+    def side_clearance(self) -> tuple[float, float]:
+        """How much room there is to the left and right, in metres.
+
+        The forward camera cannot answer this. A wall the robot is walking alongside sits at
+        90 degrees, outside a 75-degree field of view, so the clearance ahead stays comfortable
+        the whole way down a corridor while the robot scrapes along the side of it. Two more
+        head cameras turned 60 degrees out, 90 degrees each, cover the rest.
+
+        Reports the 5th percentile rather than the minimum: the very closest pixel is often the
+        robot's own shoulder at the edge of frame, and a percentile ignores that without
+        needing to know the geometry.
+        """
+        left = self.look("look_left").depth
+        right = self.look("look_right").depth
+        return float(np.percentile(left, 5)), float(np.percentile(right, 5))
+
     def camera_fovy(self, camera: str = "head_cam") -> float:
         """Vertical field of view in degrees.
 

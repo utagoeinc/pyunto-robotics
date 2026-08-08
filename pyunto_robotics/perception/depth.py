@@ -94,6 +94,27 @@ def free_space(
     return FreeSpace(bearings=bearings, ranges=ranges)
 
 
+def nearest_off_axis(
+    space: "FreeSpace", exclude_bearing: float | None = None, exclude_width: float = 0.30
+) -> tuple[float, float] | None:
+    """The closest thing that is not the target, as (bearing, range).
+
+    Obstacle checks that only look straight ahead miss the case that actually hurts: brushing
+    along a wall while walking past it. The clearance dead ahead stays comfortable the whole
+    time, so nothing objects, and the robot arrives having scraped the length of the corridor.
+
+    `exclude_bearing` blanks out the direction the robot is deliberately heading for, so the
+    door it is about to touch does not read as something to avoid.
+    """
+    mask = np.ones(space.bearings.shape, dtype=bool)
+    if exclude_bearing is not None:
+        mask &= np.abs(space.bearings - exclude_bearing) > exclude_width
+    if not mask.any():
+        return None
+    idx = int(np.argmin(np.where(mask, space.ranges, np.inf)))
+    return float(space.bearings[idx]), float(space.ranges[idx])
+
+
 def depth_at(
     depth: np.ndarray, u: float, v: float, patch: int = 5, percentile: float = 50.0
 ) -> float | None:

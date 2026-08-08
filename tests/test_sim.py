@@ -225,3 +225,34 @@ def test_doors_swing_both_ways(robot):
     low, high = robot.model.jnt_range[joint]
     assert low < -1.0, "door cannot open toward the corridor, so it can never be pulled"
     assert high > 1.0, "door cannot open into the room"
+
+
+def test_side_cameras_see_what_the_front_one_cannot(robot):
+    """A wall the robot walks alongside sits at 90 degrees, outside a 75-degree front view.
+
+    This is the whole reason the side cameras exist: without them, scraping along a corridor
+    reads as perfectly clear ahead.
+    """
+    robot.reset("start")
+    # Stand close to the north wall (y=1.0), facing west along it.
+    robot.data.qpos[0] = -2.0
+    robot.data.qpos[1] = 0.75
+    heading = math.pi
+    robot.data.qpos[3:7] = [math.cos(heading / 2), 0, 0, math.sin(heading / 2)]
+    mujoco.mj_forward(robot.model, robot.data)
+    robot.gait.reset(robot.model, robot.data)
+    robot.stand(0.3)
+
+    left, right = robot.side_clearance()
+
+    # Facing west with the wall to the north, the wall is on the robot's right.
+    assert right < 0.8, f"side camera did not see the wall it is beside (right={right:.2f} m)"
+    assert left > right, "the open side should read further than the wall side"
+
+
+def test_side_clearance_is_symmetric_in_open_space(robot):
+    """Standing in the middle of the lobby, both sides should read similar."""
+    robot.reset("lobby")
+    robot.stand(0.3)
+    left, right = robot.side_clearance()
+    assert abs(left - right) < 1.0, f"lopsided in open space: {left:.2f} vs {right:.2f}"

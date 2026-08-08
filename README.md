@@ -223,6 +223,25 @@ degrees across a 0.98 m gap does not fit through it.
 is not yet dependable. The tracked position is dropped during a long detour and the robot
 re-acquires a nearer door. The test asserts the choice rather than the arrival.
 
+### Seeing sideways
+
+The robot has three head cameras, not one: `head_cam` forward, plus `look_left` and
+`look_right` turned 60 degrees out with 90-degree fields of view. Between them they cover about
+180 degrees. Anything behind is checked by turning the head.
+
+The forward camera alone cannot notice what the robot is brushing against. A wall it is walking
+alongside sits at 90 degrees, outside a 75-degree view, so the clearance ahead stays comfortable
+the whole way down a corridor while the robot scrapes along the side of it -- measured 568 steps
+of wall contact across three errands. `Robot.side_clearance()` reads the two side cameras and
+answers "how much room is there either side", which the front camera cannot.
+
+**Steering on it is unfinished.** A keep-off term that turns away from whichever side is closest
+does work -- with a 0.85 m personal space, wall contact drops from 568 steps to 115 -- but the
+wider berth changes the route enough that the robot loses its target and opens the middle door
+when asked for the left one (3/3 correct down to 2/3). At 0.55 m it holds 3/3 but only trims
+contact to 513, and it fights the robot at doorways, which are narrow by nature. The cameras and
+the measurement are committed; the steering that uses them is not.
+
 ### Landmarks: knowing which door is which
 
 `perception/landmarks.py` gives each door an identity. Every sighting is matched against what
