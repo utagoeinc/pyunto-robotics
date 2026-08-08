@@ -171,6 +171,22 @@ class Robot:
         right = self.look("look_right").depth
         return float(np.percentile(left, 5)), float(np.percentile(right, 5))
 
+    def is_touching(self, keyword: str) -> bool:
+        """Whether the robot is in contact with scenery whose geom name contains `keyword`.
+
+        The cameras answer "how much room is there", which is a different question: a doorway
+        the robot is squarely inside reads as tight whether or not it is actually caught on the
+        frame. Contact is a physical fact, and the simulator already knows it. A real robot
+        would read this from bumper or joint-torque sensing, which is why it belongs here with
+        the hardware rather than in the navigator.
+        """
+        for i in range(self.data.ncon):
+            for geom in (self.data.contact.geom1[i], self.data.contact.geom2[i]):
+                name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom) or ""
+                if keyword in name:
+                    return True
+        return False
+
     def camera_fovy(self, camera: str = "head_cam") -> float:
         """Vertical field of view in degrees.
 

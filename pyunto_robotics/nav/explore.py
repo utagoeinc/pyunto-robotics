@@ -134,6 +134,16 @@ class MaplessNavigator:
 
     # -- perception ---------------------------------------------------------------
 
+    def observe_landmarks(self, target: str) -> int:
+        """Take one frame and fold what it sees into the map. Returns the map's count.
+
+        Exists so a caller that is looking around rather than travelling -- counting the doors
+        the user said were there, say -- can build up the map without driving the whole
+        navigation loop.
+        """
+        self._observe(target)
+        return len(self.landmarks.of_label(_canonical_label(target)))
+
     def _observe(
         self, target: str
     ) -> tuple[list[Detection], FreeSpace, float, tuple[int, int], np.ndarray]:

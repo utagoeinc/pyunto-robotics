@@ -28,6 +28,10 @@ log = logging.getLogger(__name__)
 # Ranges became accurate once the depth buffer's axial distance was converted to true range,
 # so the robot now stops where it actually intended to -- which turned out to be a couple of
 # centimetres too far back to get through. 0.55 puts the hand on the leaf again.
+
+# Half the clear width of a doorway, in metres. Used to aim for the side of an opening the
+# door does not swing across.
+DOORWAY_HALF_WIDTH_M = 0.55
 PUSH_STANDOFF_M = 0.55
 
 
@@ -58,6 +62,9 @@ class Skills:
         self._doorway_return: np.ndarray | None = None
         # Heading the robot had when it went through, so leaving can line up on the reverse.
         self._doorway_heading: float | None = None
+        # Which way to turn next time a shoulder catches on a door frame; flips each attempt so
+        # repeated snags do not walk the robot along the frame into the opposite jamb.
+        self._loose_nudge = 1.0
         # Where the robot was when it was given its instructions. 「最初にいる位置からみて」 --
         # "from where you are standing now" -- makes that the frame of reference for left and
         # right, and it is also the one spot with a clear view of every door.
@@ -270,16 +277,23 @@ class Skills:
         """
         seen = self._count_doors()
         if seen >= expect:
+            log.info("counted %d %ss, as stated; choosing between them", seen, target)
             return seen
 
         log.info("expected %d %ss in view, can see %d; repositioning", expect, target, seen)
-        for _ in range(tries):
+        for attempt in range(tries):
             self.return_home()
             self._straighten_waist()
-            self.robot.stand(0.3)
+            # Settle before counting. The count is taken from one frame, and a frame grabbed
+            # while the body is still rocking from the walk clips a door at the edge of view,
+            # so the robot concludes it can only see two and gives up on a scene where all
+            # three are plainly there.
+            self.robot.stand(0.8)
             seen = self._count_doors()
+            log.info("look %d: counted %d %ss", attempt + 1, seen, target)
             if seen >= expect:
                 return seen
+
         return seen
 
     def open_door(
@@ -397,8 +411,10 @@ class Skills:
         # manoeuvre back out.
         # Walk a fixed distance first to clear the doorway itself -- the swinging leaf keeps
         # the measured clearance low, so checking it too early stops the robot in the opening.
-        for _ in range(90):
-            self.robot.step(vx=0.45)
+        # Walking blind, though, means a shoulder that catches the jamb just grinds there for
+        # the rest of the push, which is what wedged the robot half in the opening. So drive
+        # forward but back off and re-angle whenever it actually snags.
+        self._push_through(90)
         # Then continue only while there is room, so it does not end up wedged in a corner.
         for _ in range(75):
             if self._clearance_ahead() < 0.9:
@@ -647,6 +663,17 @@ class Skills:
 
         target = self._doorway_return.copy()
 
+        # Aim for the far side of the opening from the hinge. A door pushed to 109 degrees does
+        # not vanish -- the leaf stands square across the jamb it is hinged on, so the half of
+        # the opening nearest the hinge is blocked by its own door. Retracing the way in leads
+        # straight into that half: measured the robot grinding at x=-0.40, ten centimetres from
+        # a hinge at x=-0.50, making a centimetre of progress per attempt for 398 attempts. The
+        # other half of the same doorway is clear.
+        hinge = self._nearest_hinge_x()
+        if hinge is not None:
+            away = 1.0 if target[0] >= hinge else -1.0
+            target[0] = hinge + away * DOORWAY_HALF_WIDTH_M * 0.75
+
         # 1. Face back toward the corridor.
         delta = target - self.robot.position[:2]
         heading = math.atan2(delta[1], delta[0])
@@ -665,7 +692,8 @@ class Skills:
 
         # 3. Drive to the remembered pose. Deliberately not re-planning: the reactive
         #    controller cannot navigate a doorway, and the route is only a metre or two.
-        for _ in range(400):
+        squared_up = 0
+        for _ in range(600):
             delta = target - self.robot.position[:2]
             distance = float(np.linalg.norm(delta))
             # Only stop early once we are actually out. Reaching the remembered pose is not the
@@ -675,6 +703,30 @@ class Skills:
                 break
             desired = math.atan2(delta[1], delta[0])
             error = (desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
+
+            # Square up before moving when badly misaligned. Steering while walking is fine for
+            # small errors, but in a doorway a large one never converges: the forward component
+            # carries the robot sideways across the opening faster than the turn corrects it,
+            # so it creeps along the threshold instead of through it. Measured stalled at
+            # 0.18 m short of the corridor, facing 65 degrees off, for the full step budget --
+            # and simply turning to face the way out cleared it in 40 steps.
+            if abs(error) > 0.5:
+                # Square up on the way *out*, not on the remembered spot. The two differ: the
+                # return pose sits a little to one side, and turning to face it can point the
+                # robot straight at the leaf. The reverse of the heading it came in on always
+                # points through the opening, which is the one direction guaranteed to be a way
+                # out of the room.
+                exit_heading = desired
+                if self._doorway_heading is not None:
+                    exit_heading = self._doorway_heading + math.pi
+                # Cap the corrections. Each one is expensive, and needing many of them means
+                # the heading is not the problem -- carrying on walking is better than turning
+                # forever a few centimetres from the corridor.
+                if squared_up < 4:
+                    squared_up += 1
+                    self._turn_to(exit_heading, max_steps=60)
+                    continue
+
             turn = float(np.clip(error * 1.4, -0.9, 0.9))
             self.robot.step(0.35 * max(0.4, 1.0 - abs(turn)), 0.0, turn)
 
@@ -684,6 +736,11 @@ class Skills:
             # against it and keep walking; the leaf gives way and the robot goes through.
             if self._touching_door():
                 self._hold_door_open()
+            elif self.robot.is_touching("wall"):
+                # Caught on the frame rather than the leaf. Holding the door open does nothing
+                # for this -- the obstruction is the jamb against a shoulder -- so back off and
+                # come at the gap from a slightly different angle, as when pushing in.
+                self._work_loose()
 
         # Get clear of the leaf before finishing. Ending the manoeuvre still in contact leaves
         # whatever runs next -- return_home, another door -- starting from 0.17 m of clearance
@@ -755,6 +812,28 @@ class Skills:
             f"The door did not swing shut ({after:.0f} degrees still open).",
             {"angle_before": before, "angle": after},
         )
+
+    def _nearest_hinge_x(self) -> float | None:
+        """World x of the hinge of whichever door is nearest, or None if there is no door.
+
+        Read from the simulator. On a real robot this is what a glance at the door tells you --
+        which edge it is attached to, and therefore which way it swings clear.
+        """
+        import mujoco  # noqa: PLC0415 - only needed for this introspection
+
+        best_x: float | None = None
+        best_distance = math.inf
+        here = self.robot.position[:2]
+        for name in ("door_workspace", "door_meeting", "door_pantry"):
+            bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, name)
+            if bid < 0:
+                continue
+            hinge = self.robot.data.xpos[bid][:2]
+            distance = float(np.linalg.norm(hinge - here))
+            if distance < best_distance:
+                best_distance = distance
+                best_x = float(self.robot.model.body_pos[bid][0])
+        return best_x
 
     def _hold_door_open(self, side: str = "r", steps: int = 90) -> None:
         """Brace an arm against the leaf and push on through.
@@ -893,6 +972,40 @@ class Skills:
 
         self.robot.stand(0.2)
         return best_heading
+
+    def _push_through(self, steps: int, speed: float = 0.45) -> None:
+        """Drive forward through a doorway, working loose if the body catches on the frame.
+
+        A doorway is barely wider than the shoulders, so arriving a few degrees off square puts
+        one shoulder into the jamb. Pushing harder does not help -- the contact is sideways, and
+        the robot simply grinds against the frame until the step budget runs out, stuck half in
+        the opening with the door resting on its back.
+
+        Backing off a little and turning slightly is what a person does here, and it works for
+        the same reason: reversing breaks the contact, and the small turn means the next attempt
+        presents a different angle. Alternating the turn direction matters -- always turning the
+        same way just walks the robot along the wall into the other side of the frame.
+        """
+        taken = 0
+        while taken < steps:
+            if self.robot.is_touching("wall") or self.robot.is_touching("door"):
+                self._work_loose()
+                taken += 20
+                continue
+            self.robot.step(vx=speed)
+            taken += 1
+
+    def _work_loose(self) -> None:
+        """Back off a caught shoulder and re-aim before trying the gap again.
+
+        Alternates which way it turns. Always turning the same way just walks the robot along
+        the frame into the other side of it, so the direction flips on each attempt.
+        """
+        for _ in range(12):
+            self.robot.step(vx=-0.3)
+        for _ in range(8):
+            self.robot.step(wz=self._loose_nudge * 0.5)
+        self._loose_nudge = -self._loose_nudge
 
     def _clearance_ahead(self) -> float:
         """Distance to whatever is directly in front, from the current depth frame."""
