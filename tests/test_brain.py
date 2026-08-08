@@ -360,3 +360,60 @@ def test_return_home_goes_back_to_the_start():
         assert float(np.linalg.norm(robot.position[:2] - home)) < 1.0
     finally:
         robot.close()
+
+
+# -- stated counts --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message,expect",
+    [
+        ("三つ見えるドアのうち、右のドアを開けて", 3),
+        ("of the three doors, open the left one", 3),
+        ("二つあるドアの左を開けて", 2),
+        ("右のドアを開けて", None),  # no count stated
+        ("ドアを開けて", None),  # no qualifier, so a count would mean nothing
+    ],
+)
+def test_stated_count_is_carried_into_the_plan(planner, message, expect):
+    """「三つ見えるドアのうち」 says how many to choose between, and that is checkable."""
+    plan = planner.plan(message)
+    assert plan.steps
+    assert plan.steps[0].expect == expect
+
+
+def test_parse_plan_reads_expect_from_the_model():
+    steps = parse_plan('[{"action": "open", "argument": "door", "where": "left", "expect": 3}]')
+    assert steps == [Step("open", "door", "left", 3)]
+
+
+@pytest.mark.slow
+def test_declines_when_it_cannot_see_the_stated_number():
+    """Told there are three but able to see one, the robot should say so rather than guess.
+
+    Opening the wrong door confidently is worse than admitting the ambiguity.
+    """
+    robot = Robot("office.xml", keyframe="start")  # right by the doors; only one in frame
+    try:
+        skills = Skills(robot, ColorGrounder())
+        assert skills._count_doors() < 3, "test needs a spot where all three are not visible"
+
+        result = skills.run("open", "door", "left", 3)
+
+        assert not result.ok
+        assert "only see" in result.message
+        assert result.data["expected"] == 3
+    finally:
+        robot.close()
+
+
+@pytest.mark.slow
+def test_acts_when_the_stated_number_is_visible():
+    robot = Robot("office.xml", keyframe="lobby")  # all three in frame
+    try:
+        skills = Skills(robot, ColorGrounder())
+        result = skills.run("open", "door", "right", 3)
+        assert result.ok, result.message
+        assert abs(robot.position[0] - 4.0) < 1.5
+    finally:
+        robot.close()

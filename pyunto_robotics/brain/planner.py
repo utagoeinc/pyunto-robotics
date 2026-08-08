@@ -46,11 +46,18 @@ class Step:
     action: str
     argument: str | None = None
     where: str | None = None  # "left" | "right" | "middle" | "nearest" | "far"
+    # How many of the object the user said were visible. 「三つ見えるドアのうち、右の」 tells the
+    # robot both which door to pick and how many it should be picking from -- and the second
+    # half is worth acting on, because "leftmost of three" and "leftmost of one" name different
+    # doors. Without it the robot happily resolves a qualifier against whatever it can see.
+    expect: int | None = None
 
     def __str__(self) -> str:
         target = self.argument or ""
         if self.where:
             target = f"{self.where} {target}".strip()
+        if self.expect:
+            target = f"{target} of {self.expect}"
         return f"{self.action}({target})"
 
 
@@ -114,6 +121,31 @@ _QUALIFIERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("far", ("furthest", "farthest", "far", "at the end", "一番奥", "奥の", "奥")),
     ("nearest", ("nearest", "closest", "this one", "一番近い", "手前の", "手前")),
 )
+
+# Counts a user might state, in the forms they actually write them.
+_COUNTS: dict[str, int] = {
+    "1": 1, "one": 1, "一": 1, "一つ": 1, "1つ": 1, "ひとつ": 1,
+    "2": 2, "two": 2, "二": 2, "二つ": 2, "2つ": 2, "ふたつ": 2,
+    "3": 3, "three": 3, "三": 3, "三つ": 3, "3つ": 3, "みっつ": 3,
+    "4": 4, "four": 4, "四": 4, "四つ": 4, "4つ": 4, "よっつ": 4,
+    "5": 5, "five": 5, "五": 5, "五つ": 5, "5つ": 5, "いつつ": 5,
+}
+
+
+def stated_count(message: str) -> int | None:
+    """How many of the thing the user said were there, if they said.
+
+    「三つ見えるドアのうち」 is not decoration: it tells the robot how many doors it should be
+    choosing between, which is what makes "the leftmost" mean a particular door rather than
+    the leftmost of however many happen to be in frame.
+    """
+    text = message.lower()
+    # Longest first so 「三つ」 beats 「三」 and "three" beats "3" inside "3つ".
+    for word in sorted(_COUNTS, key=len, reverse=True):
+        if word in text:
+            return _COUNTS[word]
+    return None
+
 
 _GREETINGS = ("hello", "hi", "hey", "こんにちは", "はじめまして", "やあ", "おはよう", "こんばんは")
 
@@ -180,24 +212,27 @@ class RulePlanner:
         verb = self._verb(text)
         obj = self._object(text)
         where = self._qualifier(text)
+        # Only meaningful alongside a qualifier: "three doors" on its own says nothing about
+        # which one is wanted.
+        expect = stated_count(message) if where else None
 
         if verb == "open":
             # "open" with no object named is unambiguous in this office: it means a door.
-            return Plan([Step("open", obj or "door", where)])
+            return Plan([Step("open", obj or "door", where, expect)])
         if verb in ("goto", "face", "point_at"):
             if obj is None:
                 # Do not silently substitute a door. "go to the purple giraffe" has a clear
                 # target that simply is not something the robot knows, and pretending it said
                 # "door" would send it walking off on the wrong errand.
                 target = _unknown_target(text) or "door"
-                return Plan([Step(verb, target, where)])
-            return Plan([Step(verb, obj, where)])
+                return Plan([Step(verb, target, where, expect)])
+            return Plan([Step(verb, obj, where, expect)])
         if verb in ("look_around", "describe", "where", "leave", "close", "home"):
             return Plan([Step(verb)])
 
         # No verb, but a nameable object -- "the meeting room door" almost certainly means go.
         if obj:
-            return Plan([Step("goto", obj, where)])
+            return Plan([Step("goto", obj, where, expect)])
 
         if any(g in text for g in _GREETINGS):
             return Plan([], reply="Hello. Tell me where to go or what to open.")
@@ -266,6 +301,9 @@ Each step may also carry "where" to pick between identical objects. Use it whene
 says which one they mean:
   "left" | "right" | "middle" | "nearest" | "far"
 
+If the user says how many there are -- 「三つ見えるドアのうち」, "of the three doors" -- put that
+number in "expect". It tells the robot how many it should be choosing between.
+
 Rules:
 - Only ever use the object names listed above. There is no "corridor" or "room" object; a room
   is entered by opening its door, so "go into the left room" is {{"action": "open",
@@ -282,7 +320,14 @@ Rules:
 The user said: "{message}"
 
 Reply with ONLY a JSON array of steps, no other text. Examples:
+
+"open the right door"
 [{{"action": "open", "argument": "door", "where": "right"}}]
+
+"of the three doors you can see, open the right one"  (note the count)
+[{{"action": "open", "argument": "door", "where": "right", "expect": 3}}]
+
+"open the right door, then go into the leftmost room"
 [{{"action": "open", "argument": "door", "where": "right"}}, {{"action": "leave"}}, \
 {{"action": "home"}}, {{"action": "open", "argument": "door", "where": "left"}}]
 
@@ -376,6 +421,11 @@ def parse_plan(text: str) -> list[Step]:
             log.warning("planner emitted unknown action %r, skipping", action)
             continue
         argument = entry.get("argument")
+        expect = entry.get("expect") or entry.get("count") or entry.get("of")
+        try:
+            expect = int(expect) if expect else None
+        except (TypeError, ValueError):
+            expect = None
         # Accept a spatial qualifier either as its own field or folded into the argument, since
         # models do both no matter how the prompt asks.
         where = entry.get("where") or entry.get("which") or entry.get("position")
@@ -384,5 +434,5 @@ def parse_plan(text: str) -> list[Step]:
             where = None
         if where is None and argument:
             where = RulePlanner._qualifier(str(argument).lower())
-        steps.append(Step(action, str(argument) if argument else None, where))
+        steps.append(Step(action, str(argument) if argument else None, where, expect))
     return steps

@@ -66,11 +66,23 @@ class Skills:
 
     # -- navigation ---------------------------------------------------------------
 
-    def goto(self, target: str, where: str | None = None) -> SkillResult:
+    def goto(
+        self, target: str, where: str | None = None, expect: int | None = None
+    ) -> SkillResult:
         """Walk to something the camera can find.
 
         `where` picks between identical candidates: "the door on the right".
         """
+        if where in ("left", "right", "middle") and expect:
+            seen = self._ensure_expected_in_view(target, expect)
+            if seen < expect:
+                return SkillResult(
+                    False,
+                    f"You said there were {expect} {target}s, but I can only see {seen} "
+                    f"from here, so I am not sure which one you mean.",
+                    {"expected": expect, "seen": seen},
+                )
+
         result = self.nav.goto(target, where=where)
         return SkillResult(
             ok=result.success,
@@ -247,8 +259,32 @@ class Skills:
                 distinct.append(det.x)
         return len(distinct)
 
+    def _ensure_expected_in_view(self, target: str, expect: int, tries: int = 3) -> int:
+        """Get to somewhere the stated number of objects is actually visible.
+
+        The user said how many there are -- 「三つ見えるドアのうち」 -- and that is checkable.
+        If only one door is in frame, "the leftmost" resolves against that one and the robot
+        confidently opens the wrong thing. Better to go and look properly first.
+
+        Returns how many ended up visible, which may still be short.
+        """
+        seen = self._count_doors()
+        if seen >= expect:
+            return seen
+
+        log.info("expected %d %ss in view, can see %d; repositioning", expect, target, seen)
+        for _ in range(tries):
+            self.return_home()
+            self._straighten_waist()
+            self.robot.stand(0.3)
+            seen = self._count_doors()
+            if seen >= expect:
+                return seen
+        return seen
+
     def open_door(
-        self, target: str = "door", side: str = "r", where: str | None = None
+        self, target: str = "door", side: str = "r", where: str | None = None,
+        expect: int | None = None,
     ) -> SkillResult:
         """Walk up to a door and push it open.
 
@@ -259,10 +295,22 @@ class Skills:
         The sequence: get close, square up, reach out at handle height, walk into the door so
         the arm loads it, then check the hinge actually moved.
         """
-        # A spatial qualifier is anchored to where the user was describing from, which is
-        # where the robot was standing when it was told. Go back there before choosing:
-        # from beside a doorway only one door is in frame, so "the left one" would just mean
-        # whichever it happens to be next to.
+        # A spatial qualifier is anchored to where the user was describing from, which is where
+        # the robot was standing when it was told. Go back there before choosing: from beside a
+        # doorway only one door is in frame, so "the left one" would mean whichever it is next
+        # to. When the user also said how many there are, check that too and refuse rather than
+        # guess -- opening the wrong door confidently is worse than saying you cannot tell.
+        if where in ("left", "right", "middle"):
+            wanted = expect or 3
+            seen = self._ensure_expected_in_view(target, wanted)
+            if seen < wanted:
+                return SkillResult(
+                    False,
+                    f"You said there were {wanted} {target}s, but I can only see {seen} from "
+                    f"here, so I am not sure which one you mean.",
+                    {"expected": wanted, "seen": seen},
+                )
+
         # Stop within arm's length. The arm reaches ~0.43 m in front of the base at handle
         # height (measured by sweeping the shoulder/elbow range), so the default 0.85 m
         # stand-off leaves the hand half a metre short of the door.
@@ -959,17 +1007,21 @@ class Skills:
         return argument
 
     def run(
-        self, action: str, argument: str | None = None, where: str | None = None
+        self,
+        action: str,
+        argument: str | None = None,
+        where: str | None = None,
+        expect: int | None = None,
     ) -> SkillResult:
         """Execute one planner-issued action."""
         if action in ("goto", "face", "open", "open_door", "point_at"):
             argument = self._normalise_target(argument)
         handlers = {
-            "goto": lambda: self.goto(argument or "door", where),
+            "goto": lambda: self.goto(argument or "door", where, expect),
             "face": lambda: self.face(argument or "door", where),
-            "open": lambda: self.open_door(argument or "door", where=where),
+            "open": lambda: self.open_door(argument or "door", where=where, expect=expect),
             "pull": lambda: self.pull_door(argument or "door"),
-            "open_door": lambda: self.open_door(argument or "door", where=where),
+            "open_door": lambda: self.open_door(argument or "door", where=where, expect=expect),
             "point_at": lambda: self.point_at(argument or "door", where=where),
             "leave": lambda: self.leave_room(),
             "close": lambda: self.close_door(),

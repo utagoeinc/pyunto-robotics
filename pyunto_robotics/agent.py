@@ -80,7 +80,7 @@ class RobotAgent:
         # Cap the plan length: a model that emits twenty steps has misunderstood, and running
         # them would strand the robot somewhere unexpected.
         for step in plan.steps[: self.max_steps_per_message]:
-            result = self.skills.run(step.action, step.argument, step.where)
+            result = self.skills.run(step.action, step.argument, step.where, step.expect)
             messages.append(result.message)
             if not result.ok:
                 ok = False

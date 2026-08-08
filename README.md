@@ -223,6 +223,20 @@ degrees across a 0.98 m gap does not fit through it.
 is not yet dependable. The tracked position is dropped during a long detour and the robot
 re-acquires a nearer door. The test asserts the choice rather than the arrival.
 
+### Checking what the user said before acting on it
+
+「最初にいる位置からみて、三つ見えるドアのうち、右のドアを…」 states a count, and the count is
+checkable. It now reaches the robot: the planner puts it on the step as `expect`, and before
+resolving any left/right the robot confirms it can actually see that many. If it cannot, it
+repositions; if it still cannot, it says so rather than guessing:
+
+> You said there were 3 doors, but I can only see 1 from here, so I am not sure which one you
+> mean.
+
+That matters because "the leftmost" resolved against one visible door is not a smaller answer,
+it is a wrong one -- the robot would confidently open something the user did not ask for.
+Gemma 4 emits the count once the prompt shows it an example.
+
 ### Seeing sideways
 
 The robot has three head cameras, not one: `head_cam` forward, plus `look_left` and
