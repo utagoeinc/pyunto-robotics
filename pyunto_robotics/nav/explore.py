@@ -29,9 +29,17 @@ import numpy as np
 
 from ..perception.depth import FreeSpace, free_space, target_offset
 from ..perception.grounding import Detection, Grounder
+from ..perception.landmarks import LandmarkMap
 from ..sim.robot import Robot
 
 log = logging.getLogger(__name__)
+
+
+def _canonical_label(target: str) -> str:
+    """Normalise a described target to the name landmarks are filed under."""
+    from ..perception.grounding import _canonical  # noqa: PLC0415 - avoids a circular import
+
+    return _canonical(target) or target.lower().strip()
 
 # How far a tracked target may appear to move between frames and still count as the same
 # object, in metres. Tracking is done in world coordinates rather than by bearing: a target's
@@ -112,6 +120,10 @@ class MaplessNavigator:
     ):
         self.robot = robot
         self.grounder = grounder
+        # Which door is which, accumulated as the robot looks around. Bearing alone cannot
+        # express "that one, not its neighbour"; a landmark keeps its identity however the
+        # view changes, and its averaged position is far steadier than any single frame.
+        self.landmarks = LandmarkMap()
         self.arrive_distance = arrive_distance
         self.cruise_speed = cruise_speed
         self.turn_gain = turn_gain
@@ -135,6 +147,18 @@ class MaplessNavigator:
         height, width = obs.depth.shape
         detections = self.grounder.find(obs.rgb, target)
         space = free_space(obs.depth, fovy)
+
+        # Fold what is visible into the landmark map as we go, so the robot builds up an
+        # identity for each door instead of re-deciding from scratch every frame.
+        positions = []
+        for det in detections:
+            u, v = det.pixel(width, height)
+            offset = target_offset(obs.depth, u, v, fovy, (width, height))
+            if offset is not None:
+                positions.append(self._world_position(*offset))
+        if positions:
+            self.landmarks.observe_all(_canonical_label(target), positions)
+
         return detections, space, fovy, (width, height), obs.depth
 
     def _world_position(self, bearing: float, distance: float) -> np.ndarray:

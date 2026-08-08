@@ -223,6 +223,32 @@ degrees across a 0.98 m gap does not fit through it.
 is not yet dependable. The tracked position is dropped during a long detour and the robot
 re-acquires a nearer door. The test asserts the choice rather than the arrival.
 
+### Landmarks: knowing which door is which
+
+`perception/landmarks.py` gives each door an identity. Every sighting is matched against what
+has been seen before -- by world position, the one thing about a door that does not change --
+and either updates an existing landmark or starts a new one. A landmark's position is the
+average of its own sightings, which is far steadier than any single frame: individual estimates
+are 0.1-0.34 m out and the error swings with viewpoint.
+
+This is not SLAM and not a prior map. Nothing is loaded from disk, nothing is built ahead of
+time, and the robot still cannot navigate to a door it has not seen. It is the smallest amount
+of memory that makes "that one, not the other one" expressible.
+
+Three filters keep it honest, each answering a failure that actually happened:
+
+- **Three sightings before a landmark counts.** A bad range reading lands far enough from a
+  real door to start its own landmark; those are usually seen once or twice.
+- **Detections merged within a frame, and landmarks consolidated across frames.** Close up,
+  colour matching splits one door into two blobs at its edges -- measured one door held as two
+  entries 0.89 m apart, both with 160-odd sightings.
+- **Landmarks that break the line the others form are dropped.** Doors sit along a wall; a
+  phantom from an edge-on range reading does not. The line is refitted without its worst
+  outlier first, because a single phantom drags the fit far enough to push a real door out
+  (measured a true door at 0.83 against a 0.7 threshold while the phantom sat at 1.56).
+
+Walking the corridor now produces three landmarks within 0.3 m of the real doorways.
+
 ### Why the robot still walks near the wall
 
 It heads straight at its target from first sighting, so a door across the office is approached
@@ -238,9 +264,14 @@ frames. Picking a named door drops from 3/3 to 1/3. Gains from 0.5 down to 0, ga
 down to 0.5 m, and smoothing the anchor were all tried; none separated the two effects.
 
 Hugging the wall is, perversely, what makes the current tracking reliable: it narrows the view
-so only the target door is in it. Fixing the walking properly means giving the tracker
-something stronger than a noisy point estimate to hold onto -- recognising a specific door
-rather than a position -- which is a perception change, not a steering one.
+so only the target door is in it.
+
+The landmark map was built to break that dependency -- a stable identity to hold onto instead
+of a noisy point -- and it does produce good landmarks. Switching the approach loop over to
+track by landmark id did not work: the arrival test started firing on the wrong detection
+almost immediately (reporting "arrived at 0.85 m" while the target was 5.4 m away), and the
+robot stopped in the lobby. The map is committed and used to accumulate knowledge; the
+approach loop still tracks by position. Connecting the two is unfinished work.
 
 ## Notes on the Pyunto backend
 
