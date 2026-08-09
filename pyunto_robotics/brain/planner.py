@@ -335,6 +335,16 @@ If the request is just conversation, reply with:
 [{{"action": "report", "argument": "<your reply>"}}]"""
 
 
+_CHECK_PROMPT = """You are a robot standing in front of one of several doors.
+
+Bearings to the doors you can see, from your own point of view. Positive is to your LEFT,
+negative is to your RIGHT, and 0 is straight ahead: {bearings}
+
+You were told to go to the {where} door. The door you are facing is the one nearest 0 degrees.
+
+Is the door you are facing the {where} one? Answer with a single word, yes or no."""
+
+
 class LLMPlanner:
     """Plans with a local Gemma 4 model, falling back to rules when it cannot."""
 
@@ -370,6 +380,44 @@ class LLMPlanner:
         log.info("loading planner model %s (first run downloads weights)", self.model_id)
         self._model, self._tokenizer = load(self.model_id)
         self._config = load_config(self.model_id)
+
+    def check_choice(self, where: str, bearings_deg: list[float]) -> bool | None:
+        """Ask the model whether the door being faced is the one that was asked for.
+
+        Called at a standstill, once, before the robot commits to opening something -- which is
+        the moment a second opinion is worth its latency. The geometry is already decided by
+        the time this runs; what the model adds is a check on the reasoning, in the same terms
+        the instruction used.
+
+        Returns None if the model cannot be reached or does not answer clearly, which leaves
+        the caller's own geometric test in charge.
+        """
+        if len(bearings_deg) < 2:
+            return None
+        try:
+            self._load()
+            from mlx_vlm import generate  # noqa: PLC0415
+            from mlx_vlm.prompt_utils import apply_chat_template  # noqa: PLC0415
+
+            listing = ", ".join(f"{b:+.0f} degrees" for b in sorted(bearings_deg, reverse=True))
+            prompt = apply_chat_template(
+                self._tokenizer, self._config,
+                _CHECK_PROMPT.format(where=where, bearings=listing),
+                num_images=0,
+            )
+            reply = generate(
+                self._model, self._tokenizer, prompt, [], max_tokens=12, verbose=False,
+            )
+            text = (reply if isinstance(reply, str) else getattr(reply, "text", "")).strip()
+            lowered = text.lower()
+            if "yes" in lowered:
+                return True
+            if "no" in lowered:
+                return False
+            log.info("check produced no clear answer (%r)", text[:40])
+        except Exception as e:  # noqa: BLE001 - a check failure must not stop the robot
+            log.info("could not check the choice with the model (%s)", e)
+        return None
 
     def plan(self, message: str) -> Plan:
         try:

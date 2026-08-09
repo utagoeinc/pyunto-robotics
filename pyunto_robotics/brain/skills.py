@@ -36,6 +36,16 @@ DOORWAY_HALF_WIDTH_M = 0.55
 # Two door sightings this far apart in world heading are different doors. The office doors are
 # 4 m apart, so from anywhere in the corridor they are tens of degrees apart.
 COUNT_SEPARATION_RAD = 0.35
+
+# Two bearings closer than this name the same door when checking which one is being faced.
+SAME_DOOR_RAD = 0.4
+
+# Sightings closer together than this are edges of one door, not separate doors. The office
+# doors are 4 m apart and a leaf is about 1 m wide, so this sits comfortably between the two.
+DISTINCT_DOORS_M = 2.5
+
+# How many times to walk back and try again after finding the wrong door.
+WRONG_DOOR_RETRIES = 2
 PUSH_STANDOFF_M = 0.55
 
 
@@ -54,10 +64,19 @@ class SkillResult:
 class Skills:
     """The robot's action repertoire."""
 
-    def __init__(self, robot: Robot, grounder: Grounder, navigator: MaplessNavigator | None = None):
+    def __init__(
+        self,
+        robot: Robot,
+        grounder: Grounder,
+        navigator: MaplessNavigator | None = None,
+        planner: object | None = None,
+    ):
         self.robot = robot
         self.grounder = grounder
         self.nav = navigator or MaplessNavigator(robot, grounder)
+        # Optional. When it can think about a choice -- LLMPlanner can -- the robot asks it
+        # before doing something irreversible. Anything without check_choice is ignored.
+        self.planner = planner
         # Where the robot stood just before pushing through a doorway, so it can get back out.
         # Navigation is otherwise memoryless, and a room is a dead end without this: from
         # inside, the open door shows only its edge and no other door is visible at all, so
@@ -280,6 +299,52 @@ class Skills:
         """
         return len(self.headings_of_doors())
 
+    def _at_the_right_door(self, where: str) -> bool | None:
+        """Whether the door in front is the one the qualifier names.
+
+        Looks around rather than trusting the forward frame: from right up against a door the
+        others are outside a 75-degree view, so "is this the leftmost" cannot be answered
+        without turning the head. Returns None when the question cannot be settled -- one door
+        visible means there is nothing to compare against, and refusing to act on that would
+        block every approach that ends up correctly alone in front of its target.
+        """
+        seen = self.nav.survey("door")
+        if len(seen) < 2:
+            return None
+
+        # Up against a door, its two edges read as two separate sightings -- measured (4.80,
+        # 0.57) and (3.54, 0.91) from 0.9 m away, which is one door 1.3 m wide, not two doors.
+        # Comparing "leftmost" against that says the robot is at the wrong door when it is
+        # exactly where it should be. Only judge when the sightings are far enough apart in the
+        # world to be different doors.
+        positions = [self.nav._world_position(b, d) for b, d in seen]
+        spread = max(
+            float(np.linalg.norm(a - b_)) for a in positions for b_ in positions
+        )
+        if spread < DISTINCT_DOORS_M:
+            return None
+
+        bearings = sorted(b for b, _ in seen)
+        wanted = {"left": bearings[-1], "right": bearings[0],
+                  "middle": bearings[len(bearings) // 2]}[where]
+        # The door being faced is the one nearest straight ahead.
+        facing = min(bearings, key=abs)
+        verdict = abs(facing - wanted) < SAME_DOOR_RAD
+
+        # Ask the planner too, if there is one that can think about it. This is a standstill --
+        # the robot has stopped, and is about to do something it cannot undo -- so a second
+        # opinion is worth the second it costs. The model is given the same bearings in the
+        # same terms the instruction used, and only gets to veto a "yes": a disagreement means
+        # going back for another look, which is cheap, while overriding a geometric "no" would
+        # let a hallucinated answer open the wrong door.
+        thinking = getattr(self.planner, "check_choice", None)
+        if verdict and thinking is not None:
+            second = thinking(where, [math.degrees(b) for b in bearings])
+            if second is False:
+                log.info("on reflection, this may not be the %s door", where)
+                return False
+        return verdict
+
     def headings_of_doors(self) -> list[float]:
         """World headings of every door found by turning the head, left to right.
 
@@ -386,6 +451,23 @@ class Skills:
         approach = self.nav.goto(target, where=where)
         if not approach.success:
             return SkillResult(False, approach.describe())
+
+        # Check before committing. Arriving somewhere is not the same as arriving at the door
+        # that was asked for: told the leftmost of three, the robot has finished at the middle
+        # one and opened it, reporting success. Standing still and looking around is cheap
+        # compared with opening the wrong door, and from here the answer is unambiguous --
+        # the target should be the leftmost/rightmost/middle thing in view.
+        if where in ("left", "right", "middle"):
+            for attempt in range(WRONG_DOOR_RETRIES):
+                verdict = self._at_the_right_door(where)
+                if verdict is None or verdict:
+                    break
+                log.info("this is not the %s %s; going back for another look", where, target)
+                self.return_home()
+                self._straighten_waist()
+                approach = self.nav.goto(target, where=where)
+                if not approach.success:
+                    return SkillResult(False, approach.describe())
 
         # Square up using the bearing goto already measured, rather than calling face().
         # face() re-runs detection from scratch, and next to a door the neighbouring one is

@@ -53,9 +53,11 @@ class RobotAgent:
         on_idle: Callable[[], None] | None = None,
     ):
         self.robot = robot
-        self.skills = Skills(robot, grounder)
         self.client = client
         self.planner = planner or RulePlanner()
+        # The skills get the planner too, so they can ask it to think about a choice before
+        # doing something irreversible -- opening a door is not undoable in the way walking is.
+        self.skills = Skills(robot, grounder, planner=self.planner)
         self.max_steps_per_message = max_steps_per_message
         # Called repeatedly while waiting for work. Used to keep a viewer window responsive;
         # it runs on the same thread as the simulation, which is where MuJoCo needs it.
