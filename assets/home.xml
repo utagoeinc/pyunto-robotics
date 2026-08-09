@@ -294,8 +294,17 @@
       0.40 x 0.30 and the cavity is 0.40 x 0.34, so it only fits lying flat -- spacing it any
       wider drapes it over the lip and the "take it out" step starts already half done.
     -->
+    <!--
+      Sitting toward the MOUTH of the drum (y=1.38), not centred in the cavity.
+
+      The centre is where a towel would end up if it were placed there tidily, and it is
+      0.07 m further in than the arm can comfortably follow: measured the grasp reproducibly
+      0.11 m short with the sheet centred at y=1.45, from the best of an exhaustive sweep of
+      standing positions. Laundry at the end of a cycle sits against the door anyway, so this
+      is both more reachable and more true to life.
+    -->
     <flexcomp name="towel_a" type="grid" count="9 7 1" spacing="0.043 0.043 0.05"
-              pos="-1.45 1.45 0.756" dim="2" mass="0.25" radius="0.004"
+              pos="-1.45 1.38 0.756" dim="2" mass="0.25" radius="0.004"
               material="towel_a_mat">
       <edge equality="true" solref="0.005 1"/>
       <contact condim="3" solref="0.005 1" selfcollide="none"/>

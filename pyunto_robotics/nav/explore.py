@@ -743,10 +743,24 @@ class MaplessNavigator:
 
                 _, bearing, distance = located
 
-                # Arriving means the target is close AND roughly in front. Close-but-sideways is
-                # what you get brushing past a door on the way to another one -- accepting that
-                # stopped the robot next to the middle door while walking to the right one.
-                if distance <= self.arrive_distance and abs(bearing) <= ARRIVE_BEARING_RAD:
+                # Arriving means the target is close AND roughly in front. Close-but-sideways
+                # is what you get brushing past a door on the way to another one -- accepting
+                # that stopped the robot next to the middle door while walking to the right one.
+                #
+                # But the bearing test is a proxy for "is this really the door I was sent to",
+                # and when the robot is standing next to the door it was sent to it fails for
+                # the wrong reason: measured circling at 0.4 m from the correct door because
+                # the heading never came out tidy. Where the target's position is known, ask
+                # the question directly instead -- close to *that* is arrival however the body
+                # happens to be pointing.
+                at_the_target = (
+                    tracked_at is not None
+                    and float(np.linalg.norm(tracked_at - self.robot.position[:2]))
+                    <= self.arrive_distance
+                )
+                if distance <= self.arrive_distance and (
+                    abs(bearing) <= ARRIVE_BEARING_RAD or at_the_target
+                ):
                     log.info("arrived at %s (%.2f m)", target, distance)
                     # Face front again before handing back. Everything after arrival -- lining
                     # up on a handle, pushing, walking through -- reads the forward camera, and
