@@ -58,6 +58,14 @@ TRACK_GATE_M = 2.0
 # the gate at all and wandered off.
 ARRIVE_BEARING_RAD = 0.30  # ~17 degrees
 
+# How far past the visible free space a sighting may sit before it is treated as a bad range
+# rather than a real object. Generous, because the free-space columns are coarse and a door set
+# into an alcove genuinely is slightly further than the wall beside it.
+BEHIND_TOLERANCE_M = 0.6
+
+# Only reject "behind the wall" sightings within this bearing of straight ahead.
+BEHIND_CHECK_RAD = 0.5
+
 # Sideways room to leave beyond the robot's own width, in metres. Small: this is "do not scrape"
 # clearance, not a comfortable berth. Asking for a wide margin was measured to cost more than it
 # saved -- it fights every doorway, which is barely wider than the robot -- whereas correcting
@@ -175,8 +183,26 @@ class MaplessNavigator:
         for det in detections:
             u, v = det.pixel(width, height)
             offset = target_offset(obs.depth, u, v, fovy, (width, height))
-            if offset is not None:
-                positions.append(self._world_position(*offset))
+            if offset is None:
+                continue
+
+            # Drop sightings that sit further away than the free space in that direction. A
+            # door cannot be behind the nearest surface the robot can see through the same
+            # pixels; when it reads that way the range is wrong, usually because the body was
+            # mid-stride and the head camera swung. Measured 364 such sightings in one run,
+            # putting doors up to 1.5 m beyond the wall they are set into, which is what filled
+            # the map with landmarks that were nowhere near a real door.
+            bearing, distance = offset
+            column = int(np.argmin(np.abs(space.bearings - bearing)))
+            behind = distance > space.ranges[column] + BEHIND_TOLERANCE_M
+            # Only trust this test near the centre of the frame. The free-space columns are
+            # coarse and the correction from axial to true range grows with angle, so out at
+            # the edges a perfectly good sighting can read as being behind the wall -- applying
+            # it everywhere threw away two of the three doors entirely.
+            if behind and abs(bearing) < BEHIND_CHECK_RAD:
+                continue
+
+            positions.append(self._world_position(bearing, distance))
         if positions:
             self.landmarks.observe_all(_canonical_label(target), positions)
 
