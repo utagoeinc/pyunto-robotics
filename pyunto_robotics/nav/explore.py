@@ -73,6 +73,13 @@ DOOR_WIDTH_M = 1.0
 # the gate at all and wandered off.
 ARRIVE_BEARING_RAD = 0.30  # ~17 degrees
 
+# Clearance below which the head gives up watching the target and looks where the body is going.
+HEAD_YIELD_M = 0.8
+
+# How many steps to keep walking toward a remembered position before admitting it is not
+# working and going back to looking.
+BLIND_PATIENCE = 120
+
 # How far past the visible free space a sighting may sit before it is treated as a bad range
 # rather than a real object. Generous, because the free-space columns are coarse and a door set
 # into an alcove genuinely is slightly further than the wall beside it.
@@ -270,6 +277,20 @@ class MaplessNavigator:
                     found[match] = (bearing, distance, det.confidence)
         self.robot.face_forward()
         return [(b, d) for b, d, _ in found]
+
+    def _walk_to(self, point: np.ndarray, max_steps: int = 600) -> None:
+        """Walk back to a remembered spot, steering round whatever is in the way."""
+        for _ in range(max_steps):
+            delta = point - self.robot.position[:2]
+            if float(np.linalg.norm(delta)) < 0.4:
+                break
+            desired = math.atan2(delta[1], delta[0]) - self.robot.yaw
+            desired = (desired + math.pi) % (2 * math.pi) - math.pi
+            _, space, _, _, _ = self._observe("door")
+            self.robot.face_forward()
+            scale, turn = self._avoid(space, float(np.clip(desired * self.turn_gain, -1.2, 1.2)))
+            self.robot.step(self.cruise_speed * scale * 0.7, 0.0, turn)
+        self.robot.stand(0.3)
 
     def _relative_to(self, position: np.ndarray) -> tuple[float, float]:
         """Bearing and range from where the robot is now to a fixed world point."""
@@ -535,6 +556,12 @@ class MaplessNavigator:
         # World position of the door being chased, so a changing viewpoint cannot swap it.
         tracked_at: np.ndarray | None = None
         lost_frames = 0
+        # Steps spent walking toward a remembered position without seeing the target.
+        blind_steps = 0
+        # Where the errand started, to return to if the target cannot be found from here.
+        home = self.robot.position[:2].copy()
+        returned_home = False
+        ever_seen = False
         detections: list[Detection] = []
         detour_side = 1.0
         detour_steps = 0
@@ -613,6 +640,21 @@ class MaplessNavigator:
                     tracked_at = self._world_position(bearing, distance)
                     continue
                 if searched > search_steps:
+                    # Sweeping from here has not found it. Go back to where the instruction was
+                    # given and look again: that is the one place the target is known to have
+                    # been visible, and it is what a person does when they lose their bearings.
+                    # Only worth going back if the target was ever seen. Something that has
+                    # never been in view is not there, and walking back to look again just
+                    # turns "I could not find a door" into a much slower "I could not find a
+                    # door".
+                    if ever_seen and not returned_home:
+                        log.info("cannot find %s; going back to look from the start", target)
+                        returned_home = True
+                        searched = 0
+                        blind_steps = 0
+                        tracked_at = None
+                        self._walk_to(home)
+                        continue
                     self.robot.face_forward()
                     return NavResult(NavState.SEARCH, target, steps=steps)
                 # Sweep the head as the body turns, so each step of the search covers the
@@ -627,7 +669,27 @@ class MaplessNavigator:
             if state is NavState.APPROACH:
                 if located is None:
                     lost_frames += 1
-                    if lost_frames > 12:
+
+                    # Out of sight is not lost while the robot knows where the thing is. A door
+                    # does not move, so walking to a remembered position gets there whether or
+                    # not the camera can see it on the way. The head hunts for it meanwhile,
+                    # and _avoid below still runs on the live depth frame, so this supplies a
+                    # heading, never permission to walk into something.
+                    if tracked_at is not None and blind_steps < BLIND_PATIENCE:
+                        blind_steps += 1
+                        want, range_to = self._relative_to(tracked_at)
+                        if space.clearance_ahead(half_angle=0.35) >= HEAD_YIELD_M:
+                            self.robot.look_toward(want)
+                        else:
+                            self.robot.face_forward()
+                        if blind_steps == 1:
+                            log.info(
+                                "lost sight of %s; heading for where it was, %.1f m away",
+                                target, range_to,
+                            )
+                        located = (last_seen[0] if last_seen else None, want, range_to)
+                        lost_frames = 0
+                    elif lost_frames > 12:
                         # Out of frame. Sweep again, and re-apply the qualifier when we do:
                         # dropping it here would re-acquire whichever door is most convenient
                         # rather than the one that was asked for.
@@ -644,6 +706,8 @@ class MaplessNavigator:
                         continue
                 else:
                     lost_frames = 0
+                    blind_steps = 0
+                    ever_seen = True
                     last_seen = located
                     tracked_at = self._world_position(located[1], located[2])
 
@@ -685,7 +749,16 @@ class MaplessNavigator:
                 # 51 degrees off the body's heading, well past the 37 degrees a fixed forward
                 # camera can reach.
                 if tracked_at is not None:
-                    self.robot.look_at(tracked_at)
+                    # Watch the target -- unless something is close enough ahead that the body
+                    # needs the forward camera. A turned head aims the depth frame away from
+                    # where the feet are going, and obstacle avoidance reads that frame:
+                    # measured wall contact of 277 steps with the head always on the target
+                    # against 16 when it gives way near obstacles. A person crossing a room
+                    # looks at the door, and glances ahead when something is in the way.
+                    if space.clearance_ahead(half_angle=0.35) < HEAD_YIELD_M:
+                        self.robot.face_forward()
+                    else:
+                        self.robot.look_at(tracked_at)
 
                 turn = float(np.clip(bearing * self.turn_gain, -1.2, 1.2))
                 scale, turn = self._avoid(
