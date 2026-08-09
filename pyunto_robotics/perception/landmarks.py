@@ -24,6 +24,7 @@ corridor with all three doors in frame and still know which one it is going to.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -39,6 +40,26 @@ MATCH_RADIUS_M = 1.5
 # wherever it was last seen from.
 BLEND = 0.25
 
+# Beyond this range a sighting is downweighted. Measured: error holds at 0.10 m out to 4 m and
+# jumps to 0.34 m at 5.4 m, so this is where the estimate stops being trustworthy.
+TRUSTED_RANGE_M = 4.0
+
+# How far a landmark's sightings may scatter and still be believed, in metres. Set from where
+# the real doors and the phantoms separate on a measured run: 0.04-0.07 against 0.17-0.47.
+SPREAD_LIMIT_M = 0.8
+
+
+def _range_weight(seen_from: float) -> float:
+    """How much to trust a sighting taken from `seen_from` metres away.
+
+    Full weight inside the trusted range, falling off with the square of distance beyond it --
+    the same shape as the measured error growth, which comes from a fixed pixel error subtending
+    more world distance the further away it lands.
+    """
+    if not math.isfinite(seen_from) or seen_from <= TRUSTED_RANGE_M:
+        return 1.0
+    return float((TRUSTED_RANGE_M / seen_from) ** 2)
+
 
 @dataclass
 class Landmark:
@@ -50,6 +71,7 @@ class Landmark:
     sightings: int = 1
     last_seen_step: int = 0
     _samples: list[np.ndarray] = field(default_factory=list, repr=False)
+    _ranges: list[float] = field(default_factory=list, repr=False)
 
     @property
     def spread(self) -> float:
@@ -70,21 +92,40 @@ class Landmark:
 
         Both tests earn their place. Three sightings, because a bad range estimate lands far
         enough from a real door to start a landmark of its own and those are usually seen once
-        or twice -- measured two phantoms alongside three real doors on one walk. And a tight
-        spread, because a phantom that does keep being re-matched drifts, while a real door
-        stays put.
-        """
-        return self.sightings >= 3 and self.spread < 0.8
+        or twice. And a tight spread, because a phantom that does keep being re-matched drifts,
+        while a real door stays put.
 
-    def observe(self, position: np.ndarray, step: int) -> None:
-        """Fold in a new sighting."""
+        The spread threshold is loose on purpose. It looks like it should separate real doors
+        from phantoms, and on any single run it appears to: one walk gave the real doors
+        0.04-0.07 and every phantom 0.17-0.47. Across three runs the two populations overlap
+        completely -- real 0.07-0.43 against phantom 0.04-0.47 -- so tightening it throws away
+        real doors at the same rate. Spread rejects a landmark that is visibly incoherent and
+        nothing finer than that; the co-linearity test in _drop_outliers does the real work.
+        """
+        return self.sightings >= 3 and self.spread < SPREAD_LIMIT_M
+
+    def observe(self, position: np.ndarray, step: int, seen_from: float | None = None) -> None:
+        """Fold in a new sighting, optionally weighted by how far away it was seen.
+
+        Close sightings are far better than distant ones and the difference is not subtle:
+        measured 0.10 m of error at any range up to 4 m, rising to 0.32-0.34 m at 5.4 m. So a
+        glimpse from across the room should not carry the same weight as a look from a metre
+        away -- averaging them equally is what left the map a third of a metre out even after
+        the robot had walked right up to the door.
+        """
         self.sightings += 1
         self.last_seen_step = step
         self._samples.append(position.copy())
-        # Average over recent sightings rather than tracking the latest. Individual frames are
-        # noisy and biased by viewpoint; the mean of several angles is much closer to truth.
+        self._ranges.append(math.inf if seen_from is None else seen_from)
+
         recent = self._samples[-8:]
-        self.position = (1 - BLEND) * self.position + BLEND * np.mean(recent, axis=0)
+        weights = np.array([_range_weight(r) for r in self._ranges[-8:]])
+        estimate = np.average(np.array(recent), axis=0, weights=weights)
+
+        # Move faster toward a close-range sighting than a distant one: a look from a metre away
+        # is worth committing to, one from across the room is worth only a nudge.
+        blend = BLEND * _range_weight(self._ranges[-1])
+        self.position = (1 - blend) * self.position + blend * estimate
 
 
 class LandmarkMap:
@@ -115,12 +156,14 @@ class LandmarkMap:
     def get(self, landmark_id: int) -> Landmark | None:
         return self._landmarks.get(landmark_id)
 
-    def observe(self, label: str, position: np.ndarray) -> Landmark:
+    def observe(
+        self, label: str, position: np.ndarray, seen_from: float | None = None
+    ) -> Landmark:
         """Record a sighting, matching it to an existing landmark or creating a new one."""
         self._step += 1
         match = self._nearest(label, position)
         if match is not None:
-            match.observe(position, self._step)
+            match.observe(position, self._step, seen_from)
             return match
 
         landmark = Landmark(
@@ -129,13 +172,19 @@ class LandmarkMap:
             position=position.copy(),
             last_seen_step=self._step,
             _samples=[position.copy()],
+            _ranges=[math.inf if seen_from is None else seen_from],
         )
         self._landmarks[landmark.id] = landmark
         self._next_id += 1
         log.debug("new landmark #%d %s at %s", landmark.id, label, np.round(position, 2))
         return landmark
 
-    def observe_all(self, label: str, positions: list[np.ndarray]) -> list[Landmark]:
+    def observe_all(
+        self,
+        label: str,
+        positions: list[np.ndarray],
+        ranges: list[float] | None = None,
+    ) -> list[Landmark]:
         """Record the sightings from one frame.
 
         Near-duplicates are merged first. Colour matching splits a door into two blobs when it
@@ -147,42 +196,55 @@ class LandmarkMap:
         What remains is matched greedily so two genuinely distinct detections cannot both claim
         the same landmark.
         """
-        merged = self._merge_duplicates(positions)
+        # Carry each cluster's range through the merge so the weighting still applies. A
+        # cluster is the two edges of one door seen at once, so its members share a range.
+        merged, merged_ranges = self._merge_duplicates(positions, ranges=ranges)
 
         claimed: set[int] = set()
         results: list[Landmark] = []
-        for position in merged:
+        for position, seen_from in zip(merged, merged_ranges, strict=True):
             match = self._nearest(label, position, exclude=claimed)
             if match is not None:
                 self._step += 1
-                match.observe(position, self._step)
+                match.observe(position, self._step, seen_from)
                 claimed.add(match.id)
                 results.append(match)
             else:
-                landmark = self.observe(label, position)
+                landmark = self.observe(label, position, seen_from)
                 claimed.add(landmark.id)
                 results.append(landmark)
         return results
 
     @staticmethod
     def _merge_duplicates(
-        positions: list[np.ndarray], radius: float = 0.6
-    ) -> list[np.ndarray]:
+        positions: list[np.ndarray],
+        radius: float = 0.6,
+        ranges: list[float] | None = None,
+    ) -> tuple[list[np.ndarray], list[float]]:
         """Collapse detections in one frame that are too close to be separate objects.
 
         0.6 m: wide enough to join the two edges of one door seen close up, narrow enough that
         two real doors 4 m apart can never merge. At 1.2 m the target door was being absorbed
         into its neighbour on the final approach and disappeared from the map entirely.
         """
+        if ranges is None:
+            ranges = [math.inf] * len(positions)
+
         clusters: list[list[np.ndarray]] = []
-        for position in positions:
-            for cluster in clusters:
+        cluster_ranges: list[list[float]] = []
+        for position, seen_from in zip(positions, ranges, strict=True):
+            for cluster, seen in zip(clusters, cluster_ranges, strict=True):
                 if float(np.linalg.norm(cluster[0] - position)) < radius:
                     cluster.append(position)
+                    seen.append(seen_from)
                     break
             else:
                 clusters.append([position])
-        return [np.mean(cluster, axis=0) for cluster in clusters]
+                cluster_ranges.append([seen_from])
+        return (
+            [np.mean(cluster, axis=0) for cluster in clusters],
+            [min(seen) for seen in cluster_ranges],
+        )
 
     def of_label(self, label: str, confident_only: bool = True) -> list[Landmark]:
         """Every landmark with this label.

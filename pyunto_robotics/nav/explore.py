@@ -180,6 +180,7 @@ class MaplessNavigator:
         # Fold what is visible into the landmark map as we go, so the robot builds up an
         # identity for each door instead of re-deciding from scratch every frame.
         positions = []
+        ranges = []
         for det in detections:
             u, v = det.pixel(width, height)
             offset = target_offset(obs.depth, u, v, fovy, (width, height))
@@ -203,8 +204,9 @@ class MaplessNavigator:
                 continue
 
             positions.append(self._world_position(bearing, distance))
+            ranges.append(distance)
         if positions:
-            self.landmarks.observe_all(_canonical_label(target), positions)
+            self.landmarks.observe_all(_canonical_label(target), positions, ranges)
 
         return detections, space, fovy, (width, height), obs.depth
 
