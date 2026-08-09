@@ -73,6 +73,14 @@ DOOR_WIDTH_M = 1.0
 # the gate at all and wandered off.
 ARRIVE_BEARING_RAD = 0.30  # ~17 degrees
 
+# How far the view may swing between perception frames before looking again early. About 6
+# degrees: a fraction of the 75-degree field, so a target cannot cross the frame unseen.
+REFRESH_SWING_RAD = 0.10
+
+# Body turn rate above which the head stops tracking and holds still, so the two do not swing
+# the camera through the sum of both at once.
+TURNING_HARD_RAD = 0.45
+
 # Clearance below which the head gives up watching the target and looks where the body is going.
 HEAD_YIELD_M = 0.8
 
@@ -165,6 +173,10 @@ class MaplessNavigator:
         # express "that one, not its neighbour"; a landmark keeps its identity however the
         # view changes, and its averaged position is far steadier than any single frame.
         self.landmarks = LandmarkMap()
+        # View direction when the last perception frame was taken, so the loop can tell how far
+        # the world has moved across the camera since it last looked.
+        self._view_yaw = robot.yaw
+        self._view_head = robot.head_yaw
         self.arrive_distance = arrive_distance
         self.cruise_speed = cruise_speed
         self.turn_gain = turn_gain
@@ -556,6 +568,8 @@ class MaplessNavigator:
         # World position of the door being chased, so a changing viewpoint cannot swap it.
         tracked_at: np.ndarray | None = None
         lost_frames = 0
+        # Last turn command issued, so the head can hold still while the body swings.
+        turn_last = 0.0
         # Steps spent walking toward a remembered position without seeing the target.
         blind_steps = 0
         # Where the errand started, to return to if the target cannot be found from here.
@@ -563,6 +577,7 @@ class MaplessNavigator:
         returned_home = False
         ever_seen = False
         detections: list[Detection] = []
+        turn_last = 0.0
         detour_side = 1.0
         detour_steps = 0
 
@@ -608,7 +623,22 @@ class MaplessNavigator:
 
         while steps < max_steps:
             steps += 1
-            refresh = (steps % self.perception_every == 1) or state is NavState.SEARCH
+            # Look again on a schedule -- but sooner if the view has moved much since the last
+            # frame. A fixed one-in-four was fine while the head was bolted to the torso; once
+            # both can turn, four steps of a brisk turn swing the view 15 degrees, and a target
+            # can cross most of the frame between looks. Measured the estimate of a door going
+            # from 0.43 m of error to 1.71 m across exactly one such gap, and never recovering.
+            swung = abs(
+                (self.robot.yaw - self._view_yaw + math.pi) % (2 * math.pi) - math.pi
+            ) + abs(self.robot.head_yaw - self._view_head)
+            refresh = (
+                (steps % self.perception_every == 1)
+                or state is NavState.SEARCH
+                or swung > REFRESH_SWING_RAD
+            )
+            if refresh:
+                self._view_yaw = self.robot.yaw
+                self._view_head = self.robot.head_yaw
 
             if refresh:
                 detections, space, fovy, size, depth = self._observe(target)
@@ -757,10 +787,15 @@ class MaplessNavigator:
                     # looks at the door, and glances ahead when something is in the way.
                     if space.clearance_ahead(half_angle=0.35) < HEAD_YIELD_M:
                         self.robot.face_forward()
-                    else:
+                    elif abs(turn_last) < TURNING_HARD_RAD:
                         self.robot.look_at(tracked_at)
+                    # Else: hold the head still. Turning both at once swings the camera through
+                    # the sum of the two, and the target crosses the frame faster than
+                    # perception can follow. One at a time is also what a person does -- you
+                    # stop moving your eyes while your body is swinging round.
 
                 turn = float(np.clip(bearing * self.turn_gain, -1.2, 1.2))
+                turn_last = turn
                 scale, turn = self._avoid(
                     space, turn, target_bearing=bearing, target_distance=distance
                 )

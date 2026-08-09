@@ -72,6 +72,10 @@ class Robot:
             mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, i): i
             for i in range(self.model.nu)
         }
+        # Built on first use by reach_to. Not every robot in this project has arms -- the
+        # quadruped and the rover do not -- so constructing an IK solver eagerly would allocate
+        # a scratch MjData for a chain that does not exist.
+        self._solver: object | None = None
         self.reset(keyframe)
 
     # -- lifecycle ----------------------------------------------------------------
@@ -421,10 +425,22 @@ class Robot:
         return True
 
     def release(self) -> None:
-        """Drop whatever the right hand is welded to."""
-        for name in ("grasp_1", "grasp_2", "grasp_3"):
-            eq = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_EQUALITY, name)
-            if eq >= 0:
+        """Drop whatever a hand is welded to.
+
+        Deactivates every weld naming a palm, rather than a hard-coded list of door welds. The
+        office scene has three (`grasp_1..3`, one per door); the home scene has one per towel
+        per hand plus one for the washer door, and a fixed list would silently leave those
+        latched -- a robot that cannot let go of a towel is stuck for the rest of the errand.
+        """
+        palms = {
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"palm_{side}")
+            for side in ("r", "l")
+        }
+        palms.discard(-1)
+        for eq in range(self.model.neq):
+            if self.model.eq_type[eq] != mujoco.mjtEq.mjEQ_WELD:
+                continue
+            if self.model.eq_obj1id[eq] in palms or self.model.eq_obj2id[eq] in palms:
                 self.data.eq_active[eq] = 0
         mujoco.mj_forward(self.model, self.data)
 
@@ -451,3 +467,48 @@ class Robot:
         self.set_arm(side, shoulder_pitch=-0.25, shoulder_roll=sign * 0.12,
                      shoulder_yaw=0.0, elbow=-0.35)
         self.grip(side, 0.0)
+
+    # -- reaching -----------------------------------------------------------------
+
+    def reach_to(
+        self,
+        point: np.ndarray,
+        side: str = "r",
+        passes: int = 4,
+        settle_steps: int = 150,
+    ) -> float:
+        """Put a gripper on a world point. Returns how close it got, in metres.
+
+        A reach is a LOOP, not a single solve. Solving once and driving to the answer leaves
+        the hand short, because the extended arm loads the torso and the body yields: measured
+        an IK residual of 0.024 m arriving as a 0.20 m miss. Each pass re-measures where the
+        hand actually is and asks for the remaining correction.
+
+        Beyond about 0.25 m in front of the base the loop does not converge at all -- the error
+        grew pass over pass -- so a caller that wants something further away has to walk closer
+        rather than reach harder. See sim/reach.WORKING_REACH_M.
+
+        The returned distance is the honest outcome and callers are expected to check it: a
+        grasp aimed at a corner the hand never got to would weld thin air to the palm.
+        """
+        from .reach import ArmSolver  # noqa: PLC0415 - avoids a circular import at module load
+
+        if self._solver is None:
+            self._solver = ArmSolver(self.model)
+
+        target = np.asarray(point, dtype=float)
+        error = float("inf")
+        for _ in range(max(1, passes)):
+            angles, _ = self._solver.solve(self.data, target, side)
+            if not angles:
+                return float("inf")
+            for joint, value in angles.items():
+                index = self._act.get(joint)
+                if index is None:
+                    continue
+                lo, hi = self.model.actuator_ctrlrange[index]
+                self.data.ctrl[index] = float(np.clip(value, lo, hi))
+            for _ in range(settle_steps):
+                self.step()
+            error = float(np.linalg.norm(self.hand_position(side) - target))
+        return error

@@ -65,9 +65,19 @@
         <joint damping="5" armature="0.05"/>
         <position kp="400" forcerange="-200 200"/>
       </default>
+      <!--
+        Arm gain is 500, not H1's 150. H1 only ever holds its arm out briefly to shove a door,
+        and a servo that sags a little while doing it costs nothing. Momo has to put a hand ON
+        a specific cloth corner, and at kp=150 the shoulder settled 0.20 rad below its command
+        under the arm's own weight -- which put the gripper 0.19 m from a target the IK had
+        solved to 0.02 m. The error was gravity droop, not bad IK, and no amount of solving
+        fixes a servo that cannot hold the pose it is given.
+
+        dampratio="1" keeps it critically damped, so the stiffer joint does not overshoot.
+      -->
       <default class="m_arm">
         <joint damping="2" armature="0.02"/>
-        <position kp="150" forcerange="-60 60"/>
+        <position kp="500" dampratio="1" forcerange="-120 120"/>
       </default>
       <default class="m_finger">
         <!--

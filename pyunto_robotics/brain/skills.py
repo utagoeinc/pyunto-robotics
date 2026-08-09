@@ -299,6 +299,20 @@ class Skills:
         """
         return len(self.headings_of_doors())
 
+    def _walk_to_surveyed(self, where: str) -> bool:
+        """Walk to the door the qualifier names, using the positions the survey just found.
+
+        Returns False if there is nothing usable to walk to.
+        """
+        seen = self.nav.survey("door")
+        if len(seen) < 2:
+            return False
+        chosen = self.nav._pick_bearing(seen, where)
+        if chosen is None:
+            return False
+        self.nav._walk_to(self.nav._world_position(*chosen))
+        return True
+
     def _at_the_right_door(self, where: str) -> bool | None:
         """Whether the door in front is the one the qualifier names.
 
@@ -308,6 +322,13 @@ class Skills:
         visible means there is nothing to compare against, and refusing to act on that would
         block every approach that ends up correctly alone in front of its target.
         """
+        # Settle first. The check runs straight after an approach, which leaves the head
+        # turned toward whatever it was tracking and the body still rocking; a survey started
+        # from there sees a different set of doors than the same spot does at rest, and the
+        # verdict flipped between runs because of it.
+        self.robot.face_forward()
+        self.robot.stand(0.5)
+
         seen = self.nav.survey("door")
         if len(seen) < 2:
             return None
@@ -327,9 +348,13 @@ class Skills:
         bearings = sorted(b for b, _ in seen)
         wanted = {"left": bearings[-1], "right": bearings[0],
                   "middle": bearings[len(bearings) // 2]}[where]
-        # The door being faced is the one nearest straight ahead.
-        facing = min(bearings, key=abs)
-        verdict = abs(facing - wanted) < SAME_DOOR_RAD
+
+        # The door about to be opened is the nearest one, not the one closest to straight
+        # ahead. Standing 0.38 m to the side of the middle door, with the left one 4.65 m off,
+        # the left one is nearer the centre of the frame -- so judging by bearing alone said
+        # "yes, this is the left door" about a door the robot was pressed against.
+        nearest = min(seen, key=lambda s: s[1])[0]
+        verdict = abs(nearest - wanted) < SAME_DOOR_RAD
 
         # Ask the planner too, if there is one that can think about it. This is a standstill --
         # the robot has stopped, and is about to do something it cannot undo -- so a second
@@ -463,9 +488,22 @@ class Skills:
                 if verdict is None or verdict:
                     break
                 log.info("this is not the %s %s; going back for another look", where, target)
-                self.return_home()
-                self._straighten_waist()
-                approach = self.nav.goto(target, where=where)
+                # Walk to the door itself rather than restarting from home. The survey has just
+                # located every door from here, so the one that was asked for has a position --
+                # going back to the start and re-approaching throws that away and repeats the
+                # same mistake. Measured ending 0.64 m past the left door this way, against
+                # opening the middle one and calling it the left.
+                if self._walk_to_surveyed(where):
+                    # Standing at the right door now, so approach the nearest one rather than
+                    # re-applying the qualifier. "The left door" means something different from
+                    # here -- the robot is past it, and asking for the leftmost thing in view
+                    # sends it away again: measured stalling 0.64 m from the door for the rest
+                    # of the run, where a plain approach reaches it.
+                    approach = self.nav.goto(target)
+                else:
+                    self.return_home()
+                    self._straighten_waist()
+                    approach = self.nav.goto(target, where=where)
                 if not approach.success:
                     return SkillResult(False, approach.describe())
 

@@ -135,9 +135,17 @@
     <geom name="floor" type="plane" size="0 0 0.05" material="tile"
           condim="6" friction="1.2 0.05 0.01"/>
 
-    <camera name="overview" pos="0 -5.6 4.2" xyaxes="1 0 0 0 0.62 0.79"/>
-    <camera name="washer_cam" pos="-1.4 -1.6 1.5" xyaxes="0.85 0.53 0 -0.20 0.32 0.93"/>
-    <camera name="counter_cam" pos="1.5 -1.5 1.6" xyaxes="0.80 -0.60 0 0.24 0.32 0.92"/>
+    <!--
+      Overview looks down from ABOVE the room, not from outside the south wall: the walls are
+      solid geometry and a camera placed outside one simply renders that wall.
+    -->
+    <camera name="overview" pos="0 -3.2 4.6" xyaxes="1 0 0 0 0.82 0.57"/>
+    <!--
+      Close-ups. Both sit INSIDE the room looking north at their fixture -- a camera behind a
+      wall renders the wall, which is the whole picture and easy to mistake for a broken scene.
+    -->
+    <camera name="washer_cam" pos="-1.45 0.10 1.35" xyaxes="1 0 0 0 0.42 0.91"/>
+    <camera name="counter_cam" pos="1.20 0.35 1.45" xyaxes="1 0 0 0 0.45 0.89"/>
 
     <!-- =========================== SHELL =========================== -->
     <!-- 5 x 4 m room, 2.5 m walls -->
@@ -153,12 +161,28 @@
          Body 0.62 wide x 0.62 deep x 0.85 tall, standing against the north wall at x=-1.45.
          The drum opening is centred at z=0.75, which is inside Momo's reach band (0.67-1.40).
     -->
-    <geom name="washer_body" class="h_fixture" size="0.31 0.31 0.425" pos="-1.45 1.60 0.425"
+    <!--
+      The cabinet is a SHELL, not a block. A single solid box here spans the whole footprint
+      including the cavity, so the drum's floor/back/sides end up buried inside solid matter:
+      the towel starts embedded in it and is ejected on the first step (measured landing at
+      z=0.37, outside the machine), and the door hits the body and swings to -97 degrees.
+
+      So the front face is built as a frame around the opening, and the sides and back are
+      separate slabs outside the cavity (cavity occupies y:[1.28,1.62], z:[0.55,0.95],
+      x:[-1.66,-1.24]).
+    -->
+    <geom name="washer_base" class="h_fixture" size="0.31 0.31 0.355" pos="-1.45 1.60 0.355"
           material="appliance"/>
-    <geom name="washer_top" class="h_fixture" size="0.33 0.33 0.02" pos="-1.45 1.60 0.870"
+    <geom name="washer_side_l" class="h_fixture" size="0.045 0.31 0.36" pos="-1.715 1.60 0.710"
+          material="appliance"/>
+    <geom name="washer_side_r" class="h_fixture" size="0.045 0.31 0.36" pos="-1.185 1.60 0.710"
+          material="appliance"/>
+    <geom name="washer_back" class="h_fixture" size="0.31 0.045 0.36" pos="-1.45 1.865 0.710"
+          material="appliance"/>
+    <geom name="washer_top" class="h_fixture" size="0.33 0.33 0.02" pos="-1.45 1.60 1.090"
           material="appliance"/>
     <!-- control panel: a dark strip along the top front, so the front face is identifiable -->
-    <geom name="washer_panel" class="h_fixture" size="0.26 0.02 0.055" pos="-1.45 1.285 0.800"
+    <geom name="washer_panel" class="h_fixture" size="0.26 0.02 0.055" pos="-1.45 1.285 1.180"
           material="panel_mat"/>
 
     <!--
@@ -166,40 +190,49 @@
       opening has to be a HOLE the hand can enter: a cylinder geom is solid, and MuJoCo has no
       hollow primitive. The ring is the blue colour cue.
     -->
-    <geom name="drum_ring_t" class="h_fixture" size="0.235 0.015 0.055" pos="-1.45 1.288 0.955"
+    <geom name="drum_ring_t" class="h_fixture" size="0.235 0.015 0.055" pos="-1.45 1.288 1.115"
           material="drum_ring"/>
-    <geom name="drum_ring_b" class="h_fixture" size="0.235 0.015 0.055" pos="-1.45 1.288 0.545"
+    <geom name="drum_ring_b" class="h_fixture" size="0.235 0.015 0.055" pos="-1.45 1.288 0.705"
           material="drum_ring"/>
-    <geom name="drum_ring_l" class="h_fixture" size="0.055 0.015 0.245" pos="-1.635 1.288 0.750"
+    <geom name="drum_ring_l" class="h_fixture" size="0.055 0.015 0.245" pos="-1.635 1.288 0.910"
           material="drum_ring"/>
-    <geom name="drum_ring_r" class="h_fixture" size="0.055 0.015 0.245" pos="-1.265 1.288 0.750"
+    <geom name="drum_ring_r" class="h_fixture" size="0.055 0.015 0.245" pos="-1.265 1.288 0.910"
           material="drum_ring"/>
     <!-- The drum cavity: a back wall set 0.30 m in, so the hand has somewhere to reach INTO. -->
-    <geom name="drum_back" class="h_fixture" size="0.20 0.02 0.20" pos="-1.45 1.62 0.750"
+    <geom name="drum_back" class="h_fixture" size="0.20 0.02 0.20" pos="-1.45 1.62 0.910"
           material="drum_inner"/>
-    <geom name="drum_floor" class="h_fixture" size="0.20 0.17 0.015" pos="-1.45 1.45 0.565"
+    <geom name="drum_floor" class="h_fixture" size="0.20 0.17 0.015" pos="-1.45 1.45 0.725"
           material="drum_inner"/>
-    <geom name="drum_roof" class="h_fixture" size="0.20 0.17 0.015" pos="-1.45 1.45 0.935"
+    <geom name="drum_roof" class="h_fixture" size="0.20 0.17 0.015" pos="-1.45 1.45 1.095"
           material="drum_inner"/>
-    <geom name="drum_side_l" class="h_fixture" size="0.015 0.17 0.20" pos="-1.66 1.45 0.750"
+    <geom name="drum_side_l" class="h_fixture" size="0.015 0.17 0.20" pos="-1.66 1.45 0.910"
           material="drum_inner"/>
-    <geom name="drum_side_r" class="h_fixture" size="0.015 0.17 0.20" pos="-1.24 1.45 0.750"
+    <geom name="drum_side_r" class="h_fixture" size="0.015 0.17 0.20" pos="-1.24 1.45 0.910"
           material="drum_inner"/>
 
     <!--
       The door: hinged on its LEFT (-x) edge and swinging out toward the robot, which is how a
       front-loader opens. range -2.4..0 means it only ever opens outward; 0 is shut.
     -->
-    <body name="drum_door" pos="-1.71 1.27 0.750">
+    <body name="drum_door" pos="-1.71 1.27 0.910">
       <joint name="washer_door" class="h_drumdoor"/>
       <geom name="drum_door_g" class="h_drumdoor" size="0.245 0.022 0.245" pos="0.245 0 0"
             material="drum_glass"/>
       <geom name="drum_door_rim" class="h_drumdoor" size="0.255 0.012 0.045" pos="0.245 0 0.255"
             material="drum_ring"/>
-      <!-- Handle on the far edge from the hinge, at the same height as the opening centre. -->
-      <geom name="drum_handle" type="capsule" fromto="0.475 -0.055 -0.08 0.475 -0.055 0.08"
+      <!--
+        Handle on the far edge from the hinge, at the height of the opening centre, and set
+        FORWARD of the leaf (y=-0.075) rather than level with it.
+
+        The offset is not cosmetic. With the handle in the plane of the door, an open door
+        swings it right across the mouth of the drum: measured the hand stopping dead at
+        y=1.20 for a towel at y=1.32 no matter where the robot stood, with the only contact
+        being fing_r1 against drum_handle. The reach looked like a range failure and was
+        actually the door's own handle barring the opening.
+      -->
+      <geom name="drum_handle" type="capsule" fromto="0.475 -0.075 -0.08 0.475 -0.075 0.08"
             size="0.017" material="tap_mat"/>
-      <site name="drum_handle_site" pos="0.475 -0.055 0" size="0.028" rgba="1 0.4 0 0.35"/>
+      <site name="drum_handle_site" pos="0.475 -0.075 0" size="0.028" rgba="1 0.4 0 0.35"/>
     </body>
 
     <!-- ====================== VANITY / FOLD COUNTER ======================
@@ -256,8 +289,13 @@
          selfcollide="none" is a real simplification: a folded towel will pass through itself.
          Enabling it costs roughly 3x and mattered less than having the rest of the task work.
     -->
-    <flexcomp name="towel_a" type="grid" count="9 7 1" spacing="0.05 0.05 0.05"
-              pos="-1.45 1.45 0.60" dim="2" mass="0.25" radius="0.004"
+    <!--
+      Sitting on the drum floor (z=0.58) and centred in the cavity (y=1.45). The sheet is
+      0.40 x 0.30 and the cavity is 0.40 x 0.34, so it only fits lying flat -- spacing it any
+      wider drapes it over the lip and the "take it out" step starts already half done.
+    -->
+    <flexcomp name="towel_a" type="grid" count="9 7 1" spacing="0.043 0.043 0.05"
+              pos="-1.45 1.45 0.756" dim="2" mass="0.25" radius="0.004"
               material="towel_a_mat">
       <edge equality="true" solref="0.005 1"/>
       <contact condim="3" solref="0.005 1" selfcollide="none"/>
@@ -283,7 +321,30 @@
     pose into eq_data. Without rewriting the pose the solver enforces the compiled offset and
     the towel snaps across the room.
   -->
+  <!--
+    A closed drum door sits flush in its opening and therefore touches the ring, the cavity and
+    the cabinet all at once. Left to collide it is 63 interpenetrating contacts at reset and the
+    solver simply shoves the door open -- measured swinging to -97 degrees on step 200 with no
+    one touching it. The office scene has the same problem and the same fix: exclude the leaf
+    from the frame it lives in.
+
+    Momo is NOT excluded, so a hand still meets the door and can push or pull it.
+  -->
+  <contact>
+    <exclude body1="drum_door" body2="world"/>
+  </contact>
+
   <equality>
+    <!--
+      The drum door handle. A friction grip does not hold it, exactly as a friction grip does
+      not hold an office door handle: measured the hand arriving 0.068 m from the handle,
+      closing, walking backwards, and the door not moving at all. So a closed hand on the
+      handle is a weld, and Skills.open_washer writes the relative pose at the moment of
+      contact -- without that the solver enforces the compiled offset and the door snaps to
+      the hand.
+    -->
+    <weld name="grasp_door_r" body1="palm_r" body2="drum_door" active="false" solref="0.02 1"/>
+
     <weld name="grasp_a_r" body1="palm_r" body2="towel_a_0" active="false" solref="0.01 1"/>
     <weld name="grasp_a_l" body1="palm_l" body2="towel_a_0" active="false" solref="0.01 1"/>
     <weld name="grasp_b_r" body1="palm_r" body2="towel_b_0" active="false" solref="0.01 1"/>
