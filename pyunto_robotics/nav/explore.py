@@ -56,6 +56,16 @@ TRACK_GATE_M = 2.0
 SEARCH_SWEEP_RAD = 1.0
 SEARCH_SWEEP_RATE = 0.09
 
+# Head angles used when surveying the room before committing to a target, radians.
+SURVEY_ANGLES = (-1.0, -0.5, 0.0, 0.5, 1.0)
+
+# Two sightings closer than this in bearing are the same object.
+SURVEY_SEPARATION_RAD = 0.35
+
+# Roughly how wide a door is, used to work out how far apart two sightings must be before they
+# can be different doors rather than two edges of one.
+DOOR_WIDTH_M = 1.0
+
 # A target counts as reached only if it is also roughly ahead. Brushing past a door on the way
 # somewhere else puts it within arm's reach at 30-40 degrees off, which is not arriving at it.
 # 0.30 rad was picked by measurement, not taste: at 0.45 the robot accepted the middle door
@@ -217,6 +227,78 @@ class MaplessNavigator:
             self.landmarks.observe_all(_canonical_label(target), positions, ranges)
 
         return detections, space, fovy, (width, height), obs.depth
+
+    def survey(self, target: str) -> list[tuple[float, float]]:
+        """Turn the head across its range and collect (bearing, range) for everything seen.
+
+        Bearings are body-relative, so the caller can treat the result like one very wide
+        camera frame. This is what makes a spatial qualifier mean what the user meant: a
+        forward frame covers 75 degrees, and from beside a doorway "the left door" resolves
+        against whatever single door happens to be in it. Sweeping the head covers about 190
+        degrees and finds all three from the same spot.
+
+        Duplicates are collapsed by direction rather than by position -- a bearing is enough to
+        say two sightings are the same door, and it avoids the range errors that made an
+        earlier position-based count inflate to four doors in a room with one.
+        """
+        found: list[tuple[float, float, float]] = []  # bearing, range, confidence
+        for angle in SURVEY_ANGLES:
+            self.robot.turn_head_to(angle)
+            detections, _, fovy, size, depth = self._observe(target)
+            for det in detections:
+                u, v = det.pixel(*size)
+                offset = target_offset(depth, u, v, fovy, size, self.robot.head_yaw)
+                if offset is None:
+                    continue
+                bearing, distance = offset
+                # A door subtends more of the view the closer it is, and colour matching
+                # splits a wide one into its two edges. So the angle that separates "two doors"
+                # from "two edges of one door" has to scale with range: from 1.6 m the middle
+                # door came back as two sightings 32 degrees apart, while the real doors either
+                # side sat 68 degrees away.
+                separation = max(
+                    SURVEY_SEPARATION_RAD,
+                    math.atan2(DOOR_WIDTH_M, max(distance, 0.3)),
+                )
+                match = next(
+                    (i for i, (b, _, _) in enumerate(found) if abs(bearing - b) < separation),
+                    None,
+                )
+                if match is None:
+                    found.append((bearing, distance, det.confidence))
+                elif det.confidence > found[match][2]:
+                    found[match] = (bearing, distance, det.confidence)
+        self.robot.face_forward()
+        return [(b, d) for b, d, _ in found]
+
+    def _relative_to(self, position: np.ndarray) -> tuple[float, float]:
+        """Bearing and range from where the robot is now to a fixed world point."""
+        delta = position - self.robot.position[:2]
+        bearing = math.atan2(delta[1], delta[0]) - self.robot.yaw
+        return (bearing + math.pi) % (2 * math.pi) - math.pi, float(np.linalg.norm(delta))
+
+    def _turn_body_to(self, bearing: float, max_steps: int = 200) -> None:
+        """Rotate on the spot until `bearing` is straight ahead."""
+        target = self.robot.yaw + bearing
+        for _ in range(max_steps):
+            error = (target - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
+            if abs(error) < 0.06:
+                break
+            self.robot.step(0.0, 0.0, float(np.clip(error * 1.6, -1.0, 1.0)))
+        self.robot.stand(0.2)
+
+    @staticmethod
+    def _pick_bearing(
+        seen: list[tuple[float, float]], where: str
+    ) -> tuple[float, float] | None:
+        """Choose among surveyed sightings using a spatial word. Bearing is + to the left."""
+        if where == "left":
+            return max(seen, key=lambda s: s[0])
+        if where == "right":
+            return min(seen, key=lambda s: s[0])
+        if where == "middle":
+            return sorted(seen, key=lambda s: s[0])[len(seen) // 2]
+        return None
 
     def _world_position(self, bearing: float, distance: float) -> np.ndarray:
         """Where a detection sits in the world, from its bearing and range.
@@ -457,7 +539,45 @@ class MaplessNavigator:
         detour_side = 1.0
         detour_steps = 0
 
+        # Set when a head sweep resolved the qualifier. That choice was made with far more of
+        # the room in view than the forward camera has, so losing sight of the door is not a
+        # reason to give it up -- the door has not moved.
+        surveyed: np.ndarray | None = None
+
         log.info("navigating to %r", target)
+
+        # A spatial qualifier has to be resolved against everything the robot can see, not just
+        # what is straight ahead. From the start pose the forward camera finds one door and
+        # "the left one" resolves against that; a head sweep finds all three, at -69, -16 and
+        # +69 degrees against truth of -68.2, 0.0 and +68.2. Pick from the sweep, then hand the
+        # chosen door to the approach as a world position so it is tracked like any other.
+        # Only when the forward view is not enough. A sweep costs a couple of seconds of
+        # standing still and, more importantly, resolving the qualifier against a much wider
+        # field changes which door "the left one" names -- from the corridor the forward camera
+        # already sees all three and gets it right, so sweeping there only adds ways to be
+        # wrong. It earns its keep where the forward camera sees one door and the head finds
+        # three, which is the case that used to open the middle door when told the left one.
+        if where in ("left", "right", "middle"):
+            forward, _, _, _, _ = self._observe(target)
+            seen = self.survey(target) if len(forward) < 2 else []
+            if len(seen) > 1:
+                chosen = self._pick_bearing(seen, where)
+                if chosen is not None:
+                    tracked_at = self._world_position(*chosen)
+                    log.info(
+                        "%s %s of %d is at %.0f deg", where, target, len(seen),
+                        math.degrees(chosen[0]),
+                    )
+                    # Set off toward it even though the forward camera cannot see it yet. The
+                    # sweep found the left door at (-4.05, 0.91) -- truth (-4, 1) -- while the
+                    # forward frame held only the middle one 4 m away, so re-acquiring on the
+                    # first frame fails and the correctly-chosen door gets thrown away. Walking
+                    # a few metres in its direction brings it into view, and from there the
+                    # normal approach takes over.
+                    state = NavState.APPROACH
+                    surveyed = tracked_at.copy()
+                    last_seen = (None, *self._relative_to(tracked_at))
+
 
         while steps < max_steps:
             steps += 1
@@ -516,7 +636,7 @@ class MaplessNavigator:
                         searched = 0
                         lost_frames = 0
                         last_seen = None
-                        tracked_at = None
+                        tracked_at = surveyed.copy() if surveyed is not None else None
                         continue
                     located = last_seen
                     if located is None:
@@ -595,7 +715,7 @@ class MaplessNavigator:
                     state = NavState.SEARCH
                     searched = 0
                     last_seen = None
-                    tracked_at = None
+                    tracked_at = surveyed.copy() if surveyed is not None else None
                     continue
 
                 # Rejoin the direct approach once the way ahead genuinely opens up -- but only
