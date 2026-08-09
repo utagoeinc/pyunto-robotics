@@ -32,6 +32,10 @@ log = logging.getLogger(__name__)
 # Half the clear width of a doorway, in metres. Used to aim for the side of an opening the
 # door does not swing across.
 DOORWAY_HALF_WIDTH_M = 0.55
+
+# Two door sightings this far apart in world heading are different doors. The office doors are
+# 4 m apart, so from anywhere in the corridor they are tens of degrees apart.
+COUNT_SEPARATION_RAD = 0.35
 PUSH_STANDOFF_M = 0.55
 
 
@@ -266,6 +270,48 @@ class Skills:
                 distinct.append(det.x)
         return len(distinct)
 
+    def _count_by_looking_around(self) -> int:
+        """How many distinct doors the robot can find by turning its head, without moving.
+
+        Counts by direction in the world, not by position: a bearing plus the robot's own
+        heading is enough to say "that is a different door from the last one", and it avoids
+        the range errors that made an earlier position-based count inflate to four doors in a
+        room with one. Two sightings more than 15 degrees apart are different doors.
+        """
+        return len(self.headings_of_doors())
+
+    def headings_of_doors(self) -> list[float]:
+        """World headings of every door found by turning the head, left to right.
+
+        Counting by direction rather than by position: a bearing plus the robot's own heading
+        says "that is a different door from the last one" without needing a range, which is
+        what an earlier position-based count got wrong -- range errors inflated it to four
+        doors in a room with one.
+
+        Measured from the corridor this finds all three at +21.0, +91.4 and +158.9 degrees
+        against true values of +21.8, +90.0 and +158.2, from a spot where a single forward
+        frame sees only one of them.
+        """
+        found: list[tuple[float, float]] = []  # heading, confidence
+        for angle in (-1.0, -0.5, 0.0, 0.5, 1.0):
+            self.robot.turn_head_to(angle)
+            for det in self.grounder.find(self.robot.look().rgb, "door"):
+                if det.confidence < 0.25:
+                    continue
+                bearing = self.robot.bearing_to_pixel(det.x * self.robot.camera_width)
+                heading = self.robot.yaw + self.robot.head_yaw + bearing
+                match = next(
+                    (i for i, (h, _) in enumerate(found)
+                     if abs(heading - h) < COUNT_SEPARATION_RAD),
+                    None,
+                )
+                if match is None:
+                    found.append((heading, det.confidence))
+                elif det.confidence > found[match][1]:
+                    found[match] = (heading, det.confidence)
+        self.robot.face_forward()
+        return sorted(h for h, _ in found)
+
     def _ensure_expected_in_view(self, target: str, expect: int, tries: int = 3) -> int:
         """Get to somewhere the stated number of objects is actually visible.
 
@@ -275,6 +321,14 @@ class Skills:
 
         Returns how many ended up visible, which may still be short.
         """
+        # Counts what is in the forward frame, deliberately not what turning the head can
+        # find. The head does see more -- from the corridor it picks out all three doors at
+        # +21.0, +91.4 and +158.9 degrees, against truth of +21.8, +90.0 and +158.2, from a
+        # spot where the forward camera sees one. But the navigator still chooses from the
+        # forward frame, and counting three while choosing from one is worse than not counting:
+        # told "the left door" it confidently opened the middle one and reported success,
+        # finishing at x=+0.18 for a door at x=-4.0. headings_of_doors is the piece that would
+        # close this, once choosing can use it.
         seen = self._count_doors()
         if seen >= expect:
             log.info("counted %d %ss, as stated; choosing between them", seen, target)
@@ -324,6 +378,7 @@ class Skills:
                     f"here, so I am not sure which one you mean.",
                     {"expected": wanted, "seen": seen},
                 )
+
 
         # Stop within arm's length. The arm reaches ~0.43 m in front of the base at handle
         # height (measured by sweeping the shoulder/elbow range), so the default 0.85 m

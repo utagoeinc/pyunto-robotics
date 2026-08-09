@@ -201,6 +201,7 @@ def target_offset(
     v: float,
     fovy_deg: float,
     image_size: tuple[int, int],
+    camera_yaw: float = 0.0,
 ) -> tuple[float, float] | None:
     """Convert a pixel into (bearing, distance) in the robot's frame.
 
@@ -214,12 +215,21 @@ def target_offset(
 
     free_space already did this for its clearance columns; target_offset did not, and that was
     the whole reason tracking a door by position kept locking onto its neighbour.
+
+    `camera_yaw` is where the head is pointing relative to the body. Everything downstream
+    steers the body, so the bearing has to be reported in the body's frame; a head turned 45
+    degrees toward a door puts that door in the middle of its own frame, which would otherwise
+    read as "straight ahead". Adding it here rather than at each call site keeps the correction
+    in one place -- applying it in two of them cancelled the head entirely.
     """
     w, h = image_size
     axial = depth_at(depth, u, v, patch=9, percentile=70.0)
     if axial is None:
         return None
     focal = (h / 2.0) / math.tan(math.radians(fovy_deg) / 2.0)
-    bearing = -math.atan2(u - w / 2.0, focal)
-    distance = axial / max(math.cos(bearing), 1e-3)
-    return bearing, distance
+    # Bearing within the image, before accounting for where the camera itself points.
+    in_frame = -math.atan2(u - w / 2.0, focal)
+    # The range correction uses the in-frame angle: it is about where the pixel sits on the
+    # sensor, not about which way the head is turned.
+    distance = axial / max(math.cos(in_frame), 1e-3)
+    return in_frame + camera_yaw, distance

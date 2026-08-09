@@ -242,6 +242,87 @@ class Robot:
                     return True
         return False
 
+    # How far the neck can turn either way, in radians. Matches the joint range in the model.
+    NECK_LIMIT_RAD = 1.75
+
+    # Most the head may turn in one control step, radians -- about 4 rad/s at 50 Hz, which is
+    # fast for a head but well short of a saccade. There is a real optimum here: measured wall
+    # and frame contact over three approaches at 0.015 / 0.05 / 0.08 / 0.12 as 438 / 180 / 6 /
+    # 206 steps. Too slow and the head lags behind the target the body is turning away from;
+    # too fast and every frame is taken mid-swing, pairing a depth reading with a bearing the
+    # camera has already left.
+    NECK_RATE_RAD = 0.08
+
+    @property
+    def head_yaw(self) -> float:
+        """Where the head is pointing relative to the body, in radians. + is left."""
+        joint = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "neck_yaw")
+        return float(self.data.qpos[self.model.jnt_qposadr[joint]])
+
+    def look_at(self, world_point: np.ndarray) -> float:
+        """Hold the head on a fixed point in the world, whatever the body is doing.
+
+        This is the gaze-stabilising half of looking. Commanding a body-relative angle is not
+        enough on its own: walking swings the torso through 66 degrees of yaw, and a head held
+        at a constant angle to it swings with it, so the target crosses the frame twice a
+        stride. Aiming at a world point instead makes each step's command absorb whatever the
+        body just did -- which is what eyes do for a person, and why they can walk toward a
+        door while looking straight at it.
+
+        Returns the body-relative angle actually commanded.
+        """
+        delta = np.asarray(world_point)[:2] - self.position[:2]
+        bearing = math.atan2(delta[1], delta[0]) - self.yaw
+        return self.look_toward((bearing + math.pi) % (2 * math.pi) - math.pi)
+
+    def look_toward(self, bearing: float) -> float:
+        """Turn the head toward a body-relative bearing. Returns what it can actually reach.
+
+        This is what lets the body walk one line while the eyes stay on another. Steering
+        around a wall used to swing the cameras off the door being approached, and with three
+        identical doors in the office the robot would come back to whichever was nearest --
+        so the body could not avoid anything without losing track of where it was going.
+        """
+        target = float(np.clip(bearing, -self.NECK_LIMIT_RAD, self.NECK_LIMIT_RAD))
+        index = self._act.get("neck_yaw")
+        if index is not None:
+            # Move the head at a bounded rate. Snapping it to a new angle each control step
+            # means every frame is taken mid-swing, and a frame taken while the camera is
+            # rotating pairs a depth reading with the wrong bearing: measured a tracked door
+            # landing 1.71 m from where it actually is at a head angle of -28 degrees, against
+            # 0.05 m with the head still. A person does not flick their eyes to a new target
+            # every twentieth of a second either.
+            current = float(self.data.ctrl[index])
+            step = float(np.clip(target - current, -self.NECK_RATE_RAD, self.NECK_RATE_RAD))
+            self.data.ctrl[index] = current + step
+            return current + step
+        return target
+
+    def face_forward(self) -> None:
+        """Bring the head back to straight ahead, and wait for it to get there."""
+        self.turn_head_to(0.0)
+
+    def turn_head_to(self, bearing: float, max_steps: int = 80) -> float:
+        """Turn the head to a bearing and hold still until it arrives.
+
+        look_toward only moves the head one step's worth, because a head that snaps to a new
+        angle takes every frame mid-swing. So a caller that wants to *look* somewhere -- rather
+        than to track something that is moving -- has to keep asking. Measured: a single call
+        followed by stand(0.5) reached 4.4 degrees of a commanded 57.
+        """
+        target = float(np.clip(bearing, -self.NECK_LIMIT_RAD, self.NECK_LIMIT_RAD))
+        for _ in range(max_steps):
+            self.look_toward(target)
+            self.step()
+            if abs(self.head_yaw - target) < 0.02:
+                break
+        return self.head_yaw
+
+    @property
+    def camera_width(self) -> int:
+        """Width of a rendered frame in pixels."""
+        return self._renderer.width
+
     def camera_fovy(self, camera: str = "head_cam") -> float:
         """Vertical field of view in degrees.
 

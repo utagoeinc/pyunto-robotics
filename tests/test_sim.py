@@ -39,7 +39,7 @@ def test_office_loads_with_expected_structure():
             mujoco.mj_id2name(r.model, mujoco.mjtObj.mjOBJ_BODY, i) for i in range(r.model.nbody)
         }
         assert {"door_workspace", "door_meeting", "door_pantry"} <= names
-        assert r.model.nu == 23  # 12 leg + 1 waist + 8 arm + 2 gripper
+        assert r.model.nu == 24  # 12 leg + 1 waist + 1 neck + 8 arm + 2 gripper
     finally:
         r.close()
 

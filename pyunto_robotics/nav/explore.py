@@ -51,6 +51,11 @@ def _canonical_label(target: str) -> str:
 # 0.72 m in a single approach step.
 TRACK_GATE_M = 2.0
 
+# How far either side the head sweeps while searching, and how fast it cycles. Wide enough to
+# reach well past the forward camera's 37 degrees, slow enough that frames are not smeared.
+SEARCH_SWEEP_RAD = 1.0
+SEARCH_SWEEP_RATE = 0.09
+
 # A target counts as reached only if it is also roughly ahead. Brushing past a door on the way
 # somewhere else puts it within arm's reach at 30-40 degrees off, which is not arriving at it.
 # 0.30 rad was picked by measurement, not taste: at 0.45 the robot accepted the middle door
@@ -173,6 +178,9 @@ class MaplessNavigator:
         """
         obs = self.robot.look()
         fovy = self.robot.camera_fovy()
+        # Everything downstream steers the body, so bearings have to be body-relative. The head
+        # can be turned, and a bearing measured in the camera's frame is offset by exactly that.
+        head = self.robot.head_yaw
         height, width = obs.depth.shape
         detections = self.grounder.find(obs.rgb, target)
         space = free_space(obs.depth, fovy)
@@ -183,7 +191,7 @@ class MaplessNavigator:
         ranges = []
         for det in detections:
             u, v = det.pixel(width, height)
-            offset = target_offset(obs.depth, u, v, fovy, (width, height))
+            offset = target_offset(obs.depth, u, v, fovy, (width, height), head)
             if offset is None:
                 continue
 
@@ -251,7 +259,7 @@ class MaplessNavigator:
         measured: list[tuple[Detection, float, float]] = []
         for det in detections:
             u, v = det.pixel(*size)
-            offset = target_offset(depth, u, v, fovy, size)
+            offset = target_offset(depth, u, v, fovy, size, self.robot.head_yaw)
             if offset is None:
                 continue
             bearing, distance = offset
@@ -485,8 +493,14 @@ class MaplessNavigator:
                     tracked_at = self._world_position(bearing, distance)
                     continue
                 if searched > search_steps:
+                    self.robot.face_forward()
                     return NavResult(NavState.SEARCH, target, steps=steps)
-                # Rotate to bring new parts of the room into view.
+                # Sweep the head as the body turns, so each step of the search covers the
+                # head's range as well as the body's. Holding the head still instead was
+                # measured costing a step of the four-step errand, so the extra coverage is
+                # worth more than the occasional frame taken mid-swing.
+                sweep = math.sin(searched * SEARCH_SWEEP_RATE) * SEARCH_SWEEP_RAD
+                self.robot.look_toward(sweep)
                 self.robot.step(0.0, 0.0, 0.7)
                 continue
 
@@ -520,6 +534,12 @@ class MaplessNavigator:
                 # stopped the robot next to the middle door while walking to the right one.
                 if distance <= self.arrive_distance and abs(bearing) <= ARRIVE_BEARING_RAD:
                     log.info("arrived at %s (%.2f m)", target, distance)
+                    # Face front again before handing back. Everything after arrival -- lining
+                    # up on a handle, pushing, walking through -- reads the forward camera, and
+                    # a head still turned toward the target from the approach points it at a
+                    # wall: measured arriving 1 m from the left door with the head at -33
+                    # degrees and reporting it could not find a door.
+                    self.robot.face_forward()
                     self.robot.stand(0.3)
                     return NavResult(
                         NavState.ARRIVED, target, distance=distance, bearing=bearing,
@@ -537,6 +557,15 @@ class MaplessNavigator:
                         target, "left" if detour_side > 0 else "right",
                     )
                     continue
+
+                # Keep the head on the target while the body steers wherever it needs to.
+                # This is the whole reason the neck exists: without it, avoiding a wall swings
+                # the cameras off the door, and with three identical doors in the office the
+                # robot re-acquires whichever is nearest. Measured the head holding a target
+                # 51 degrees off the body's heading, well past the 37 degrees a fixed forward
+                # camera can reach.
+                if tracked_at is not None:
+                    self.robot.look_at(tracked_at)
 
                 turn = float(np.clip(bearing * self.turn_gain, -1.2, 1.2))
                 scale, turn = self._avoid(
@@ -593,6 +622,7 @@ class MaplessNavigator:
                 # front, so the robot slides along the obstruction rather than into it.
                 self.robot.step(*self._wall_follow(space, detour_side))
 
+        self.robot.face_forward()
         return NavResult(NavState.LOST, target, steps=steps)
 
     def face(self, target: str, max_steps: int = 200, where: str | None = None) -> NavResult:

@@ -84,6 +84,21 @@
         <!-- A short neck stub separates the head from the torso so they do not interpenetrate. -->
         <body name="head" pos="0 0 0.455">
           <inertial pos="0 0 0.03" mass="1.2" diaginertia="0.006 0.006 0.005"/>
+          <!--
+            A neck that actually turns. The head used to be welded to the torso, which meant
+            the robot could only look where it was walking: steering around a wall swung the
+            cameras off the door it was heading for, it lost track of which door that was, and
+            with three identical doors in the office it would re-acquire whichever was nearest.
+
+            Turning the head separates the two. The body takes whatever line keeps it clear of
+            the walls while the head stays pointed at the target, which is what a person does
+            walking across a room toward a door.
+
+            +/- 100 degrees is roughly human. Beyond that the robot has to turn its body, which
+            is also what a person does.
+          -->
+          <joint name="neck_yaw" type="hinge" axis="0 0 1" pos="0 0 -0.055"
+                 range="-1.75 1.75" damping="1.5" stiffness="0" armature="0.005"/>
           <geom name="neck_g" type="cylinder" size="0.032 0.030" pos="0 0 -0.055"
                 material="dark_mat"/>
           <geom name="head_g" type="box" size="0.062 0.070 0.062" material="body_mat"/>
@@ -267,6 +282,13 @@
   </contact>
 
   <actuator>
+    <!-- neck (1) -->
+    <!--
+      Strong enough to hold the head against the body's motion while walking, which is the
+      whole point: a head that drifts with the torso is no better than a fixed one.
+    -->
+    <position name="neck_yaw" joint="neck_yaw" ctrlrange="-1.75 1.75" kp="25" kv="2.5"/>
+
     <!-- legs (12) -->
     <position name="hip_yaw_r" joint="hip_yaw_r" ctrlrange="-0.7 0.7" class="leg"/>
     <position name="hip_roll_r" joint="hip_roll_r" ctrlrange="-0.5 0.5" class="leg"/>
