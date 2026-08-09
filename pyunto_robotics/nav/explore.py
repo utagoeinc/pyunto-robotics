@@ -58,6 +58,17 @@ TRACK_GATE_M = 2.0
 # the gate at all and wandered off.
 ARRIVE_BEARING_RAD = 0.30  # ~17 degrees
 
+# Sideways room to leave beyond the robot's own width, in metres. Small: this is "do not scrape"
+# clearance, not a comfortable berth. Asking for a wide margin was measured to cost more than it
+# saved -- it fights every doorway, which is barely wider than the robot -- whereas correcting
+# only when the body genuinely will not fit leaves narrow gaps passable.
+CLEARANCE_MARGIN_M = 0.08
+
+# Inside this range of the target, stop correcting for width. The last stretch of any approach
+# is a narrowing gap, because doors are set into walls; keeping clear there means never getting
+# there.
+CLEARANCE_DISABLE_M = 2.0
+
 
 class NavState(Enum):
     SEARCH = "search"
@@ -313,7 +324,11 @@ class MaplessNavigator:
     # -- steering -----------------------------------------------------------------
 
     def _avoid(
-        self, space: FreeSpace, desired_turn: float, target_bearing: float = 0.0
+        self,
+        space: FreeSpace,
+        desired_turn: float,
+        target_bearing: float = 0.0,
+        target_distance: float = math.inf,
     ) -> tuple[float, float]:
         """Blend the desired heading with what the depth image says is safe.
 
@@ -326,6 +341,23 @@ class MaplessNavigator:
         it just parks against the wall with the target in sight and never arrives.
         """
         ahead = space.clearance_ahead(half_angle=0.35)
+
+        # Before anything else, check the body actually fits along the way it is being steered.
+        # Range alone cannot tell: a wall a metre ahead and slightly off to one side reads as a
+        # comfortable clearance in every direction, and the robot walks into it shoulder first
+        # and scrapes along it. Asking "how much room is there beside the line I am walking"
+        # catches that, and the answer only has meaning against a width, which the robot knows.
+        # Not on the last stretch, though. A doorway is 1.1 m wide against a 0.67 m body, so
+        # from close up the target itself reads as a gap the robot barely fits through -- which
+        # is true, and steering away from it is exactly wrong. Ten tests failed that way:
+        # contact fell, but the robot stopped arriving anywhere.
+        if target_distance > CLEARANCE_DISABLE_M:
+            half_width = self.robot.half_width
+            gap = space.widest_gap(desired_turn, half_width)
+            if gap < CLEARANCE_MARGIN_M:
+                roomier = space.clearest_heading(desired_turn, half_width)
+                if space.widest_gap(roomier, half_width) > gap:
+                    desired_turn = roomier
 
         if ahead > self.safety_distance * 2.5:
             return 1.0, desired_turn
@@ -479,7 +511,9 @@ class MaplessNavigator:
                     continue
 
                 turn = float(np.clip(bearing * self.turn_gain, -1.2, 1.2))
-                scale, turn = self._avoid(space, turn, target_bearing=bearing)
+                scale, turn = self._avoid(
+                    space, turn, target_bearing=bearing, target_distance=distance
+                )
 
                 if scale == 0.0 and turn == 0.0:
                     return NavResult(

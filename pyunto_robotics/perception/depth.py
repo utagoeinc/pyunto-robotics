@@ -19,6 +19,14 @@ import numpy as np
 MIN_VALID_M = 0.12
 
 
+# How far ahead an obstacle has to be before it stops constraining how wide a path needs to be.
+# Near enough that the robot is committed to passing it, far enough that a wall at the end of a
+# corridor does not read as an immediate squeeze. Measured across a sweep: 2.4 m makes distant
+# walls constrain the width and wall contact goes back up nearly fivefold, because the robot
+# swerves for things it would have turned past anyway.
+LOOKAHEAD_M = 1.2
+
+
 @dataclass(frozen=True)
 class FreeSpace:
     """How far the robot could travel in each of several directions."""
@@ -32,6 +40,56 @@ class FreeSpace:
         if not mask.any():
             return float(self.ranges.min())
         return float(self.ranges[mask].min())
+
+    def widest_gap(self, heading: float, half_width: float) -> float:
+        """Sideways room to spare when travelling along `heading`, in metres.
+
+        Negative means the body does not fit. Positive is how much margin there is.
+
+        Range alone cannot answer "will I fit". A wall a metre ahead and slightly to the left
+        reads as a comfortable range in every direction, and the robot walks into it shoulder
+        first. What matters is how far each obstacle sits from the line of travel, sideways,
+        compared with how wide the robot is -- so that is what this measures: for every bearing
+        with something in it, the perpendicular distance from that obstacle to the intended
+        path, minus the half-width.
+        """
+        offsets = self.bearings - heading
+        # Only obstacles roughly ahead can be walked into; something at 80 degrees is passed,
+        # not hit, and including it makes every corridor look impassable.
+        relevant = np.abs(offsets) < math.pi / 3.0
+        if not relevant.any():
+            return float("inf")
+
+        # Perpendicular distance from the obstacle to the line of travel, and how far along
+        # that line it sits.
+        lateral = np.abs(self.ranges[relevant] * np.sin(offsets[relevant]))
+        forward = self.ranges[relevant] * np.cos(offsets[relevant])
+
+        # Only obstacles within the next stretch of travel constrain the width. A wall straight
+        # ahead has a lateral offset of zero at any distance, so without this every direction in
+        # an open room reports "will not fit" -- measured -0.32 m in all directions in an empty
+        # lobby. What is far away gets steered around long before it is reached.
+        soon = (forward > 0.0) & (forward < LOOKAHEAD_M)
+        if not soon.any():
+            return float("inf")
+        return float(lateral[soon].min() - half_width)
+
+    def clearest_heading(
+        self, prefer: float, half_width: float, spread: float = 0.35
+    ) -> float:
+        """The heading near `prefer` that leaves the body the most room.
+
+        Deliberately a small search around the direction the robot already wants to go, not a
+        free choice of any direction. Steering purely for clearance walks away from the target;
+        nudging the heading by up to `spread` keeps the errand while taking the roomier line
+        through a gap.
+        """
+        options = prefer + np.linspace(-spread, spread, 9)
+        gaps = [self.widest_gap(float(h), half_width) for h in options]
+
+        # Prefer room, but break ties toward the heading actually wanted.
+        scores = [g - 0.25 * abs(float(h) - prefer) for g, h in zip(gaps, options, strict=True)]
+        return float(options[int(np.argmax(scores))])
 
     def best_bearing(self, prefer: float = 0.0, min_range: float = 1.0) -> float | None:
         """The most open direction, breaking ties toward `prefer`.

@@ -171,6 +171,61 @@ class Robot:
         right = self.look("look_right").depth
         return float(np.percentile(left, 5)), float(np.percentile(right, 5))
 
+    @property
+    def half_width(self) -> float:
+        """How far the body sticks out sideways from its centre line, in metres.
+
+        Measured from the model rather than declared, so it stays true if the robot changes.
+        Currently 0.334 m, set by the forearms -- wider than the torso, which is why an
+        approach that clears the chest can still catch an arm on a door frame.
+
+        This is what turns "there is a wall 0.3 m to my left" into "I do not fit", and a real
+        robot needs the same number for the same reason. It is a property, not a constant,
+        because the arms move: reaching out makes the robot wider.
+        """
+        base = self.position[:2]
+        cos_yaw, sin_yaw = math.cos(-self.yaw), math.sin(-self.yaw)
+        root = self.model.body_rootid[
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "torso")
+        ]
+
+        widest = 0.0
+        for geom in range(self.model.ngeom):
+            if self.model.body_rootid[self.model.geom_bodyid[geom]] != root:
+                continue
+            offset = self.data.geom_xpos[geom][:2] - base
+            # Rotate into the body frame; y is the sideways axis.
+            lateral = abs(cos_yaw * offset[1] - sin_yaw * offset[0])
+            widest = max(widest, lateral + float(self.model.geom_size[geom].max()))
+        return widest
+
+    def arm_is_blocked(self) -> bool:
+        """Whether either arm is pressed against something it cannot pull away from.
+
+        An arm resting on a desk or held out by a door leaf will not come in when the servo is
+        commanded home -- the contact wins -- and the robot stays at its widest. Knowing this
+        is what lets it back off first and then tuck.
+        """
+        arm_parts = ("uarm", "farm", "palm", "fing")
+        root = self.model.body_rootid[
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "torso")
+        ]
+        for i in range(self.data.ncon):
+            geoms = (self.data.contact.geom1[i], self.data.contact.geom2[i])
+            names = [
+                mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom) or ""
+                for geom in geoms
+            ]
+            if not any(any(p in n for p in arm_parts) for n in names):
+                continue
+            # Only scenery counts. Tucked-in arms rest against the robot's own chest, and
+            # treating that as a jam meant the tuck reported failure the moment it succeeded --
+            # measured "blocked" with a perfectly normal 0.330 m half-width, the contacts being
+            # farm_r and farm_l against torso_g.
+            if any(self.model.body_rootid[self.model.geom_bodyid[g]] != root for g in geoms):
+                return True
+        return False
+
     def is_touching(self, keyword: str) -> bool:
         """Whether the robot is in contact with scenery whose geom name contains `keyword`.
 

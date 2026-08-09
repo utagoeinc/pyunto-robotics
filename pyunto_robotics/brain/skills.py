@@ -661,6 +661,13 @@ class Skills:
         if self._doorway_return is None:
             return SkillResult(False, "I do not remember how I came in.")
 
+        # Tuck the arms in before going anywhere near the opening. An outstretched arm is the
+        # widest thing on the robot: measured half-width 0.496 m against 0.334 m with the arms
+        # down, so a 0.67 m body becomes a 0.99 m one trying to fit a 1.10 m doorway. That is
+        # why it snags on the frame and cannot get clear -- the gap it is aiming for is barely
+        # wider than it has made itself.
+        self._tuck_arms()
+
         target = self._doorway_return.copy()
 
         # Aim for the far side of the opening from the hinge. A door pushed to 109 degrees does
@@ -736,11 +743,44 @@ class Skills:
             # against it and keep walking; the leaf gives way and the robot goes through.
             if self._touching_door():
                 self._hold_door_open()
+            elif self.robot.arm_is_blocked():
+                # An arm has fouled something -- a desk edge, the frame. Left alone the robot
+                # keeps pushing against it and stops making ground: measured stalled at y=1.04
+                # with the doorway 4 cm away, arm jammed, for the rest of the step budget.
+                # Pull the arms in, and if the contact still holds them out, turn slightly to
+                # slide the arm off whatever it is caught on. Turning rather than reversing:
+                # backing off mid-exit gives up the ground the loop is spending its budget to
+                # win, and every variant that retreated here cost two other rooms, while a turn
+                # keeps the robot where it is.
+                self._narrow_arms()
+                if self.robot.arm_is_blocked():
+                    for _ in range(10):
+                        self.robot.step(wz=self._loose_nudge * 0.4)
+                    self._loose_nudge = -self._loose_nudge
+                    self._narrow_arms()
             elif self.robot.is_touching("wall"):
                 # Caught on the frame rather than the leaf. Holding the door open does nothing
                 # for this -- the obstruction is the jamb against a shoulder -- so back off and
                 # come at the gap from a slightly different angle, as when pushing in.
                 self._work_loose()
+
+        # A last straight push if the loop ran out while still inside. The steering loop stops
+        # making ground once the heading error sits just under its squaring-up threshold --
+        # measured 4 cm short of the opening, 23 degrees wide, walking sideways along the
+        # threshold. Facing the way out and walking is all that is needed from there.
+        if self.report_position().data.get("room") == started_in:
+            exit_heading = (
+                self._doorway_heading + math.pi
+                if self._doorway_heading is not None
+                else self.robot.yaw
+            )
+            self._turn_to(exit_heading)
+            for _ in range(120):
+                if self.report_position().data.get("room") != started_in:
+                    break
+                if self._touching_door():
+                    self._hold_door_open()
+                self.robot.step(0.35)
 
         # Get clear of the leaf before finishing. Ending the manoeuvre still in contact leaves
         # whatever runs next -- return_home, another door -- starting from 0.17 m of clearance
@@ -748,6 +788,13 @@ class Skills:
         for _ in range(40):
             if not self._touching_door() and self._clearance_ahead() > 0.7:
                 break
+            # Never reverse back into the room. This step exists to get off the leaf, but it
+            # reverses along the way the robot came, which is through the doorway: measured
+            # reaching the corridor at y=0.92 and being pushed back to y=1.04, inside, so the
+            # errand reported failure after actually succeeding. Sidestep instead once out.
+            if self.report_position().data.get("room") != started_in:
+                self.robot.step(0.0, 0.3, 0.0)
+                continue
             self.robot.step(-0.35, 0.25, 0.0)
         self.robot.stand(0.3)
 
@@ -834,6 +881,40 @@ class Skills:
                 best_distance = distance
                 best_x = float(self.robot.model.body_pos[bid][0])
         return best_x
+
+    def _tuck_arms(self) -> None:
+        """Bring both arms in close, so the body is as narrow as it can be.
+
+        Narrower than arm_home, which rests them slightly out from the body. Used before
+        anything that has to fit through a gap.
+        """
+        # Back off first if an arm is pressed against anything. A pinned arm cannot be pulled
+        # in -- the servo is commanded home but the contact holds it out, and the robot stays as
+        # wide as it was: measured tucking from 0.420 m down to only 0.391 m instead of the
+        # 0.299 m the same command reaches in free space. A short reverse unloads it.
+        #
+        # Not just doors. In the workspace it was a fingertip resting on a desk that held the
+        # arm out, which a door-only test missed entirely.
+        for _ in range(30):
+            if not self.robot.arm_is_blocked():
+                break
+            self.robot.step(vx=-0.3)
+
+        self._narrow_arms()
+
+    def _narrow_arms(self) -> None:
+        """Command both arms in against the body. Does not move the feet."""
+        for side in ("l", "r"):
+            # Roll toward the body, not away from it. arm_home rolls outward by 0.12, which is
+            # what leaves the forearms as the widest part of the robot; the opposite sign pulls
+            # them in against the ribs. Measured 0.334 m half-width at rest against 0.299 m
+            # here, so tucking is worth 7 cm on each side of a doorway.
+            sign = 1.0 if side == "r" else -1.0
+            self.robot.set_arm(side, shoulder_pitch=-0.25, shoulder_roll=sign * 0.05,
+                               shoulder_yaw=0.0, elbow=-0.35)
+            self.robot.grip(side, 0.0)
+        self.robot.stand(0.3)
+
 
     def _hold_door_open(self, side: str = "r", steps: int = 90) -> None:
         """Brace an arm against the leaf and push on through.
