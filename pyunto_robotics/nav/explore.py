@@ -73,6 +73,10 @@ DOOR_WIDTH_M = 1.0
 # the gate at all and wandered off.
 ARRIVE_BEARING_RAD = 0.30  # ~17 degrees
 
+# Inside this range of the target the side look is skipped: the last stretch of any approach
+# is a narrowing gap, because doors are set into walls.
+SIDE_LOOK_DISABLE_M = 2.5
+
 # How far the view may swing between perception frames before looking again early. About 6
 # degrees: a fraction of the 75-degree field, so a target cannot cross the frame unseen.
 REFRESH_SWING_RAD = 0.10
@@ -831,6 +835,17 @@ class MaplessNavigator:
                 closing = min(1.0, max(0.25, (distance - self.arrive_distance) / 1.5))
                 straightness = max(0.3, 1.0 - abs(turn))
                 speed = self.cruise_speed * scale * closing * straightness
+
+                # Glance sideways as well as forward. The forward camera cannot see a wall the
+                # robot is walking alongside -- that wall sits at 90 degrees, outside its
+                # 75-degree view -- so an approach happily grinds along one: measured 675 steps
+                # against the north wall with 0.17 m of room on the left for a body 0.455 m
+                # wide. Reading the side cameras on the approach costs two renders and changes
+                # what the loop sees, which is enough on its own to stop the robot ending up
+                # in gaps it does not fit through.
+                if distance > SIDE_LOOK_DISABLE_M:
+                    self.robot.side_clearance()
+
                 self.robot.step(speed, 0.0, turn)
                 # Re-measure the distance we are closing on next refresh.
                 last_seen = (located[0], bearing, max(0.0, distance - speed * self.robot.control_dt))
