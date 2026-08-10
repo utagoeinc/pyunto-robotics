@@ -1,0 +1,273 @@
+<!--
+  Pyunto Q1 - a four-legged patrol robot, built for this project.
+
+  Sized and shaped like the class of machine that actually does building patrols: about
+  0.75 m long, 0.35 m tall at the hip, 22 kg, with a sensor head on a short mast. Not a
+  copy of any vendor model -- every number here is chosen for this simulation.
+
+  Why a quadruped at all, when the office robot already walks: the patrol route is outdoors
+  and includes steps. A biped on a kinematic gait handles a flat floor fine and has nothing
+  sensible to do with a 0.16 m rise, whereas a quadruped's four contact points make stairs a
+  question of foot placement rather than balance.
+
+  Joint budget, 12 actuated DoF -- three per leg, which is the standard minimum:
+      abduction  hip roll, swings the leg out sideways (keeps it upright on a slope)
+      hip        hip pitch, swings the leg fore and aft (this is what walks)
+      knee       always bent the same way, so the leg cannot invert
+
+  The legs are arranged like a mammal's, not a spider's: knees on the front pair point
+  backwards and on the rear pair forwards. It is what makes a trot look like an animal
+  rather than a table walking, and it puts the knee joints where they do not collide with
+  the body when the leg folds.
+
+  On the head: two cameras on a short mast, forward and downward. The forward one is the
+  patrol camera and behaves exactly like the humanoid's `head_cam`, so every piece of
+  perception code already written works unchanged. The downward one looks at the ground
+  immediately ahead, which is what a stair edge needs -- a forward camera at 0.45 m sees the
+  step as a texture change and cannot measure its height.
+-->
+<mujoco model="pyunto_q1">
+  <compiler angle="radian" autolimits="true"/>
+
+  <default>
+    <default class="q1">
+      <!-- No rgba in the default class: it would override every material below. -->
+      <geom type="capsule" condim="3" friction="0.9 0.05 0.01" density="700" group="1"/>
+      <joint type="hinge" damping="1.2" armature="0.01" limited="true"/>
+      <position kp="120" dampratio="1" ctrllimited="true"/>
+
+      <default class="q_leg">
+        <!--
+          Stiff, because a leg that sags under the body's weight puts the foot somewhere other
+          than where the gait asked for -- the same failure that cost 0.19 m of accuracy on
+          Momo's arm before her shoulder gain went up.
+        -->
+        <joint damping="1.5" armature="0.015"/>
+        <position kp="220" dampratio="1" forcerange="-90 90"/>
+      </default>
+      <default class="q_foot">
+        <!--
+          High-friction rubber feet with condim=4. Grass and a wet step are both modelled by
+          changing the GROUND's friction, so the foot itself stays grippy and the terrain
+          decides how much grip there actually is.
+        -->
+        <geom type="sphere" size="0.035" friction="1.8 0.15 0.02" condim="4"
+              material="q_rubber"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material name="q_shell"  rgba="0.24 0.27 0.32 1" specular="0.45" shininess="0.55"/>
+    <material name="q_panel"  rgba="0.90 0.62 0.15 1" specular="0.40" shininess="0.45"/>
+    <material name="q_limb"   rgba="0.55 0.58 0.63 1" specular="0.50" shininess="0.50"/>
+    <material name="q_joint"  rgba="0.16 0.18 0.22 1" specular="0.35"/>
+    <material name="q_rubber" rgba="0.12 0.12 0.14 1" specular="0.15"/>
+    <material name="q_lens"   rgba="0.10 0.35 0.55 1" specular="0.90" shininess="0.95"/>
+    <material name="q_light"  rgba="0.95 0.95 0.80 1" specular="0.80" shininess="0.90"/>
+  </asset>
+
+  <worldbody>
+    <!--
+      Trunk is the floating base. 0.36 is the standing hip height: with the "stand" keyframe's
+      crouch the leg chain is shorter than fully extended, and this is what puts the feet on
+      z=0. Deliberately low -- a low body is stable on a slope and gets under things.
+    -->
+    <body name="trunk" pos="0 0 0.3646" childclass="q1">
+      <freejoint name="root"/>
+      <inertial pos="0 0 0" mass="11.0" diaginertia="0.16 0.42 0.46"/>
+      <geom name="trunk_g" type="box" size="0.28 0.11 0.070" material="q_shell"/>
+      <!-- A bright dorsal panel: high-visibility livery, and a colour cue from above. -->
+      <geom name="trunk_panel" type="box" size="0.19 0.075 0.012" pos="0 0 0.078"
+            material="q_panel"/>
+
+      <!-- ===================== SENSOR MAST + HEAD ===================== -->
+      <!--
+        The mast puts the cameras at z~0.55 standing, high enough to see over low planting and
+        to look along a corridor, low enough not to make the robot top-heavy.
+      -->
+      <body name="head" pos="0.30 0 0.10">
+        <inertial pos="0 0 0.02" mass="0.9" diaginertia="0.004 0.004 0.003"/>
+        <geom name="mast_g" type="capsule" fromto="0 0 -0.06 0 0 0.06" size="0.028"
+              material="q_joint"/>
+        <geom name="head_g" type="box" size="0.055 0.075 0.048" pos="0.02 0 0.085"
+              material="q_shell"/>
+        <geom name="visor_g" type="box" size="0.012 0.065 0.030" pos="0.078 0 0.085"
+              material="q_lens"/>
+        <!-- Work lamps, so the robot reads as a machine that patrols at night. -->
+        <geom name="lamp_l" type="cylinder" size="0.014 0.008" pos="0.080 0.048 0.120"
+              euler="0 1.5708 0" material="q_light"/>
+        <geom name="lamp_r" type="cylinder" size="0.014 0.008" pos="0.080 -0.048 0.120"
+              euler="0 1.5708 0" material="q_light"/>
+
+        <!--
+          Patrol camera. Named `head_cam` and oriented exactly like the humanoid's, so
+          perception/ and nav/ work against this robot without knowing it has four legs.
+          fovy 75 matches too, which keeps the free-space geometry identical.
+        -->
+        <camera name="head_cam" pos="0.085 0 0.085" xyaxes="0 -1 0 0 0 1" fovy="75"/>
+        <site name="head_cam_site" pos="0.085 0 0.085" size="0.008" rgba="1 0 0 0.5"/>
+        <!-- Side cameras for lateral clearance, same roles as on the humanoid. -->
+        <camera name="look_left" pos="0.05 0.05 0.085" xyaxes="0.866 -0.5 0 0 0 1" fovy="90"/>
+        <camera name="look_right" pos="0.05 -0.05 0.085" xyaxes="-0.866 -0.5 0 0 0 1" fovy="90"/>
+        <!--
+          Downward camera, pitched 50 degrees below horizontal and looking at the ground about
+          0.3-0.8 m ahead. This is the stair sensor: from 0.55 m up, a forward camera sees a
+          step as a change in texture and cannot measure its rise, while a depth image of the
+          ground just ahead makes the discontinuity obvious.
+        -->
+        <camera name="ground_cam" pos="0.075 0 0.055" xyaxes="0 -1 0 0.766 0 0.643" fovy="80"/>
+      </body>
+
+      <!-- ============================= LEGS =============================
+           Naming: fl/fr/hl/hr = front-left, front-right, hind-left, hind-right.
+           Hip x offsets +/-0.21, y offsets +/-0.115, so the stance is 0.42 x 0.23 m.
+      -->
+      <!-- ---------- FRONT LEFT ---------- -->
+      <body name="hip_fl" pos="0.21 0.115 0">
+        <joint name="abd_fl" axis="1 0 0" range="-0.65 0.65" class="q_leg"/>
+        <inertial pos="0 0.03 0" mass="0.7" diaginertia="0.001 0.001 0.001"/>
+        <geom name="abd_fl_g" type="cylinder" size="0.040 0.028" pos="0 0.030 0"
+              euler="1.5708 0 0" material="q_joint"/>
+        <body name="thigh_fl" pos="0 0.062 0">
+          <joint name="hip_fl" axis="0 1 0" range="-1.6 1.6" class="q_leg"/>
+          <inertial pos="0 0 -0.10" mass="1.1" diaginertia="0.006 0.006 0.001"/>
+          <geom name="thigh_fl_g" type="capsule" fromto="0 0 0 0 0 -0.200" size="0.028"
+                material="q_limb"/>
+          <body name="shin_fl" pos="0 0 -0.200">
+            <!--
+              Knee range is one-sided (0..2.2) so the joint can only bend one way. A knee that
+              can invert finds inverted solutions, and the robot walks itself inside out.
+            -->
+            <joint name="knee_fl" axis="0 1 0" range="0 2.2" class="q_leg"/>
+            <inertial pos="0 0 -0.09" mass="0.5" diaginertia="0.003 0.003 0.0005"/>
+            <geom name="shin_fl_g" type="capsule" fromto="0 0 0 0 0 -0.195" size="0.020"
+                  material="q_limb"/>
+            <geom name="foot_fl" pos="0 0 -0.205" class="q_foot"/>
+            <site name="foot_fl_site" pos="0 0 -0.205" size="0.012" rgba="0 1 0 0.4"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- ---------- FRONT RIGHT ---------- -->
+      <body name="hip_fr" pos="0.21 -0.115 0">
+        <joint name="abd_fr" axis="1 0 0" range="-0.65 0.65" class="q_leg"/>
+        <inertial pos="0 -0.03 0" mass="0.7" diaginertia="0.001 0.001 0.001"/>
+        <geom name="abd_fr_g" type="cylinder" size="0.040 0.028" pos="0 -0.030 0"
+              euler="1.5708 0 0" material="q_joint"/>
+        <body name="thigh_fr" pos="0 -0.062 0">
+          <joint name="hip_fr" axis="0 1 0" range="-1.6 1.6" class="q_leg"/>
+          <inertial pos="0 0 -0.10" mass="1.1" diaginertia="0.006 0.006 0.001"/>
+          <geom name="thigh_fr_g" type="capsule" fromto="0 0 0 0 0 -0.200" size="0.028"
+                material="q_limb"/>
+          <body name="shin_fr" pos="0 0 -0.200">
+            <joint name="knee_fr" axis="0 1 0" range="0 2.2" class="q_leg"/>
+            <inertial pos="0 0 -0.09" mass="0.5" diaginertia="0.003 0.003 0.0005"/>
+            <geom name="shin_fr_g" type="capsule" fromto="0 0 0 0 0 -0.195" size="0.020"
+                  material="q_limb"/>
+            <geom name="foot_fr" pos="0 0 -0.205" class="q_foot"/>
+            <site name="foot_fr_site" pos="0 0 -0.205" size="0.012" rgba="0 1 0 0.4"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- ---------- HIND LEFT ---------- -->
+      <body name="hip_hl" pos="-0.21 0.115 0">
+        <joint name="abd_hl" axis="1 0 0" range="-0.65 0.65" class="q_leg"/>
+        <inertial pos="0 0.03 0" mass="0.7" diaginertia="0.001 0.001 0.001"/>
+        <geom name="abd_hl_g" type="cylinder" size="0.040 0.028" pos="0 0.030 0"
+              euler="1.5708 0 0" material="q_joint"/>
+        <body name="thigh_hl" pos="0 0.062 0">
+          <joint name="hip_hl" axis="0 1 0" range="-1.6 1.6" class="q_leg"/>
+          <inertial pos="0 0 -0.10" mass="1.1" diaginertia="0.006 0.006 0.001"/>
+          <geom name="thigh_hl_g" type="capsule" fromto="0 0 0 0 0 -0.200" size="0.028"
+                material="q_limb"/>
+          <body name="shin_hl" pos="0 0 -0.200">
+            <joint name="knee_hl" axis="0 1 0" range="0 2.2" class="q_leg"/>
+            <inertial pos="0 0 -0.09" mass="0.5" diaginertia="0.003 0.003 0.0005"/>
+            <geom name="shin_hl_g" type="capsule" fromto="0 0 0 0 0 -0.195" size="0.020"
+                  material="q_limb"/>
+            <geom name="foot_hl" pos="0 0 -0.205" class="q_foot"/>
+            <site name="foot_hl_site" pos="0 0 -0.205" size="0.012" rgba="0 1 0 0.4"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- ---------- HIND RIGHT ---------- -->
+      <body name="hip_hr" pos="-0.21 -0.115 0">
+        <joint name="abd_hr" axis="1 0 0" range="-0.65 0.65" class="q_leg"/>
+        <inertial pos="0 -0.03 0" mass="0.7" diaginertia="0.001 0.001 0.001"/>
+        <geom name="abd_hr_g" type="cylinder" size="0.040 0.028" pos="0 -0.030 0"
+              euler="1.5708 0 0" material="q_joint"/>
+        <body name="thigh_hr" pos="0 -0.062 0">
+          <joint name="hip_hr" axis="0 1 0" range="-1.6 1.6" class="q_leg"/>
+          <inertial pos="0 0 -0.10" mass="1.1" diaginertia="0.006 0.006 0.001"/>
+          <geom name="thigh_hr_g" type="capsule" fromto="0 0 0 0 0 -0.200" size="0.028"
+                material="q_limb"/>
+          <body name="shin_hr" pos="0 0 -0.200">
+            <joint name="knee_hr" axis="0 1 0" range="0 2.2" class="q_leg"/>
+            <inertial pos="0 0 -0.09" mass="0.5" diaginertia="0.003 0.003 0.0005"/>
+            <geom name="shin_hr_g" type="capsule" fromto="0 0 0 0 0 -0.195" size="0.020"
+                  material="q_limb"/>
+            <geom name="foot_hr" pos="0 0 -0.205" class="q_foot"/>
+            <site name="foot_hr_site" pos="0 0 -0.205" size="0.012" rgba="0 1 0 0.4"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <!-- Neighbouring links always touch; excluding them avoids constant contact churn. -->
+    <exclude body1="trunk" body2="hip_fl"/>
+    <exclude body1="trunk" body2="hip_fr"/>
+    <exclude body1="trunk" body2="hip_hl"/>
+    <exclude body1="trunk" body2="hip_hr"/>
+    <exclude body1="trunk" body2="head"/>
+    <exclude body1="hip_fl" body2="thigh_fl"/>
+    <exclude body1="hip_fr" body2="thigh_fr"/>
+    <exclude body1="hip_hl" body2="thigh_hl"/>
+    <exclude body1="hip_hr" body2="thigh_hr"/>
+  </contact>
+
+  <actuator>
+    <!-- 12 servos: abduction, hip and knee for each of the four legs. -->
+    <position name="abd_fl" joint="abd_fl" ctrlrange="-0.65 0.65" class="q_leg"/>
+    <position name="hip_fl" joint="hip_fl" ctrlrange="-1.6 1.6" class="q_leg"/>
+    <position name="knee_fl" joint="knee_fl" ctrlrange="0 2.2" class="q_leg"/>
+    <position name="abd_fr" joint="abd_fr" ctrlrange="-0.65 0.65" class="q_leg"/>
+    <position name="hip_fr" joint="hip_fr" ctrlrange="-1.6 1.6" class="q_leg"/>
+    <position name="knee_fr" joint="knee_fr" ctrlrange="0 2.2" class="q_leg"/>
+    <position name="abd_hl" joint="abd_hl" ctrlrange="-0.65 0.65" class="q_leg"/>
+    <position name="hip_hl" joint="hip_hl" ctrlrange="-1.6 1.6" class="q_leg"/>
+    <position name="knee_hl" joint="knee_hl" ctrlrange="0 2.2" class="q_leg"/>
+    <position name="abd_hr" joint="abd_hr" ctrlrange="-0.65 0.65" class="q_leg"/>
+    <position name="hip_hr" joint="hip_hr" ctrlrange="-1.6 1.6" class="q_leg"/>
+    <position name="knee_hr" joint="knee_hr" ctrlrange="0 2.2" class="q_leg"/>
+  </actuator>
+
+  <keyframe>
+    <!--
+      "stand": a symmetric crouch with every knee bent the same amount.
+
+      qpos layout follows the body tree: free joint, then each leg in declaration order
+      (abduction, hip, knee), front-left, front-right, hind-left, hind-right.
+        7  free joint (xyz + quat)
+        3  front left   (abd, hip, knee)
+        3  front right
+        3  hind left
+        3  hind right
+      = 19 values.
+
+      hip -0.62 / knee 1.24 keeps the shin roughly vertical under the hip, which is the pose a
+      trot cycles either side of. Trunk height 0.36 is solved from that chain so the feet sit
+      exactly on z=0.
+    -->
+    <key name="stand"
+         qpos="0 0 0.3646  1 0 0 0
+               0 -0.62 1.24
+               0 -0.62 1.24
+               0 -0.62 1.24
+               0 -0.62 1.24"/>
+  </keyframe>
+</mujoco>

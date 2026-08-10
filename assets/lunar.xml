@@ -1,0 +1,278 @@
+<!--
+  The lunar south pole, for the R1 rover.
+
+  A 60 x 50 m patch of cratered regolith with a lander, a few scientific targets, and the
+  lighting that makes the polar region what it is. The terrain is generated procedurally in
+  Python (sim/terrain.lunar_south_pole) rather than loaded from a file, so nothing here
+  depends on an external asset.
+
+  What is physically different about the Moon, and what each difference costs the rover:
+
+  * **Gravity is 1.62 m/s^2**, not 9.81. This is set in <option> and it changes driving more
+    than it sounds: the rover weighs a sixth of what it does on Earth, so the friction its
+    wheels can generate is a sixth as much. It accelerates gently, it cannot climb what it
+    could on Earth, and it takes a long time to settle after a bump.
+
+  * **The regolith grips well but yields.** Modelled with high friction and a soft contact
+    (solref), so wheels bite but the surface gives slightly, which is what a fine unconsolidated
+    powder does.
+
+  * **The lighting is brutal.** At the pole the Sun sits within a couple of degrees of the
+    horizon and never rises, so shadows are enormously long and crater floors are permanently
+    dark. There is no atmosphere to scatter light into them: what the Sun does not hit is
+    black. That is modelled with a near-horizontal directional light, almost no ambient, and a
+    black sky. It matters for perception, not just for looks -- a camera-driven rover here
+    genuinely cannot see into a shadowed crater, which is the real problem at the lunar pole.
+
+  Layout (x east, y north; the rover starts near the lander in the south):
+
+        y=+25 ┌──────────────────────────────────────────────┐
+              │        CRATER A (large)      ridge            │
+              │                                              │
+              │   CRATER B          [ICE]                    │
+              │        (large)                               │
+        y=0   │                     small craters   [BEACON] │
+              │                                              │
+              │   [LANDER]                                   │
+        y=-25 └──────────────────────────────────────────────┘
+              x=-30                                      x=+30
+
+  The named sites are what the rover is asked to drive to. Like the patrol waypoints, they
+  live in the scene rather than in Python, so moving a target here moves it for the skills too.
+-->
+<mujoco model="pyunto_lunar">
+  <include file="pyunto_r1.xml"/>
+
+  <statistic center="0 0 2" extent="30"/>
+
+  <!--
+    Lunar gravity. Everything else in this project runs at Earth's 9.81; this is the one scene
+    where that number is wrong, and getting it right is most of what makes driving here feel
+    different from driving on the campus lawn.
+
+    timestep 0.004 with Newton: the rover has six wheel contacts on a heightfield, which is the
+    most contact-heavy scene in the project.
+  -->
+  <option timestep="0.004" gravity="0 0 -1.62" iterations="40" solver="Newton" cone="elliptic"/>
+
+  <visual>
+    <!--
+      Almost no ambient and no headlight. On the Moon there is no atmosphere to scatter light,
+      so a surface facing away from the Sun is genuinely black -- and a rover's camera really
+      cannot see into a shadowed crater. Leaving the default headlight on would light the whole
+      scene evenly and quietly remove the single most interesting perception problem here.
+    -->
+    <headlight diffuse="0.10 0.10 0.11" ambient="0.13 0.13 0.15" specular="0 0 0"/>
+    <rgba haze="0 0 0 1"/>
+    <global azimuth="20" elevation="-8" offwidth="1600" offheight="1200"/>
+    <map znear="0.05" zfar="200"/>
+    <quality shadowsize="8192"/>
+  </visual>
+
+  <asset>
+    <!-- Black sky. No atmosphere, so no blue and no gradient -- just stars, which at this
+         scale is a very dark grey. -->
+    <texture type="skybox" builtin="gradient" rgb1="0.02 0.02 0.03" rgb2="0.00 0.00 0.01"
+             width="512" height="640"/>
+
+    <!--
+      The regolith heightfield. 128 x 128 over 60 x 50 m is a 0.47 m cell, which is finer than
+      the rover's 1.04 m wheelbase, so a crater rim is resolved rather than averaged away.
+      Elevation data comes from sim/terrain.lunar_south_pole; this only reserves the space.
+
+      Base thickness 0.05: thin, so the field reads as ground rather than as a plinth -- the
+      campus lawn was a visible slab at 0.1.
+    -->
+    <!--
+      Total relief is 1.4 m, not the 3.2 the first version had.
+
+      The rover's wheels are 0.40 m across and its belly clears the ground by about 0.26 m, so
+      3.2 m of relief over 60 m produced crater walls it simply could not climb: dropped into
+      one beside the beacon it managed 0.0-1.4 m in each of the four compass directions before
+      stopping, which is stuck by any definition. Craters still read clearly at 1.4 m -- the
+      rims cast the same long shadows -- but they are now obstacles the rover can be routed
+      around and, at the shallow end, driven through.
+    -->
+    <hfield name="regolith_hf" nrow="128" ncol="128" size="30 25 1.4 0.05"/>
+
+    <!-- Regolith is mid-grey and very matte: it reflects little and scatters what it does. -->
+    <material name="regolith" rgba="0.42 0.41 0.40 1" specular="0.02" shininess="0.02"/>
+    <material name="rock"     rgba="0.30 0.29 0.28 1" specular="0.05"/>
+    <material name="rock_lit" rgba="0.52 0.51 0.49 1" specular="0.08"/>
+
+    <!-- The things people put here. Bright by design, and the only reliable colour cues in a
+         world where everything natural is grey. -->
+    <material name="lander_body" rgba="0.84 0.69 0.24 1" specular="0.75" shininess="0.80"/>
+    <material name="lander_leg"  rgba="0.72 0.72 0.75 1" specular="0.60"/>
+    <material name="solar"       rgba="0.18 0.29 0.54 1" specular="0.80" shininess="0.85"/>
+    <material name="beacon_mat"  rgba="0.92 0.34 0.18 1" specular="0.40"/>
+    <material name="ice_mat"     rgba="0.78 0.86 0.92 1" specular="0.65" shininess="0.70"/>
+    <material name="flag_mat"    rgba="0.90 0.90 0.92 1" specular="0.30"/>
+  </asset>
+
+  <default>
+    <default class="l_prop">
+      <geom type="box" condim="3" friction="0.9 0.05 0.01" group="1"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <!--
+      The Sun, 3 degrees above the horizon in the east. This is the defining feature of the
+      lunar polar environment: the light comes in almost horizontally, so every rock throws a
+      shadow tens of metres long and crater floors never see it at all.
+
+      castshadow is on and shadowsize is 8192 because those shadows are the point.
+    -->
+    <light name="sun" pos="-55 -18 9.0" dir="0.90 0.28 -0.34" directional="true"
+           diffuse="1.0 0.98 0.94" specular="0.30 0.30 0.30" castshadow="true"/>
+    <!--
+      Fill light, standing in for sunlight bounced off nearby slopes.
+
+      Both this and the sun's elevation are a deliberate compromise. Physically the polar Sun
+      sits 1-3 degrees up and the fill is nearly nil, which is what the first version had --
+      and it rendered a scene so dark that the craters, the lander and the rover were all
+      barely discernible even to a human eye. The point of this environment is to drive a rover
+      around and watch it, so the Sun is lifted to about 20 degrees and the bounce raised until
+      the terrain reads.
+
+      What survives the compromise is the thing that matters: light still arrives from low and
+      to one side, shadows are still long and directional, and crater floors facing away from
+      the Sun are still much darker than their rims. A camera-driven rover here still has to
+      cope with half the world being in shadow.
+    -->
+    <light name="bounce" pos="30 25 12" dir="-0.7 -0.6 -0.55" directional="true"
+           diffuse="0.16 0.16 0.18"/>
+
+    <!--
+      The surface. The hfield IS the ground here -- unlike the campus, where a flat plane
+      carried the paving and the heightfield was a patch of lawn on top of it. A rover
+      driving on the Moon has nowhere flat to be.
+    -->
+    <geom name="surface" type="hfield" hfield="regolith_hf" pos="0 0 0"
+          material="regolith" condim="4" friction="1.1 0.08 0.02" solref="0.02 1"/>
+
+    <camera name="overview" pos="0 -46 30" xyaxes="1 0 0 0 0.62 0.79"/>
+    <camera name="lander_cam" pos="-14 -26 6" xyaxes="0.92 0.39 0 -0.16 0.37 0.92"/>
+    <camera name="chase" mode="trackcom" pos="-5 -5 3.2" xyaxes="0.71 -0.71 0 0.32 0.32 0.89"/>
+
+    <!-- ============================ THE LANDER ============================
+         The rover's home base and the brightest object on the surface. Four legs, a gold
+         thermal-blanketed body, and solar panels -- the silhouette reads as a lander from any
+         angle, which matters because it is the landmark the rover navigates back to.
+    -->
+    <body name="lander" pos="-14.0 -18.0 1.35">
+      <geom name="lander_core" type="cylinder" size="1.15 0.70" material="lander_body"/>
+      <geom name="lander_top" type="cylinder" size="0.85 0.22" pos="0 0 0.85"
+            material="lander_leg"/>
+      <!-- Solar wings, angled to catch a Sun that never gets above a few degrees. -->
+      <geom name="lander_panel_l" type="box" size="1.75 0.85 0.035" pos="0 2.35 0.55"
+            euler="0.35 0 0" material="solar"/>
+      <geom name="lander_panel_r" type="box" size="1.75 0.85 0.035" pos="0 -2.35 0.55"
+            euler="-0.35 0 0" material="solar"/>
+      <!-- Four splayed legs with footpads. -->
+      <geom name="leg_1" type="capsule" fromto="0.75 0.75 -0.55 1.75 1.75 -1.35" size="0.075"
+            material="lander_leg"/>
+      <geom name="leg_2" type="capsule" fromto="-0.75 0.75 -0.55 -1.75 1.75 -1.35" size="0.075"
+            material="lander_leg"/>
+      <geom name="leg_3" type="capsule" fromto="0.75 -0.75 -0.55 1.75 -1.75 -1.35" size="0.075"
+            material="lander_leg"/>
+      <geom name="leg_4" type="capsule" fromto="-0.75 -0.75 -0.55 -1.75 -1.75 -1.35"
+            size="0.075" material="lander_leg"/>
+      <geom name="pad_1" type="cylinder" size="0.30 0.05" pos="1.75 1.75 -1.38"
+            material="lander_leg"/>
+      <geom name="pad_2" type="cylinder" size="0.30 0.05" pos="-1.75 1.75 -1.38"
+            material="lander_leg"/>
+      <geom name="pad_3" type="cylinder" size="0.30 0.05" pos="1.75 -1.75 -1.38"
+            material="lander_leg"/>
+      <geom name="pad_4" type="cylinder" size="0.30 0.05" pos="-1.75 -1.75 -1.38"
+            material="lander_leg"/>
+      <!-- A flag, because every lunar scene has one and it gives the eye a scale reference. -->
+      <geom name="flagpole" type="cylinder" size="0.03 0.9" pos="1.5 0 1.6"
+            material="lander_leg"/>
+      <geom name="flag" type="box" size="0.32 0.02 0.20" pos="1.82 0 2.35"
+            material="flag_mat"/>
+    </body>
+
+    <!-- ========================= SCIENCE TARGETS =========================
+         Things the rover can be sent to. Each is visually distinct, because on a grey world
+         the only findable objects are the ones that are not grey.
+    -->
+    <!-- An ice deposit at the edge of a shadowed area: pale blue-white, the thing a polar
+         prospecting rover is actually looking for. -->
+    <body name="ice_patch" pos="8.0 12.0 0">
+      <geom name="ice_1" type="ellipsoid" size="1.30 1.00 0.22" pos="0 0 0.10"
+            material="ice_mat"/>
+      <geom name="ice_2" type="ellipsoid" size="0.75 0.60 0.16" pos="1.60 0.70 0.08"
+            material="ice_mat"/>
+      <geom name="ice_3" type="ellipsoid" size="0.55 0.45 0.12" pos="-1.40 -0.60 0.06"
+            material="ice_mat"/>
+    </body>
+
+    <!--
+      A survey beacon: a bright orange mast, deliberately the most visible small object on the
+      surface, so "drive to the beacon" is a solvable perception problem.
+
+      Placed on flat ground, and that placement is measured rather than chosen by eye. At its
+      first position it sat on a crater rim with 0.78 m of relief within 3 m, and a rover that
+      got there could then drive only 0.1 m north or west before stopping -- reaching the
+      target stranded it. Here the local relief is 0.35 m and it can leave in any direction.
+    -->
+    <body name="beacon" pos="18.0 2.0 0">
+      <geom name="beacon_base" type="cylinder" size="0.45 0.14" pos="0 0 0.14"
+            material="lander_leg"/>
+      <geom name="beacon_mast" type="cylinder" size="0.075 1.05" pos="0 0 1.30"
+            material="beacon_mat"/>
+      <geom name="beacon_top" type="sphere" size="0.28" pos="0 0 2.45" material="beacon_mat"/>
+    </body>
+
+    <!-- Boulders. Grey on grey, so they are genuinely hard to see except by the shadows they
+         throw -- which is exactly the problem this environment is meant to pose. -->
+    <geom name="rock_1" type="ellipsoid" size="1.15 0.95 0.75" pos="-4.0 4.0 0.4"
+          material="rock" group="1"/>
+    <geom name="rock_2" type="ellipsoid" size="0.75 0.65 0.55" pos="3.5 -6.0 0.3"
+          material="rock_lit" group="1"/>
+    <geom name="rock_3" type="ellipsoid" size="1.55 1.25 0.95" pos="-9.0 8.5 0.5"
+          material="rock" group="1"/>
+    <geom name="rock_4" type="ellipsoid" size="0.60 0.55 0.45" pos="11.0 3.0 0.25"
+          material="rock_lit" group="1"/>
+    <geom name="rock_5" type="ellipsoid" size="0.95 0.80 0.62" pos="-18.0 -6.0 0.35"
+          material="rock" group="1"/>
+    <geom name="rock_6" type="ellipsoid" size="1.30 1.05 0.85" pos="20.0 9.0 0.45"
+          material="rock" group="1"/>
+
+    <!-- ========================== TARGET SITES ==========================
+         Read by brain/lunar.py, so the mission is defined by the scene. Named rather than
+         numbered, because a rover's targets are places with meaning, not just corners of a
+         loop the way the patrol waypoints are.
+    -->
+    <site name="target_lander" pos="-14.0 -18.0 0.5" size="0.5" rgba="0.9 0.75 0.2 0.35"/>
+    <site name="target_ice" pos="8.0 12.0 0.5" size="0.5" rgba="0.7 0.85 0.95 0.35"/>
+    <site name="target_beacon" pos="18.0 2.0 0.5" size="0.5" rgba="0.95 0.4 0.2 0.35"/>
+    <!-- The rim of the large northern crater: the interesting and dangerous place to drive. -->
+    <site name="target_crater" pos="-4.0 15.0 0.5" size="0.5" rgba="0.6 0.6 0.7 0.35"/>
+  </worldbody>
+
+  <keyframe>
+    <!--
+      qpos = rover only (21): the lunar scene adds no joints of its own.
+
+      "start" parks the rover just east of the lander, facing north (+y) out across the
+      surface. Its forward axis is +x, so the quaternion (0.7071,0,0,0.7071) is +90 degrees
+      about z -- the same convention as every other scene here.
+
+      z=2.6 rather than the rover's own 0.46: the surface is a heightfield and the ground near
+      the lander is well above the field's zero. Starting slightly high and letting it settle
+      is far more robust than trying to compute the terrain height in a keyframe.
+    -->
+    <key name="start"
+         qpos="-10.5 -18.0 2.6   0.7071 0 0 0.7071
+               0 0 0 0 0 0 0
+               0 0 0 0 0 0 0"/>
+    <!-- "plain" starts out on the open surface, away from the lander, for driving tests. -->
+    <key name="plain"
+         qpos="0 -6.0 2.6   0.7071 0 0 0.7071
+               0 0 0 0 0 0 0
+               0 0 0 0 0 0 0"/>
+  </keyframe>
+</mujoco>

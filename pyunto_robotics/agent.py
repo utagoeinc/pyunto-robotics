@@ -51,13 +51,21 @@ class RobotAgent:
         planner: RulePlanner | None = None,
         max_steps_per_message: int = 4,
         on_idle: Callable[[], None] | None = None,
+        skills: object | None = None,
     ):
         self.robot = robot
         self.client = client
         self.planner = planner or RulePlanner()
-        # The skills get the planner too, so they can ask it to think about a choice before
-        # doing something irreversible -- opening a door is not undoable in the way walking is.
-        self.skills = Skills(robot, grounder, planner=self.planner)
+        # Any object with `run(action, argument, where, expect) -> SkillResult` will do. The
+        # office humanoid's Skills is the default; the laundry, patrol and lunar robots pass
+        # their own, which is what lets one agent drive four very different machines.
+        #
+        # The office skills get the planner too, so they can ask it to think about a choice
+        # before doing something irreversible -- opening a door is not undoable in the way
+        # walking is.
+        self.skills = (
+            skills if skills is not None else Skills(robot, grounder, planner=self.planner)
+        )
         self.max_steps_per_message = max_steps_per_message
         # Called repeatedly while waiting for work. Used to keep a viewer window responsive;
         # it runs on the same thread as the simulation, which is where MuJoCo needs it.

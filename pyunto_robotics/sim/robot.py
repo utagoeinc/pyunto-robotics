@@ -58,6 +58,13 @@ class Robot:
         if not path.is_absolute():
             path = ASSETS / path
         self.model = mujoco.MjModel.from_xml_path(str(path))
+        # Fill any procedural heightfields before the first step. A hfield declared in XML has
+        # a size but no elevation data, so an outdoor scene loaded without this is dead flat.
+        # Harmless for scenes with no heightfield, which is why it lives here rather than
+        # being something every caller has to remember.
+        from .terrain import apply as apply_terrain  # noqa: PLC0415 - avoids a circular import
+
+        apply_terrain(self.model)
         self.data = mujoco.MjData(self.model)
 
         self.gait: Gait = gait if gait is not None else KinematicGait()

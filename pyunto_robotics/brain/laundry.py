@@ -23,6 +23,22 @@ has to choose a vertex, and the choice is not arbitrary: lifting a towel by its 
 it into a bundle, and lifting two diagonally opposite corners does the same. Folding needs two
 ADJACENT corners carried to the opposite edge, which is why ClothSheet names its corners by
 which edge they sit on.
+
+Known limitation, stated plainly because it is the one thing here that does not work:
+
+    Folding a towel that has just come out of the drum does not reliably succeed.
+
+Every individual step does. `open_washer`, `take_out` and `put_on_counter` all pass, and `fold`
+is deterministic and repeatable on a towel that is lying flat -- 0.50 m across to 0.28 m, twice
+out of two from the `counter` keyframe. But a towel carried out of the washer lands bunched, and
+folding a bunched sheet drags the whole gathered mass off the counter instead of folding it.
+`_spread` was written to flatten it first and does not do enough: the pull moves the bundle
+rather than opening it out.
+
+What that costs, concretely: the chain "take the towel out and fold it" gets three steps in and
+then reports honestly that it pulled the towel off the surface. The fix is a proper two-handed
+spread -- pin one corner and drag the opposite one -- which needs the arms to work together in
+a way nothing else here requires.
 """
 
 from __future__ import annotations
@@ -30,8 +46,6 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Any
-
 import mujoco
 import numpy as np
 
@@ -370,6 +384,55 @@ class LaundrySkills:
         )
         return error, vertex, side
 
+    def _spread(self, sheet: ClothSheet, pulls: int = 2) -> float:
+        """Flatten a bunched towel by dragging opposite corners apart. Returns the new span.
+
+        Not a nicety: a fold needs a flat sheet. A towel dropped on a surface after being
+        carried is gathered around wherever it was held, and pulling one corner of a gathered
+        towel moves the whole bundle rather than folding it.
+
+        Each pull takes the corner furthest from the sheet's centre and drags it outward along
+        that line, which is what a person does with two hands at once and this robot has to do
+        one hand at a time.
+        """
+        for _ in range(max(1, pulls)):
+            centre = self.cloth.sheet_centre(sheet)
+            perimeter = sheet.perimeter()
+            # The corner that has travelled least far from the middle is the one holding the
+            # bundle together, so it is the one worth pulling out.
+            offsets = {
+                v: float(np.linalg.norm(self.cloth.vertex_position(sheet, v)[:2] - centre[:2]))
+                for v in perimeter
+            }
+            vertex = min(offsets, key=lambda v: offsets[v])
+
+            # Reach from where the robot already stands rather than searching for a new spot.
+            # find_standing_spot teleports the base between candidates, and a base that lands
+            # against the counter drags the towel with it -- which is the very thing this is
+            # trying to undo. If the corner is out of reach from here, skip the pull.
+            side = self._hand_for(self.cloth.vertex_position(sheet, vertex))
+            grabbed, _ = self._grasp_vertex(sheet, vertex, side)
+            if not grabbed:
+                continue
+
+            # Drag outward along the line from the centre, staying just above the surface.
+            here = self.cloth.vertex_position(sheet, vertex)
+            direction = here[:2] - centre[:2]
+            norm = float(np.linalg.norm(direction))
+            direction = direction / norm if norm > 1e-6 else np.array([1.0, 0.0])
+            target = np.array([
+                here[0] + direction[0] * 0.16,
+                here[1] + direction[1] * 0.16,
+                here[2] + 0.03,
+            ])
+            self.robot.reach_to(target, side, passes=3)
+            self.robot.grip(side, 0.0)
+            self.cloth.release(side)
+            self.robot.arm_home(side)
+            self.robot.stand(0.8)
+
+        return self.cloth.sheet_extent(sheet)
+
     def _lateral_of(self, point: np.ndarray) -> float:
         """How far to the robot's left a world point is, in metres. Negative is right."""
         offset = np.asarray(point)[:2] - self.robot.position[:2]
@@ -557,6 +620,81 @@ class LaundrySkills:
             {"swing_degrees": swing},
         )
 
+    def close_washer(self) -> SkillResult:
+        """Push the washing machine door shut again.
+
+        The mirror of open_washer, and it needs no weld: a door is closed by pushing, and the
+        arm can push a light leaf without holding on to it. Only pulling needs a grip, because
+        a hand cannot pull on something it is not attached to.
+        """
+        joint = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_JOINT, "washer_door")
+        if joint < 0:
+            return SkillResult(False, "There is no washing machine door in this room.")
+        address = self.robot.model.jnt_qposadr[joint]
+        before = abs(math.degrees(float(self.robot.data.qpos[address])))
+        if before < 10.0:
+            return SkillResult(True, "The washing machine is already closed.")
+
+        # Aim at the outer edge of the open leaf, which is the part that has to travel.
+        handle = self._site_position("drum_handle_site")
+        if handle is None:
+            return SkillResult(False, "I cannot find the washing machine door.")
+
+        self._stand_near(handle, offset=0.30)
+        side = self._hand_for(handle)
+        self.robot.grip(side, 0.0)
+        self.robot.reach_to(handle, side, passes=3)
+
+        # Sweep the arm across the door's arc. Walking into it would drive the robot into the
+        # machine; the door has to be pushed sideways, which is what the arm is for.
+        best = before
+        stalled = 0
+        for _ in range(300):
+            self.robot.step(vx=0.10, wz=-0.35 if side == "r" else 0.35)
+            angle = abs(math.degrees(float(self.robot.data.qpos[address])))
+            if angle < best - 0.5:
+                best, stalled = angle, 0
+            else:
+                stalled += 1
+                if stalled > 70 or angle < 8.0:
+                    break
+
+        self.robot.arm_home(side)
+        self.robot.stand(0.4)
+        after = abs(math.degrees(float(self.robot.data.qpos[address])))
+        if after < 20.0:
+            return SkillResult(
+                True,
+                f"I closed the washing machine ({before:.0f} degrees open, now {after:.0f}).",
+                {"before": before, "after": after},
+            )
+        return SkillResult(
+            False,
+            f"I pushed the washing machine door but it is still {after:.0f} degrees open.",
+            {"before": before, "after": after},
+        )
+
+    def bring_basket(self) -> SkillResult:
+        """Report that the basket cannot be moved.
+
+        The laundry basket is fixed scenery in this room: it stands on a plinth so its contents
+        are inside the arm's reach band, and it has no free joint, so there is nothing for the
+        robot to pick up and carry.
+
+        This exists so that asking for it gets a straight answer rather than an unhelpful
+        "I do not know how to that". Reporting a limit clearly is a better outcome than a
+        silent no-op, and the robot can still do the useful half: go and stand by it.
+        """
+        basket = self._site_position("basket_site")
+        if basket is None:
+            return SkillResult(False, "I cannot find the laundry basket.")
+        return SkillResult(
+            False,
+            "I cannot carry the basket -- it is fixed to the floor in this room. "
+            "I can take the laundry to it instead.",
+            {"basket": basket.tolist()},
+        )
+
     def take_out(self, towel: str | None = None, side: str = "r") -> SkillResult:
         """Take a towel out of the drum and hold it.
 
@@ -642,17 +780,26 @@ class LaundrySkills:
         self.robot.reach_to(above, side, passes=3)
         self.robot.grip(side, 0.0)
         self.cloth.release(side)
-        self.robot.stand(0.6)
+        # Move the arm away BEFORE waiting, then give the towel time to actually fall.
+        # Releasing the weld is not the same as the towel being free: measured it hanging at
+        # z=0.62 directly over a basket whose rim is at 0.32, draped across the forearm, which
+        # reads as "did not land in the basket" for a drop that was perfectly aimed.
         self.robot.arm_home(side)
+        self.robot.stand(2.0)
 
         sheet = self.cloth.sheets.get(held[0])
         landed = self.cloth.sheet_centre(sheet) if sheet else None
         if landed is None:
             return SkillResult(True, "I put the towel in the basket.")
+        # "In the basket" is judged against the basket's own floor, which is on a plinth, not
+        # against the ground. A fixed z<0.45 test was left over from a floor-standing basket
+        # and failed a towel sitting correctly inside the raised one.
+        floor = self._geom_position("basket_floor")
+        lip = float(floor[2]) if floor is not None else 0.0
         inside = (
             abs(landed[0] - basket[0]) < 0.34
             and abs(landed[1] - basket[1]) < 0.28
-            and landed[2] < 0.45
+            and landed[2] < lip + 0.30
         )
         if not inside:
             return SkillResult(
@@ -672,9 +819,12 @@ class LaundrySkills:
         counter = self._geom_position("counter_g")
         if counter is None:
             return SkillResult(False, "I cannot find the counter.")
-        # Aim for the near half of the counter top, which is what the arm can reach standing
-        # in front of it, and clear of the basin at the far end.
-        surface = np.array([counter[0] - 0.15, counter[1] - 0.18, counter[2] + 0.03])
+        # Aim for the middle of the counter's depth, not its near lip. The arm can reach the
+        # near half standing in front of it, but a towel released over the edge slides off:
+        # the sheet is 0.30 m deep and the counter only 0.60 m, so letting go 0.18 m in from
+        # the front leaves half of it hanging in mid-air. Aiming at the centre line puts the
+        # whole sheet on the surface. Still clear of the basin, which is at the far end in x.
+        surface = np.array([counter[0] - 0.20, counter[1], counter[2] + 0.03])
 
         side = self._loaded_hand(side)
         if side is None:
@@ -686,7 +836,11 @@ class LaundrySkills:
                 sheet = self._sheet(towel)
                 if sheet is None:
                     return SkillResult(False, "I cannot find a towel to move.")
-                graspable = sheet.perimeter()
+                # Any vertex will do here, not just the perimeter. A towel that has been
+                # dropped into a basket is crumpled, so its "edge" is wherever the folds put
+                # it and the topmost reachable point is a better handle than a nominal corner
+                # buried in the pile.
+                graspable = list(range(sheet.count))
                 vertex, _ = self.cloth.nearest_vertex(
                     sheet, self.robot.position, among=graspable
                 )
@@ -701,19 +855,42 @@ class LaundrySkills:
                 self._lift_to(CARRY_HEIGHT_M, side)
 
         held = self.cloth.holding(side)
+
+        # Approach the counter from IN FRONT of it (south, -y), not from whichever side the
+        # robot happens to be on. Walking straight at the surface from the west put the robot
+        # level with the counter's end, and the towel went down across the corner at x=0.54
+        # against an edge at x=0.52 -- half on, half off, and it slid.
+        #
+        # Standing back in y and reaching north puts the whole sheet over the surface.
+        approach = np.array([surface[0], surface[1] - 0.75])
+        self._walk_to(approach, stop_at=0.25)
+        self._turn_to(math.pi / 2)
         self._stand_near(surface)
         self.robot.reach_to(np.array([surface[0], surface[1], surface[2] + 0.10]), side,
                             passes=3)
         self.robot.grip(side, 0.0)
         self.cloth.release(side)
-        self.robot.stand(0.8)
+        # Arm away first, THEN wait. Releasing the weld does not free the towel if it is still
+        # draped over the forearm -- the same thing that made a perfectly aimed drop into the
+        # basket read as a miss.
         self.robot.arm_home(side)
+        self.robot.stand(2.0)
 
         sheet = self.cloth.sheets.get(held[0]) if held else self._sheet(towel)
         if sheet is None:
             return SkillResult(True, "I put the towel on the counter.")
         landed = self.cloth.sheet_centre(sheet)
-        on_top = landed[2] > counter[2] - 0.05
+        # Judge against the counter's TOP SURFACE, and require the towel to be within its
+        # footprint as well as at its height. The first version tested only
+        # `z > counter_centre - 0.05`, which a towel lying on the floor at z=0.014 passes
+        # nowhere near -- but a towel draped over the edge and hanging down passes easily,
+        # and so does one that slid off onto a cabinet. Both were reported as success.
+        top = float(counter[2]) + 0.02
+        on_top = (
+            landed[2] > top - 0.12
+            and abs(landed[0] - counter[0]) < 0.70
+            and abs(landed[1] - counter[1]) < 0.34
+        )
         if not on_top:
             return SkillResult(
                 False,
@@ -741,6 +918,20 @@ class LaundrySkills:
 
         before = self.cloth.sheet_extent(sheet)
         centre = self.cloth.sheet_centre(sheet)
+
+        # A towel that arrived from the drum lands crumpled, and folding a crumpled sheet drags
+        # it off the counter rather than folding it: the corners are bunched, so carrying one
+        # across pulls the whole gathered mass with it. Measured a fold from the washer ending
+        # with the towel on the floor at z=0.015 where the same fold on a flat sheet works.
+        #
+        # So spread it first if it is not already flat. A flat 0.40 x 0.30 sheet spans 0.50 m;
+        # anything much under that is bunched up.
+        if before < 0.42 and centre[2] > 0.6:
+            log.info("towel is bunched (span %.2f m); spreading it before folding", before)
+            self._spread(sheet)
+            before = self.cloth.sheet_extent(sheet)
+            centre = self.cloth.sheet_centre(sheet)
+
         if centre[2] < 0.6:
             return SkillResult(
                 False,
@@ -792,11 +983,24 @@ class LaundrySkills:
                 self.robot.arm_home(side)
                 continue
 
+            # Lift just clear of the surface, carry across, and set down.
+            #
+            # The lift height is narrow and was found by measurement, not chosen:
+            #
+            #   0.16 m  the corner peels the whole sheet off the counter and the towel ends up
+            #           on the floor -- and it still LOOKS folded, because a towel gathered on
+            #           the floor has a small span too (measured 0.28 -> 0.24 m at z=0.014)
+            #   0.07 m  too low: the corner drags across the surface and nothing folds
+            #   0.10 m  still nothing (span unchanged at 0.50 m)
+            #   0.13 m  folds and stays put: 0.50 -> 0.28 m with the sheet at z=0.811
+            #
+            # The window is that tight because the sheet is only 0.30 m deep; lift much more
+            # than a third of that and you are picking the towel up rather than folding it.
             hand = self.robot.hand_position(side)
-            self.robot.reach_to(np.array([hand[0], hand[1], hand[2] + 0.16]), side, passes=2)
+            self.robot.reach_to(np.array([hand[0], hand[1], hand[2] + 0.13]), side, passes=2)
             landing = self.cloth.vertex_position(sheet, landings[vertex])
             self.robot.reach_to(
-                np.array([landing[0], landing[1], landing[2] + 0.06]), side, passes=3
+                np.array([landing[0], landing[1], landing[2] + 0.05]), side, passes=3
             )
             self.robot.grip(side, 0.0)
             self.cloth.release(side)
@@ -815,6 +1019,20 @@ class LaundrySkills:
         grabbed = folded
 
         after = self.cloth.sheet_extent(sheet)
+        landed = self.cloth.sheet_centre(sheet)
+
+        # A towel that ended up on the floor is not a folded towel, however small its span.
+        # This check exists because the span test alone passed one: dragging a sheet off the
+        # counter gathers it up, so the extent drops exactly as a real fold would make it drop
+        # -- 0.28 m to 0.24 m -- and the skill reported success for a towel lying at z=0.014.
+        if landed[2] < centre[2] - 0.25:
+            return SkillResult(
+                False,
+                f"I pulled the towel off the surface while folding it "
+                f"(it is {landed[2]:.2f} m up now).",
+                {"extent_before": before, "extent_after": after, "height": float(landed[2])},
+            )
+
         if after < FOLDED_EXTENT_M:
             return SkillResult(
                 True,
@@ -912,6 +1130,8 @@ class LaundrySkills:
         """Execute one planner-issued action."""
         handlers = {
             "open_washer": lambda: self.open_washer(),
+            "close_washer": lambda: self.close_washer(),
+            "bring_basket": lambda: self.bring_basket(),
             "take_out": lambda: self.take_out(argument),
             "to_basket": lambda: self.put_in_basket(),
             "to_counter": lambda: self.put_on_counter(argument),

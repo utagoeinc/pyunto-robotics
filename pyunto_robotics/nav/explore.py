@@ -127,6 +127,13 @@ DETOUR_MIN_STEPS = 40  # commit for at least this long, or it oscillates in and 
 # a door standing open on the way takes several detours, and at 320 the budget ran out mid-way.
 DETOUR_MAX_STEPS = 500
 
+# How much room to keep beside the body while following a wall, in metres. Just over the
+# robot's own half-width, so it travels alongside rather than against.
+WALL_STANDOFF_M = 0.55
+
+# Sideways speed used to hold that gap, m/s.
+WALL_PUSH_OFF = 0.10
+
 
 @dataclass
 class NavResult:
@@ -466,6 +473,7 @@ class MaplessNavigator:
             aim = side * 0.8
 
         turn = float(np.clip(aim * self.turn_gain, -1.2, 1.2))
+
         # Back off if genuinely nose-first into something, otherwise keep edging forward.
         if ahead < self.safety_distance * 0.8:
             return -0.15, 0.0, turn

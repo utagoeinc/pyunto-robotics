@@ -1,11 +1,10 @@
 <!--
-  Momo - a 1.50 m companion robot for the home environment.
+  Momo - a 1.43 m companion robot for the home environment.
 
   Why this exists as a separate model from pyunto_h1:
 
-    * 1.50 m, not 1.38 m, and proportioned for a household rather than an office. The tasks
-      here are at counter height (0.85 m) and inside a drum washer whose door centre sits at
-      0.55 m, so the arm has to reach DOWN and IN, not up at a door handle.
+    * Proportioned for a household rather than an office. The tasks here are at counter height
+      and inside a drum washer, so the arm has to reach DOWN and IN, not up at a door handle.
     * Two-finger grippers sized for fabric, not for a 3.6 cm door handle. Fabric is grasped by
       welding a cloth vertex to the palm (see brain/laundry.py), the same mechanism the office
       robot uses for door handles, so the finger geometry only has to look right and provide
@@ -14,22 +13,55 @@
       product requirement, not decoration: this robot is the face of a consumer app, and the
       one thing a user sees before anything else is what it looks like.
 
-  On the appearance, since it is unusual to write this down in a physics model:
+  ============================ ORIENTATION: READ THIS FIRST ============================
 
-  Everything here is MuJoCo primitives - spheres, capsules, boxes, ellipsoids. There are no
-  meshes and nothing is loaded from disk. "Cute" out of primitives is mostly proportion, and
-  the proportions are chosen deliberately:
+  The robot faces +x. The face, the apron, the collar ribbon and head_cam all point that way.
 
-    * Head is 0.115 m in radius on a 1.50 m body - about 1:5.4 head-to-height, against roughly
-      1:7.5 for an adult human. Large heads read as young and unthreatening; this is the single
-      biggest lever and everything else is secondary to it.
-    * Eyes are large, set wide and low on the face, with a bright highlight sphere on each.
-      Low-set wide eyes are the classic infant-schema cue.
-    * Round everything. Shoulders, hands, knees and hips are spheres; limbs are capsules. There
-      is not a sharp exposed corner above the ankles.
-    * Hair is a shell of overlapping spheres with side locks framing the face, plus a single
-      strand standing up (the "ahoge") which is what stops the silhouette reading as a helmet.
-    * A skirt as a truncated cone, so the lower body has a distinct silhouette from the legs.
+  They did not originally: the face was modelled looking along -y while head_cam looked along
+  +x, so the robot walked sideways relative to its own face and every photograph caught it in
+  profile. When adding anything to the front of this model -- a face feature, a hair strand, a
+  garment detail -- the forward offset goes in x, never in y.
+
+  ================================= THE APPEARANCE =================================
+
+  Everything here is MuJoCo primitives: spheres, capsules, boxes, ellipsoids. There are no
+  meshes and nothing is loaded from disk. The target is a Japanese anime character, and out of
+  primitives that comes down to a handful of specific decisions:
+
+    * PROPORTION. Head 0.112 m in half-width on a 1.43 m body, roughly 1:6 head-to-height
+      against about 1:7.5 for an adult. The skull is narrow front-to-back and wide across,
+      because an anime head gets its width from hair rather than bone.
+
+    * A TAPERED JAW. Wide at the temples, narrowing to a small chin. This is the single most
+      characteristic thing about the face type: a rounded jaw reads as a doll or a baby, and
+      the taper is what reads as a character.
+
+    * LAYERED EYES, and they are the whole design. Each is a stack -- pale sclera, large
+      saturated iris, a brighter ring low in the iris, a dark pupil, and two asymmetric
+      catchlights -- capped by a dark lash. That layering is why they look alive rather than
+      painted on, and it is worth the geom count. Half-height 0.040 against a 0.120 skull
+      makes each eye a third of the face tall, which is far past human and exactly right.
+
+    * A SHORT FOREHEAD. The fringe comes down to just above the brows. Cut higher, the expanse
+      of bare skin between brow and hairline was the one thing making the face read as odd.
+
+    * POINTED HAIR CLUMPS, not a smooth helmet. Every strand tapers, and the shape comes from
+      a fringe of pointed locks, side locks framing the face, twintails sweeping back, and one
+      stray strand standing up (the "ahoge"). The ahoge is the cheapest geometry in the model
+      and does more than any of it to make the character look drawn rather than moulded.
+
+    * ROUND JOINTS. Shoulders, hands, knees and hips are spheres; limbs are capsules. There is
+      not a sharp exposed corner above the ankles.
+
+  Two traps worth knowing, because both cost time:
+
+    * MuJoCo renders SITES as solid spheres. The head_cam marker sits between the eyes, so the
+      default red debug site rendered as a bright red dot on the bridge of the nose -- and it
+      survived two rounds of hunting for a stray nose geom that had already been removed. Both
+      it and the gripper sites are alpha 0 here; the names are still used by code.
+
+    * A default-class `rgba` silently overrides every geom's `material`, and the whole robot
+      renders bone white. Defaults set physics; materials set appearance.
 
   Colour is also functional. The hair is a saturated pink that appears nowhere else in the
   house scene, so ColorGrounder can pick the robot out of a frame; likewise the mint uniform.
@@ -43,8 +75,8 @@
     grippers 2x1    one actuator per hand, fingers coupled by a tendon
 
   The neck PITCH is the one addition over H1 and it is load-bearing: everything Momo works
-  with - a drum opening at 0.55 m, a basket on the floor, a towel on a counter - is below eye
-  level, and a head that can only pan left and right cannot look down into any of them.
+  with - the drum opening, the basket, a towel on a counter - is below eye level, and a head
+  that can only pan left and right cannot look down into any of them.
 -->
 <mujoco model="momo">
   <compiler angle="radian" autolimits="true"/>
@@ -103,15 +135,26 @@
   </default>
 
   <asset>
-    <material name="skin"      rgba="0.99 0.91 0.88 1" specular="0.25" shininess="0.35"/>
+    <!--
+      Skin is warmer and a shade deeper than it looks it should be on paper. At 0.99/0.91/0.88
+      the strong key light blew it out to flat white and the face lost all its modelling.
+    -->
+    <material name="skin"      rgba="0.98 0.84 0.78 1" specular="0.18" shininess="0.25"/>
     <material name="hair"      rgba="0.98 0.55 0.72 1" specular="0.45" shininess="0.55"/>
     <material name="hair_dark" rgba="0.90 0.42 0.62 1" specular="0.45" shininess="0.55"/>
     <material name="dress"     rgba="0.55 0.90 0.83 1" specular="0.30" shininess="0.40"/>
     <material name="dress_alt" rgba="0.42 0.80 0.75 1" specular="0.30"/>
     <material name="apron"     rgba="0.99 0.99 0.99 1" specular="0.20"/>
     <material name="eye_white" rgba="0.99 0.99 0.99 1" specular="0.60" shininess="0.80"/>
-    <material name="eye_iris"  rgba="0.25 0.62 0.86 1" specular="0.80" shininess="0.90"/>
-    <material name="eye_pupil" rgba="0.10 0.14 0.24 1" specular="0.70" shininess="0.85"/>
+    <!--
+      The iris is layered, which is how anime eyes are drawn: a deep saturated body with a
+      brighter ring low down, so the eye looks translucent and lit from below rather than flat.
+    -->
+    <material name="eye_iris"  rgba="0.16 0.48 0.80 1" specular="0.80" shininess="0.90"/>
+    <material name="eye_glow"  rgba="0.48 0.82 0.97 1" specular="0.85" shininess="0.95"/>
+    <material name="eye_pupil" rgba="0.07 0.10 0.20 1" specular="0.70" shininess="0.85"/>
+    <!-- Lashes are near-black with a warm cast, never pure black, which reads as harsh. -->
+    <material name="lash_mat"  rgba="0.16 0.10 0.18 1" specular="0.35" shininess="0.40"/>
     <material name="blush"     rgba="0.99 0.68 0.70 1" specular="0.15"/>
     <material name="mouth"     rgba="0.90 0.45 0.50 1" specular="0.30"/>
     <material name="joint_mat" rgba="0.88 0.86 0.92 1" specular="0.40" shininess="0.50"/>
@@ -139,7 +182,7 @@
       -->
       <geom name="skirt_g" type="cylinder" size="0.150 0.062" pos="0 0 -0.052"
             material="dress" class="deco"/>
-      <geom name="skirt_hem" type="cylinder" size="0.190 0.030" pos="0 0 -0.104"
+      <geom name="skirt_hem" type="cylinder" size="0.196 0.022" pos="0 0 -0.100"
             material="dress_alt" class="deco"/>
 
       <!-- ================= TORSO ================= -->
@@ -154,21 +197,53 @@
         <geom name="torso_g" type="ellipsoid" size="0.128 0.135 0.158" pos="0 0 0.132"
               material="dress"/>
         <!-- Apron/pinafore front panel, and a collar. Both decoration. -->
-        <geom name="apron_g" type="box" size="0.070 0.005 0.082" pos="0 -0.124 0.108"
+        <!--
+          The pinafore front, on the robot's FRONT (+x) like the face. It used to sit on -y,
+          matching the old head, so the robot wore its apron on one hip.
+        -->
+        <!--
+          Pinafore: a curved bib rather than a flat rectangle. A box on the chest rendered as a
+          plain white square with a shadow in the middle -- a sign hung round the neck, not an
+          apron. Two ellipsoids that follow the torso's own curve read as cloth lying on it.
+        -->
+        <geom name="apron_g" type="ellipsoid" size="0.020 0.070 0.076" pos="0.112 0 0.104"
               material="apron" class="deco"/>
+        <geom name="apron_top" type="ellipsoid" size="0.016 0.040 0.030" pos="0.114 0 0.186"
+              material="apron" class="deco"/>
+        <!-- shoulder straps, so the pinafore is held up by something -->
+        <geom name="strap_l" type="capsule" fromto="0.096 0.036 0.196 0.036 0.092 0.246"
+              size="0.011" material="apron" class="deco"/>
+        <geom name="strap_r" type="capsule" fromto="0.096 -0.036 0.196 0.036 -0.092 0.246"
+              size="0.011" material="apron" class="deco"/>
+        <!-- a waist frill where the pinafore meets the skirt -->
+        <geom name="apron_hem" type="ellipsoid" size="0.024 0.084 0.016" pos="0.104 0 0.028"
+              material="dress_alt" class="deco"/>
         <!--
           Collar sits at the very top of the torso, BELOW the neck stub. Any higher and it
           intersects the chin, which from the front looks like the robot is wearing a bowl.
         -->
         <geom name="collar_g" type="cylinder" size="0.076 0.014" pos="0 0 0.262"
               material="apron" class="deco"/>
-        <geom name="ribbon_c" type="ellipsoid" size="0.034 0.020 0.024" pos="0 -0.062 0.258"
+        <!-- Collar ribbon, at the throat on the front (+x). -->
+        <geom name="ribbon_c" type="ellipsoid" size="0.020 0.038 0.024" pos="0.058 0 0.258"
               material="ribbon" class="deco"/>
 
         <!-- ================= HEAD ================= -->
         <!--
-          Neck stub separates head from torso. The head itself is a large sphere - the single
-          most important proportion in the whole model.
+          The head faces +x, which is the robot's forward axis and where head_cam looks.
+
+          It did not, originally: the face was modelled looking along -y while the camera
+          looked along +x, so the robot walked sideways relative to its own face and every
+          photograph caught it in profile. Nothing about the body needed to change -- only the
+          face was wrong -- but "only the face" is the whole point of this model, so the entire
+          head is laid out here in one consistent frame:
+
+              +x  forward, out of the face
+              +y  the robot's LEFT
+              +z  up
+
+          Every face and hair geom below follows it. When adding one, put the forward offset in
+          x, never in y.
         -->
         <body name="head" pos="0 0 0.340">
           <inertial pos="0 0 0.06" mass="1.4" diaginertia="0.008 0.008 0.007"/>
@@ -182,153 +257,255 @@
                  range="-1.75 1.75" damping="1.5" stiffness="0" armature="0.005"/>
           <joint name="neck_pitch" type="hinge" axis="0 1 0" pos="0 0 -0.052"
                  range="-0.35 1.05" damping="1.5" stiffness="0" armature="0.005"/>
-          <geom name="neck_g" type="cylinder" size="0.030 0.028" pos="0 0 -0.052"
+          <geom name="neck_g" type="cylinder" size="0.028 0.028" pos="0 0 -0.052"
                 material="skin"/>
 
-          <!-- Skull. Slightly taller than wide, which reads better than a perfect sphere. -->
-          <geom name="head_g" type="ellipsoid" size="0.113 0.108 0.120" pos="0 0 0.020"
+          <!--
+            Skull. Narrow in x (0.100) and wide in y (0.112): an anime head is fairly flat
+            front-to-back and its width comes from the hair, not the skull. Slightly taller
+            than wide, which reads better than a sphere.
+          -->
+          <geom name="head_g" type="ellipsoid" size="0.100 0.112 0.120" pos="0 0 0.018"
                 material="skin"/>
-          <!-- Chin taper: a small sphere low and forward narrows the jaw. -->
-          <geom name="chin_g" type="ellipsoid" size="0.070 0.062 0.048" pos="0 -0.020 -0.062"
+          <!--
+            Jaw and chin. Two tapering ellipsoids narrowing toward a point below and forward,
+            which is the single most characteristic thing about an anime face: the head is
+            wide at the temples and comes down to a small pointed chin. A rounded jaw reads as
+            a doll or a baby; the taper is what reads as a character.
+          -->
+          <geom name="jaw_g" type="ellipsoid" size="0.072 0.078 0.046" pos="0.014 0 -0.044"
+                material="skin" class="deco"/>
+          <geom name="chin_g" type="ellipsoid" size="0.034 0.036 0.026" pos="0.024 0 -0.080"
                 material="skin" class="deco"/>
 
-          <!-- ============ FACE ============
-               +x is the robot's LEFT, -y is FORWARD (the face direction), +z is up.
-               Everything on the face is deco: no collisions, negligible mass.
+          <!-- ============================ FACE ============================
+               Everything here is deco: no collisions, negligible mass.
 
-               Eyes are large (0.030 radius against a 0.113 skull), set wide and LOW - centred
-               at z=+0.005, below the skull's midline. Infant proportions put the eyes below
-               the halfway line of the head, and it is the cue that most strongly reads as
-               "young" rather than "adult".
+               The eyes are the whole design. Anime eyes are LARGE, TALL and set LOW and WIDE,
+               and they are built from stacked layers: a pale sclera, a big saturated iris, a
+               dark pupil, a bright ring low in the iris, and two catchlights. That layering is
+               why they look alive rather than painted, and it is worth the geom count.
+
+               Half-height 0.042 against a 0.120 skull makes each eye a third of the face tall.
+               That is far past human and exactly right here.
           -->
-          <!-- eye whites -->
-          <geom name="eye_l_w" type="ellipsoid" size="0.031 0.020 0.036" pos="0.046 -0.088 0.005"
+          <!-- sclera: tall ovals, angled slightly so the outer corner sits higher -->
+          <geom name="eye_l_w" type="ellipsoid" size="0.019 0.030 0.040" pos="0.080 0.039 0.018"
                 material="eye_white" class="deco"/>
-          <geom name="eye_r_w" type="ellipsoid" size="0.031 0.020 0.036" pos="-0.046 -0.088 0.005"
+          <geom name="eye_r_w" type="ellipsoid" size="0.019 0.030 0.040" pos="0.080 -0.039 0.018"
                 material="eye_white" class="deco"/>
-          <!-- irises, large and forward -->
-          <geom name="eye_l_i" type="ellipsoid" size="0.023 0.014 0.027" pos="0.047 -0.100 0.002"
+          <!-- iris: large, filling most of the sclera -->
+          <geom name="eye_l_i" type="ellipsoid" size="0.013 0.023 0.031" pos="0.090 0.039 0.015"
                 material="eye_iris" class="deco"/>
-          <geom name="eye_r_i" type="ellipsoid" size="0.023 0.014 0.027" pos="-0.047 -0.100 0.002"
+          <geom name="eye_r_i" type="ellipsoid" size="0.013 0.023 0.031" pos="0.090 -0.039 0.015"
                 material="eye_iris" class="deco"/>
-          <!-- pupils -->
-          <geom name="eye_l_p" type="ellipsoid" size="0.012 0.009 0.015" pos="0.047 -0.107 0.000"
+          <!--
+            A brighter ring low in the iris. Anime eyes are almost always drawn darker at the
+            top and lighter at the bottom, which is what suggests a translucent iris catching
+            light from below.
+          -->
+          <geom name="eye_l_g" type="ellipsoid" size="0.010 0.018 0.015" pos="0.095 0.039 0.001"
+                material="eye_glow" class="deco"/>
+          <geom name="eye_r_g" type="ellipsoid" size="0.010 0.018 0.015" pos="0.095 -0.039 0.001"
+                material="eye_glow" class="deco"/>
+          <!-- pupil -->
+          <geom name="eye_l_p" type="ellipsoid" size="0.008 0.011 0.018" pos="0.097 0.039 0.016"
                 material="eye_pupil" class="deco"/>
-          <geom name="eye_r_p" type="ellipsoid" size="0.012 0.009 0.015" pos="-0.047 -0.107 0.000"
+          <geom name="eye_r_p" type="ellipsoid" size="0.008 0.011 0.018" pos="0.097 -0.039 0.016"
                 material="eye_pupil" class="deco"/>
           <!--
-            Catchlights. Two per eye, offset up-and-outward, one large one small. This is the
-            detail that makes eyes look alive rather than painted on, and it is why character
-            art always draws them.
+            Catchlights: one large high and outboard, one small low and inboard. Two of them,
+            asymmetric, is the convention -- a single centred highlight looks like plastic.
           -->
-          <geom name="eye_l_h1" type="sphere" size="0.0095" pos="0.056 -0.110 0.015"
+          <geom name="eye_l_h1" type="ellipsoid" size="0.008 0.011 0.013" pos="0.101 0.047 0.035"
                 material="eye_white" class="deco"/>
-          <geom name="eye_r_h1" type="sphere" size="0.0095" pos="-0.038 -0.110 0.015"
+          <geom name="eye_r_h1" type="ellipsoid" size="0.008 0.011 0.013" pos="0.101 -0.031 0.035"
                 material="eye_white" class="deco"/>
-          <geom name="eye_l_h2" type="sphere" size="0.0050" pos="0.039 -0.108 -0.010"
+          <geom name="eye_l_h2" type="ellipsoid" size="0.006 0.007 0.008" pos="0.101 0.031 -0.003"
                 material="eye_white" class="deco"/>
-          <geom name="eye_r_h2" type="sphere" size="0.0050" pos="-0.055 -0.108 -0.010"
+          <geom name="eye_r_h2" type="ellipsoid" size="0.006 0.007 0.008" pos="0.101 -0.047 -0.003"
                 material="eye_white" class="deco"/>
-          <!-- upper lash line: a dark sliver above each eye, which defines the eye shape -->
-          <geom name="lash_l" type="box" size="0.032 0.006 0.006" pos="0.046 -0.095 0.040"
-                material="eye_pupil" class="deco"/>
-          <geom name="lash_r" type="box" size="0.032 0.006 0.006" pos="-0.046 -0.095 0.040"
-                material="eye_pupil" class="deco"/>
           <!--
-            Eyebrows, set just above the lash line and slightly FORWARD of the fringe locks
-            (y=-0.104 against the fringe at -0.086), so they read as brows on a face instead of
-            marks on the hair. Kept low and close to the eye: high thin brows read as surprise,
-            and this face should read as calm.
+            Upper lash: a dark lid capping each eye, tilted so the outer corner lifts. This is
+            drawn as a thick dark line in every anime style and is what gives the eye its
+            shape.
+
+            Two earlier attempts at a lash BAR failed -- they rendered as heavy black eyebrows
+            floating above the face, because a thin box tucked against a stack of ellipsoids
+            loses the depth fight at most angles. An ellipsoid slightly wider than the sclera,
+            sunk into its top, sits on the eye instead of hovering over it.
           -->
-          <geom name="brow_l" type="ellipsoid" size="0.024 0.005 0.005" pos="0.046 -0.104 0.050"
+          <geom name="lash_l" type="ellipsoid" size="0.018 0.032 0.011" pos="0.081 0.039 0.054"
+                material="lash_mat" euler="0.20 0 0" class="deco"/>
+          <geom name="lash_r" type="ellipsoid" size="0.018 0.032 0.011" pos="0.081 -0.039 0.054"
+                material="lash_mat" euler="-0.20 0 0" class="deco"/>
+          <!-- outer lash tips, angled up: the little flick at the corner of the eye -->
+          <geom name="lash_l_tip" type="ellipsoid" size="0.012 0.014 0.008"
+                pos="0.072 0.068 0.058" material="lash_mat" class="deco"/>
+          <geom name="lash_r_tip" type="ellipsoid" size="0.012 0.014 0.008"
+                pos="0.072 -0.068 0.058" material="lash_mat" class="deco"/>
+          <!--
+            Eyebrows, tucked just under the fringe rather than above it.
+
+            At z=0.082 they sat on the hairline and rendered as two pink marks floating on the
+            fringe -- reading as part of the hair, not as brows. Lowered to 0.062 and pushed
+            forward to x=0.092 they sit on the forehead in the gap the fringe leaves, which is
+            where a drawn brow goes. Kept thin and soft: a heavy brow on this face reads cross.
+          -->
+          <geom name="brow_l" type="ellipsoid" size="0.006 0.023 0.004" pos="0.092 0.039 0.062"
                 material="hair_dark" class="deco"/>
-          <geom name="brow_r" type="ellipsoid" size="0.024 0.005 0.005" pos="-0.046 -0.104 0.050"
+          <geom name="brow_r" type="ellipsoid" size="0.006 0.023 0.004" pos="0.092 -0.039 0.062"
                 material="hair_dark" class="deco"/>
-          <!-- blush -->
-          <geom name="blush_l" type="ellipsoid" size="0.024 0.008 0.014" pos="0.072 -0.078 -0.032"
+          <!--
+            Blush: flat ovals on the cheeks BELOW the eyes, sunk into the face rather than
+            standing off it (half-depth 0.004 against 0.012 before). Placed level with the eyes
+            and proud of the surface, they rendered as two pink lumps growing out of the
+            cheekbones and reading as part of the eye rather than as colour on skin.
+          -->
+          <geom name="blush_l" type="ellipsoid" size="0.004 0.022 0.011" pos="0.074 0.052 -0.046"
                 material="blush" class="deco"/>
-          <geom name="blush_r" type="ellipsoid" size="0.024 0.008 0.014" pos="-0.072 -0.078 -0.032"
+          <geom name="blush_r" type="ellipsoid" size="0.004 0.022 0.011" pos="0.074 -0.052 -0.046"
                 material="blush" class="deco"/>
-          <!-- a small mouth -->
-          <geom name="mouth_g" type="ellipsoid" size="0.013 0.006 0.008" pos="0 -0.096 -0.052"
+          <!--
+            A small mouth, low on the jaw. Its height is not free: with the eyes centred at
+            z=+0.018 a mouth at -0.070 sits barely below them and reads as a red nose between
+            the eyes rather than as a mouth. On the jaw at -0.104 it reads correctly, and the
+            long gap between eyes and mouth is itself an anime convention.
+          -->
+          <geom name="mouth_g" type="ellipsoid" size="0.007 0.014 0.006" pos="0.064 0 -0.072"
                 material="mouth" class="deco"/>
-
-          <!-- ============ HAIR ============
-               A shell of overlapping spheres. Built as a cap over the skull, side locks that
-               frame the face, and a back mass; then one strand standing up.
-
-               The ahoge (the stray strand) does a disproportionate amount of work: without it
-               the silhouette reads as a helmet, and it is the single cheapest thing here that
-               makes the model look drawn rather than moulded.
-          -->
           <!--
-            Crown: a shell that sits slightly BEHIND and ABOVE the skull centre, so it caps the
-            head rather than swallowing it. A crown centred on the skull makes the face a small
-            hole in a sphere, which is the "helmet" look.
+            No nose geom. An anime face draws the nose as a single short stroke or omits it
+            entirely, and a small ellipsoid sitting proud of the face rendered as a bright dot
+            between the eyes -- a clown nose, not a character.
           -->
-          <geom name="hair_top1" type="ellipsoid" size="0.120 0.116 0.104" pos="0 0.016 0.046"
-                material="hair" class="deco"/>
-          <!--
-            Fringe: a row of rounded locks ACROSS the forehead. These must sit proud of the
-            skull surface (y=-0.098 against a skull half-depth of 0.108 at its widest) or they
-            are buried inside it and the eyebrows appear to float on bare hair. Flattened in y
-            so they read as a fringe rather than as bolted-on balls.
+
+          <!-- ============================ HAIR ============================
+               Anime hair is drawn as separate POINTED CLUMPS, not as a smooth helmet, and that
+               is the difference between this and the first version. Every strand below tapers:
+               a capsule or a stretched ellipsoid with its narrow end outward.
+
+               Three groups: a crown shell, a fringe of pointed locks over the forehead, and
+               long side locks framing the face -- plus twintails, which do most of the work of
+               making the silhouette recognisable from any angle.
           -->
-          <geom name="fringe_1" type="ellipsoid" size="0.036 0.022 0.050" pos="0.000 -0.086 0.066"
+          <!-- crown: sits back and above the skull, capping it rather than swallowing it -->
+          <geom name="hair_top1" type="ellipsoid" size="0.108 0.120 0.104" pos="-0.012 0 0.046"
                 material="hair" class="deco"/>
-          <geom name="fringe_2" type="ellipsoid" size="0.034 0.022 0.046" pos="0.058 -0.078 0.064"
+          <geom name="hair_top2" type="ellipsoid" size="0.086 0.100 0.070" pos="-0.030 0 0.076"
                 material="hair" class="deco"/>
-          <geom name="fringe_3" type="ellipsoid" size="0.034 0.022 0.046" pos="-0.058 -0.078 0.064"
-                material="hair" class="deco"/>
-          <geom name="fringe_4" type="ellipsoid" size="0.030 0.024 0.044" pos="0.093 -0.056 0.058"
-                material="hair" class="deco"/>
-          <geom name="fringe_5" type="ellipsoid" size="0.030 0.024 0.044" pos="-0.093 -0.056 0.058"
-                material="hair" class="deco"/>
-          <!-- side locks framing the cheeks, tapering downward -->
-          <geom name="lock_l1" type="ellipsoid" size="0.030 0.034 0.070" pos="0.098 -0.030 -0.020"
-                material="hair" class="deco"/>
-          <geom name="lock_r1" type="ellipsoid" size="0.030 0.034 0.070" pos="-0.098 -0.030 -0.020"
-                material="hair" class="deco"/>
-          <geom name="lock_l2" type="ellipsoid" size="0.024 0.026 0.052" pos="0.100 -0.024 -0.100"
-                material="hair_dark" class="deco"/>
-          <geom name="lock_r2" type="ellipsoid" size="0.024 0.026 0.052" pos="-0.100 -0.024 -0.100"
-                material="hair_dark" class="deco"/>
-          <!-- back of the head: a fuller mass so the head is not flat from behind -->
-          <geom name="hair_back1" type="ellipsoid" size="0.116 0.088 0.110" pos="0 0.055 -0.005"
-                material="hair" class="deco"/>
-          <geom name="hair_back2" type="ellipsoid" size="0.098 0.070 0.082" pos="0 0.072 -0.090"
-                material="hair_dark" class="deco"/>
-          <!-- ahoge: the stray strand. Three shrinking spheres in an arc. -->
-          <geom name="ahoge_1" type="ellipsoid" size="0.014 0.014 0.022" pos="0.010 0.010 0.152"
-                material="hair" class="deco"/>
-          <geom name="ahoge_2" type="ellipsoid" size="0.011 0.011 0.018" pos="0.026 0.026 0.180"
-                material="hair" class="deco"/>
-          <geom name="ahoge_3" type="ellipsoid" size="0.008 0.008 0.013" pos="0.048 0.042 0.196"
-                material="hair" class="deco"/>
-          <!-- twin ribbons, one either side -->
-          <geom name="ribbon_l1" type="ellipsoid" size="0.030 0.016 0.024" pos="0.118 0.020 0.086"
-                material="ribbon" class="deco"/>
-          <geom name="ribbon_l2" type="ellipsoid" size="0.020 0.012 0.016" pos="0.140 0.044 0.070"
-                material="ribbon" class="deco"/>
-          <geom name="ribbon_r1" type="ellipsoid" size="0.030 0.016 0.024" pos="-0.118 0.020 0.086"
-                material="ribbon" class="deco"/>
-          <geom name="ribbon_r2" type="ellipsoid" size="0.020 0.012 0.016" pos="-0.140 0.044 0.070"
-                material="ribbon" class="deco"/>
 
           <!--
-            ============ CAMERAS ============
-            Same arrangement as H1: one forward eye plus two side cameras for depth only.
+            Fringe. Six pointed clumps across the forehead, each a capsule running down-and-
+            forward so it ends in a point just above the brows.
 
-            IMPORTANT: the face points along -y in the head's local frame (see the eye
-            positions above), but the robot's forward axis is +x in the WORLD, and the
-            "stand" keyframe rotates the base so those agree. The camera therefore points
-            along +x locally, exactly as on H1 -- the face geometry is simply modelled
-            facing -y and the whole body is placed accordingly.
+            The tips reach z=0.024-0.046, only a little above the brows at 0.082, and that is
+            deliberate: an anime face has a SHORT forehead. Cut higher, the expanse of bare
+            skin between brow and hairline was the single thing making the face read as odd
+            rather than as drawn.
           -->
-          <camera name="head_cam" pos="0.075 0 0.005" xyaxes="0 -1 0 0 0 1" fovy="75"/>
-          <site name="head_cam_site" pos="0.075 0 0.005" size="0.008" rgba="1 0 0 0.5"/>
-          <camera name="look_left" pos="0.04 0.05 0.005" xyaxes="0.866 -0.5 0 0 0 1" fovy="90"/>
-          <camera name="look_right" pos="0.04 -0.05 0.005" xyaxes="-0.866 -0.5 0 0 0 1" fovy="90"/>
+          <geom name="fringe_1" type="capsule" fromto="0.028 0.020 0.108 0.078 0.028 0.046"
+                size="0.018" material="hair" class="deco"/>
+          <geom name="fringe_2" type="capsule" fromto="0.028 -0.020 0.108 0.078 -0.028 0.046"
+                size="0.018" material="hair" class="deco"/>
+          <geom name="fringe_3" type="capsule" fromto="0.020 0.058 0.106 0.068 0.070 0.038"
+                size="0.018" material="hair" class="deco"/>
+          <geom name="fringe_4" type="capsule" fromto="0.020 -0.058 0.106 0.068 -0.070 0.038"
+                size="0.018" material="hair" class="deco"/>
+          <geom name="fringe_5" type="capsule" fromto="0.006 0.092 0.102 0.046 0.104 0.024"
+                size="0.017" material="hair" class="deco"/>
+          <geom name="fringe_6" type="capsule" fromto="0.006 -0.092 0.102 0.046 -0.104 0.024"
+                size="0.017" material="hair" class="deco"/>
+
+          <!--
+            Side locks: long tapering strands down either side of the face, ending in a point
+            below the chin. These frame the face and are the other half of what stops the head
+            reading as a helmet.
+          -->
+          <geom name="lock_l1" type="capsule" fromto="0.010 0.106 0.040 0.030 0.104 -0.090"
+                size="0.023" material="hair" class="deco"/>
+          <geom name="lock_r1" type="capsule" fromto="0.010 -0.106 0.040 0.030 -0.104 -0.090"
+                size="0.023" material="hair" class="deco"/>
+          <geom name="lock_l2" type="capsule" fromto="0.030 0.102 -0.090 0.040 0.096 -0.150"
+                size="0.019" material="hair_dark" class="deco"/>
+          <geom name="lock_r2" type="capsule" fromto="0.030 -0.102 -0.090 0.040 -0.096 -0.150"
+                size="0.019" material="hair_dark" class="deco"/>
+
+          <!-- back of the head, so the silhouette is full from behind too -->
+          <geom name="hair_back1" type="ellipsoid" size="0.098 0.118 0.112" pos="-0.052 0 -0.004"
+                material="hair" class="deco"/>
+          <geom name="hair_back2" type="ellipsoid" size="0.072 0.092 0.080" pos="-0.062 0 -0.090"
+                material="hair_dark" class="deco"/>
+
+          <!--
+            Twintails. Two bunches gathered high at the sides and falling outward and back,
+            each built from three shrinking segments so it tapers to a point.
+
+            These are the most recognisable thing about the silhouette and the reason the robot
+            reads as a character from behind or in profile, not only face on.
+
+            They sweep BACK (x from -0.052 out to -0.140), not out to the side. Hanging level
+            with the head they fell forward over the shoulders in profile and made the whole
+            head look tilted down, when the neck was in fact perfectly level -- an illusion
+            created entirely by where the hair mass sat.
+          -->
+          <geom name="tail_l1" type="ellipsoid" size="0.044 0.042 0.048" pos="-0.052 0.112 0.066"
+                material="hair" class="deco"/>
+          <geom name="tail_l2" type="capsule" fromto="-0.064 0.124 0.046 -0.112 0.142 -0.062"
+                size="0.034" material="hair" class="deco"/>
+          <geom name="tail_l3" type="capsule" fromto="-0.112 0.142 -0.062 -0.140 0.150 -0.152"
+                size="0.021" material="hair_dark" class="deco"/>
+          <geom name="tail_r1" type="ellipsoid" size="0.044 0.042 0.048" pos="-0.052 -0.112 0.066"
+                material="hair" class="deco"/>
+          <geom name="tail_r2" type="capsule" fromto="-0.064 -0.124 0.046 -0.112 -0.142 -0.062"
+                size="0.034" material="hair" class="deco"/>
+          <geom name="tail_r3" type="capsule" fromto="-0.112 -0.142 -0.062 -0.140 -0.150 -0.152"
+                size="0.021" material="hair_dark" class="deco"/>
+
+          <!--
+            Ahoge: the single strand standing up off the crown. Three shrinking segments in an
+            arc, curling forward. It is the cheapest geometry in the whole model and does more
+            than any of it to make the character look drawn rather than moulded.
+          -->
+          <geom name="ahoge_1" type="capsule" fromto="-0.020 0.006 0.140 0.004 0.010 0.186"
+                size="0.011" material="hair" class="deco"/>
+          <geom name="ahoge_2" type="capsule" fromto="0.004 0.010 0.186 0.040 0.014 0.202"
+                size="0.008" material="hair" class="deco"/>
+          <geom name="ahoge_3" type="capsule" fromto="0.040 0.014 0.202 0.066 0.016 0.192"
+                size="0.005" material="hair" class="deco"/>
+
+          <!-- ribbons tying the twintails -->
+          <geom name="ribbon_l1" type="ellipsoid" size="0.020 0.028 0.026" pos="-0.048 0.106 0.098"
+                material="ribbon" class="deco"/>
+          <geom name="ribbon_l2" type="ellipsoid" size="0.014 0.030 0.020" pos="-0.060 0.132 0.106"
+                material="ribbon" class="deco"/>
+          <geom name="ribbon_r1" type="ellipsoid" size="0.020 0.028 0.026" pos="-0.048 -0.106 0.098"
+                material="ribbon" class="deco"/>
+          <geom name="ribbon_r2" type="ellipsoid" size="0.014 0.030 0.020" pos="-0.060 -0.132 0.106"
+                material="ribbon" class="deco"/>
+
+          <!--
+            ============================ CAMERAS ============================
+            head_cam looks along +x, which is now the direction the face points. The two of
+            them agreeing is the whole reason this block was rewritten: before, the camera
+            looked forward while the face looked 90 degrees to the side.
+
+            Mounted between and just in front of the eyes, which is where a character's line of
+            sight comes from.
+          -->
+          <camera name="head_cam" pos="0.105 0 0.000" xyaxes="0 -1 0 0 0 1" fovy="75"/>
+          <!--
+            The camera marker is INVISIBLE (alpha 0), and that matters more here than on the
+            other robots. MuJoCo renders sites as solid spheres, and on this face the camera
+            sits exactly between the eyes -- so the default red debug marker rendered as a
+            bright red dot on the bridge of the nose. It looked like a clown nose, and it
+            survived two rounds of looking for a stray nose geom that had already been removed.
+
+            It is kept as a site rather than deleted because code addresses it by name.
+          -->
+          <site name="head_cam_site" pos="0.105 0 0.000" size="0.006" rgba="1 0 0 0"/>
+          <camera name="look_left" pos="0.070 0.050 0.000" xyaxes="0.866 -0.5 0 0 0 1" fovy="90"/>
+          <camera name="look_right" pos="0.070 -0.050 0.000" xyaxes="-0.866 -0.5 0 0 0 1" fovy="90"/>
         </body>
 
         <!-- ================= ARMS =================
@@ -363,7 +540,8 @@
             <body name="palm_r" pos="0 0 -0.175">
               <inertial pos="0 0 -0.02" mass="0.20" diaginertia="0.0003 0.0003 0.0002"/>
               <geom name="palm_r_g" type="ellipsoid" size="0.026 0.040 0.028" material="skin"/>
-              <site name="grip_r" pos="0 0 -0.058" size="0.012" rgba="0 1 0 0.5"/>
+              <!-- invisible: code uses this site, but a green dot on the hand is not wanted -->
+              <site name="grip_r" pos="0 0 -0.058" size="0.010" rgba="0 1 0 0"/>
               <body name="finger_r1" pos="0 -0.030 -0.020">
                 <joint name="grip_r1" axis="1 0 0" range="0 0.9" class="m_finger"/>
                 <geom name="fing_r1" type="capsule" fromto="0 0 0 0 0 -0.062" size="0.015"
@@ -399,7 +577,8 @@
             <body name="palm_l" pos="0 0 -0.175">
               <inertial pos="0 0 -0.02" mass="0.20" diaginertia="0.0003 0.0003 0.0002"/>
               <geom name="palm_l_g" type="ellipsoid" size="0.026 0.040 0.028" material="skin"/>
-              <site name="grip_l" pos="0 0 -0.058" size="0.012" rgba="0 1 0 0.5"/>
+              <!-- invisible: code uses this site, but a green dot on the hand is not wanted -->
+              <site name="grip_l" pos="0 0 -0.058" size="0.010" rgba="0 1 0 0"/>
               <body name="finger_l1" pos="0 -0.030 -0.020">
                 <joint name="grip_l1" axis="1 0 0" range="0 0.9" class="m_finger"/>
                 <geom name="fing_l1" type="capsule" fromto="0 0 0 0 0 -0.062" size="0.015"

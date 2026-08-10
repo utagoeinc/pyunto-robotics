@@ -1,12 +1,22 @@
 # pyunto-robotics
 
-A humanoid robot in a simulated office that you control by messaging its **Pyunto** account.
+Four robots in four simulated worlds, each controlled by messaging its **Pyunto** account.
 
 > Send 「オフィスのドアを開けて」 from the Pyunto app → the robot works out what you meant,
 > finds the door from camera images alone with no prior map, walks across the office, pushes it
 > open, goes through, and messages you back what happened.
 
 Everything runs on one MacBook. No CUDA, no cloud inference, no pre-built map.
+
+| Robot | World | What it does |
+|---|---|---|
+| **H1** humanoid, 1.38 m | office, 3 rooms | opens doors, finds a named one of three |
+| **Momo** humanoid, 1.41 m | home laundry room | opens a washer, takes a towel out, folds it |
+| **Q1** quadruped, 21 kg | outdoor site + building | patrols the perimeter, climbs steps |
+| **R1** rover, 6 wheels | lunar south pole | drives cratered regolith at 1.62 m/s² |
+
+All four share one seam — `step(vx, vy, wz)` — so the perception, navigation and agent code is
+written once and does not know whether it is driving legs, four legs, or wheels.
 
 ## Status
 
@@ -19,6 +29,13 @@ Everything runs on one MacBook. No CUDA, no cloud inference, no pre-built map.
 | 4 | Door opening + instruction understanding (Gemma 4) | done |
 | 5 | End-to-end integration | done |
 | 6 | RL locomotion instead of kinematic gait | optional |
+| 7 | Momo + home laundry room (cloth) | done, one gap |
+| 8 | Q1 quadruped + outdoor patrol site | done |
+| 9 | R1 rover + lunar south pole | done |
+
+The one gap in phase 7 is named in the [Momo](#momo-and-the-laundry) section below: folding a
+towel that has just come out of the drum is not reliable, because it lands bunched. Folding a
+towel that is lying flat works every time.
 
 ## Setup
 
@@ -61,6 +78,45 @@ ships with the mujoco wheel, sets that up.)
 `--speed` sets playback rate (default 3x; `--speed 1` is real time). A trip to a far door
 takes over a minute at 1x.
 
+### The other three robots
+
+Every robot takes the same flags as `run_robot.py` -- `--say`, `--llm`, `--view`, `--speed`,
+`--join`, `--scene`, `--keyframe` -- so anything above works with any of them.
+
+```bash
+# ---- Momo, the home assistant ------------------------------------------------
+./.venv/bin/mjpython scripts/run_home.py --view --say "洗濯機を開けて"
+./.venv/bin/mjpython scripts/run_home.py --view --keyframe counter --say "タオルを畳んで"
+./.venv/bin/python   scripts/run_home.py --llm --say "タオルを洗濯機から出して畳んで"
+
+# ---- Q1, the patrol quadruped ------------------------------------------------
+./.venv/bin/mjpython scripts/run_patrol.py --view --say "ビルの周りを1周して"
+./.venv/bin/mjpython scripts/run_patrol.py --view --say "階段を上って"
+./.venv/bin/python   scripts/run_patrol.py --say "2番の地点に行って"
+
+# ---- R1, the lunar rover -----------------------------------------------------
+./.venv/bin/mjpython scripts/run_lunar.py --view --speed 6 --say "ビーコンまで行って"
+./.venv/bin/mjpython scripts/run_lunar.py --view --speed 6 --say "クレーターの縁まで行って"
+./.venv/bin/python   scripts/run_lunar.py --say "周りを見て"
+
+# ---- connected: listen on Pyunto and act on whatever you message --------------
+./.venv/bin/mjpython scripts/run_home.py   --view
+./.venv/bin/mjpython scripts/run_patrol.py --view
+./.venv/bin/mjpython scripts/run_lunar.py  --view
+./.venv/bin/python   scripts/run_home.py --join INVITE_CODE   # first time only
+```
+
+Starting positions, via `--keyframe`:
+
+| Robot | Keyframes |
+|---|---|
+| `run_home.py` | `start` (at the washer), `middle` (centre of room), `counter` (at the counter) |
+| `run_patrol.py` | `start` (south of the building), `corner` (SE corner), `steps` (at the stairs) |
+| `run_lunar.py` | `plain` (open surface, the default), `start` (beside the lander) |
+
+The lunar rover is slow by design -- lunar gravity gives it a sixth of Earth's traction -- so
+`--speed 6` makes a drive across the site watchable.
+
 Other tools:
 
 ```bash
@@ -68,7 +124,8 @@ Other tools:
                                                        # only checks the gait and collisions
 ./.venv/bin/python scripts/view_sim.py --shot out.png  # stills; plain python is fine
 ./.venv/bin/python scripts/test_comms.py --listen      # Pyunto connection only
-./.venv/bin/python -m pytest tests/ -q                 # 112 tests
+./.venv/bin/python -m pytest tests/ -q                 # 188 tests (~3 min)
+./.venv/bin/python -m pytest tests/ -q -m "not slow"   # the fast ones only (~10 s)
 ```
 
 ## What it understands
@@ -306,6 +363,203 @@ almost immediately (reporting "arrived at 0.85 m" while the target was 5.4 m awa
 robot stopped in the lobby. The map is committed and used to accumulate knowledge; the
 approach loop still tracks by position. Connecting the two is unfinished work.
 
+## Momo and the laundry
+
+A 1.41 m companion robot in a home laundry room, folding towels that are real MuJoCo flex
+cloth rather than boxes on a hinge.
+
+The appearance is a product requirement, not decoration: this robot is the face of a consumer
+app, and what a user sees first is what it looks like. It is built entirely from MuJoCo
+primitives -- spheres, capsules, boxes, ellipsoids, no meshes and nothing loaded from disk --
+so "cute" had to come out of proportion. Head radius 0.115 m on a 1.41 m body is about 1:5.4
+against roughly 1:7.5 for an adult; the eyes are large, set wide and BELOW the skull's midline,
+which is the infant-schema cue that does most of the work; every joint cap is a sphere; and a
+single strand of hair stands up, which is the cheapest thing in the model and the one that
+stops the silhouette reading as a helmet.
+
+Two things about the appearance were bugs rather than choices, and both are worth knowing:
+
+- **A default-class `rgba` silently overrides every geom's `material`.** The whole robot
+  rendered bone white until the default was removed. Defaults set physics; materials set
+  appearance, and mixing them loses the materials without an error.
+- **`geom_rbound` is a bounding SPHERE.** Solving the standing height from it put the feet
+  9 cm off the floor, because for a 0.10 × 0.046 × 0.0225 foot box the bounding sphere is far
+  bigger than the box. Measure from `geom_size`.
+
+### Everything the room contains is placed against a measured reach
+
+The arm's *kinematic* span is 0.40 m. Its *working* reach -- how far in front of the base the
+hand can actually be PUT -- is 0.25 m, and the two are not the same number:
+
+| commanded forward | hand error after 4 closed-loop passes |
+|---|---|
+| 0.20 m | 0.023 m |
+| 0.25 m | 0.029 m |
+| 0.30 m | 0.194 m |
+| 0.40 m | 0.230 m |
+
+Past 0.25 m the extended arm loads the torso, the body yields, and the hand settles a fifth of
+a metre short *however many correction passes are run* -- the error grew pass over pass rather
+than converging. Stiffening the shoulder from kp=150 to kp=500 cut the joint tracking error
+from 0.204 rad to 0.065 but did not close the gap, because what remains is the body moving,
+not the joint sagging. Reaching further is not a matter of trying harder; it is walking closer.
+
+The hand also bottoms out at z≈0.70 and Momo has no crouch. So every surface in the room sits
+inside z=0.70..1.40, and each one moved there because the task failed first:
+
+- the drum opening is at z=0.91, not the realistic height of a front-loader, because at the
+  realistic height the towel was simply below the arm;
+- the basket stands on a plinth with its floor at z=0.62 -- on the floor, its contents were
+  unreachable by 0.40 m;
+- the towel starts toward the drum *mouth* rather than centred in the cavity, which is both
+  0.07 m more reachable and where laundry actually ends up after a cycle.
+
+### Cloth is grasped by welding a vertex, not by pinching
+
+A towel has no pose. It has 63 vertex positions, and which one the hand is near is the whole
+question. Friction does not hold a 4 mm sheet any more than it holds a door handle, so a closed
+hand is a weld to one vertex -- the same compromise the office robot makes on doors. Measured:
+welding a corner and raising the hand to z=0.72 lifts the sheet to z=0.665.
+
+Which vertex matters. Lifting a towel by its middle gathers it into a bundle; a corner is the
+furthest part of the sheet from a robot standing square on. `take_out` grasps the nearest
+*perimeter* vertex, `fold` uses corners, and both search a patch of floor for a spot the target
+is genuinely reachable from rather than trusting a "stand 0.22 m back and face it" rule -- that
+rule kept reporting 0.19 m misses on grasps that work at 0.03 m from a spot 20 cm away.
+
+Three failures worth recording because each looked like something else:
+
+- **The washer cabinet was a solid box**, so the drum's floor and back were buried inside it.
+  The towel started embedded in solid matter and was ejected onto the floor on the first step.
+  The cabinet is now a shell around the cavity.
+- **A closed door flush in its frame is 63 interpenetrating contacts**, and the solver simply
+  threw it open -- measured swinging to -97° with nobody touching it. Same fix as the office:
+  `<contact><exclude>` the leaf from the world.
+- **An open door hangs across its own opening.** Every reach into the drum stopped dead at
+  y=1.20 for a towel at y=1.32, the only contact being a finger against the door. The door now
+  opens to 105-113° and the robot sidesteps to a spot with a clear line in.
+
+Releasing needs care too: the arm has to move away BEFORE waiting, or the towel drapes over the
+forearm and a perfectly aimed drop into the basket reads as a miss.
+
+### Folding, and the one thing that does not work
+
+Folding is measured, not asserted. A flat 0.40 × 0.30 sheet spans about 0.50 m corner to
+corner; folded once it should span appreciably less, and `fold` reports both numbers.
+
+The lift height while carrying a corner across turned out to be a narrow window:
+
+| lift | outcome |
+|---|---|
+| 0.07 m | corner drags, nothing folds |
+| 0.10 m | still nothing (span unchanged at 0.50 m) |
+| 0.13 m | folds and stays put: **0.50 → 0.28 m**, sheet at z=0.811 |
+| 0.16 m | peels the whole sheet off the counter; towel ends on the floor |
+
+That 0.16 m case is the one worth dwelling on, because it *passed*. A towel gathered on the
+floor has a small span too -- 0.28 → 0.24 m -- so a span-only test called it a successful fold.
+The skill now also checks the towel is still at surface height, which is what a measurement is
+for.
+
+Folding is two-handed by nature, and this arm cannot do it that way: the two corners of an edge
+are 0.40 m apart, and an exhaustive sweep of standing positions still left the worse hand
+0.22 m from its corner against a 0.075 m tolerance. There is no spot where both are in reach,
+because the sheet is wider than the span the hands share. So each corner is carried across on
+its own and the robot walks between them, which is also what a person does with a bath towel.
+
+**Known limitation.** Folding a towel that has just come out of the drum is not reliable. Every
+step individually works -- `open_washer`, `take_out` and `put_on_counter` all pass, and `fold`
+is deterministic and repeatable on a flat towel (0.50 → 0.28 m, twice from the `counter`
+keyframe) -- but a towel carried out of the washer lands *bunched*, and folding a bunched sheet
+drags the gathered mass off the counter instead of folding it. `_spread` was written to flatten
+it first and does not do enough. The chain gets three steps in and then reports honestly that
+it pulled the towel off the surface. The fix is a proper two-handed spread: pin one corner and
+drag the opposite one, which needs the arms to work together in a way nothing else here does.
+
+## Q1 and the patrol
+
+A 21 kg quadruped walking a route around a building, over grass, and up three 0.16 m steps.
+Four legs rather than two because the route has stairs: a kinematic biped handles a flat floor
+and has nothing sensible to do with a step, whereas four contact points make a stair a question
+of foot placement rather than balance.
+
+The trot is kinematic, like the humanoid's gait, and implements the same `Gait` protocol, so
+navigation and skills are unchanged. Measured: forward 0.54 m/s against 0.6 commanded, turning
+±0.73 rad/s against ±0.8, strafe correct.
+
+Two findings:
+
+- **Writing both the qpos quaternion and `qvel[5]` double-integrates a turn.** A commanded
+  +0.8 rad/s over three seconds came out as **-2.63 rad** where +2.40 was wanted -- which reads
+  exactly like a sign error and is not. Setting the heading through qpos alone gives +2.400.
+  (The humanoid's gait sets both and gets away with it, because its planted stance resists the
+  extra rotation.)
+- **The trunk must be held at a height above the LOWEST FOOT, not above world zero.** Holding a
+  fixed world height makes the robot fight the terrain: on a step it hauls itself back down to
+  lawn level. With the ground-relative hold it climbs all three rises and ends on the landing,
+  trunk rising 0.365 → 0.831 m.
+
+The patrol route is read from the scene -- sites named `waypoint_1..4` -- so moving the building
+in the XML moves the patrol with it. A lap visits all four corners in about 10 s of simulated
+time and reports what the camera saw along the way.
+
+Climbing needed one thing the rest of the site does not: **obstacle avoidance turned off for
+the last two metres.** The steps *are* an obstacle by any clearance measure, so the avoider slid
+the robot sideways along the building and it arrived at x=-2.98 for a staircase at x=0, having
+never touched a step. The approach now stops short, squares up, and drives the last stretch
+blind -- and the standoff has to sit *inside* the bollard line, or the blind run spends its
+whole budget pushing against a post.
+
+## R1 and the Moon
+
+A six-wheeled rocker-bogie rover on 60 × 50 m of cratered regolith at 1.62 m/s². Rocker-bogie
+because it is the suspension every planetary rover uses, and for one property: both arms pivot
+freely and the two sides are linked by a differential, so all six wheels stay on the ground over
+terrain rougher than the wheels are tall.
+
+Measured on flat ground at lunar gravity:
+
+| command | achieved |
+|---|---|
+| vx +0.6 m/s | 0.57 m/s |
+| vx -0.5 m/s | 0.48 m/s |
+| wz ±0.5 rad/s | ±0.24 rad/s |
+
+The turn shortfall is not a bug to tune out. A six-wheeler turns by scrubbing its wheels
+sideways, the force available to do that is proportional to weight, and on the Moon the rover
+weighs a sixth of what it would on Earth. Skills plan around it by closing the loop on heading
+rather than assuming a commanded rate arrives.
+
+Getting it to move at all took four fixes, each of which presented as something else:
+
+1. **The rocker and bogie struts were colliding with the ground** and carrying the rover's
+   weight, so the wheels barely turned -- 0.19 rad/s against a commanded 3.0, the whole vehicle
+   moving 0.04 m/s. Struts are structure, not undercarriage; only wheels touch ground now.
+2. **Skid steering alone cannot turn a six-wheeler at 1/6 g.** The two middle wheels sit near
+   the turn centre where they cannot roll through the turn, and they ploughed: stalled at
+   0.05 rad/s with their actuators saturated at the full 45 N·m. Four corner steering joints
+   fixed it, which is what real rovers do for the same reason.
+3. **The steering angle and the wheel differential act in opposite senses.** Getting the sign
+   wrong makes them cancel almost exactly: +0.5 rad/s commanded arrived as -0.18.
+4. **The obstacle threshold was above what empty ground reads.** A mast camera 0.9 m up on
+   rolling terrain always has ground in the lower half of its view, so open plain reads about
+   2.0 m of forward clearance -- and a 2.2 m threshold declared the rover permanently blocked.
+
+Two things about the terrain are compromises, and both are stated in the XML where they are
+made. The relief is 1.4 m rather than 3.2: at 3.2 the crater walls were simply unclimbable for
+0.4 m wheels -- dropped into one beside the beacon, the rover managed 0.0-1.4 m in each of the
+four compass directions before stopping. And the Sun is lifted to about 20° from the 1-3° that
+is physically right at the pole, with a little bounce light added, because the physically
+correct version rendered a scene so dark that the craters, the lander and the rover were all
+barely discernible to a human eye. What survives the compromise is what matters: light still
+arrives from low and to one side, shadows are still long, and crater floors are still much
+darker than their rims.
+
+Target positions are measured rather than chosen by eye. The beacon was originally on a crater
+rim with 0.78 m of local relief, and a rover that reached it could then drive 0.1 m before
+stopping -- arriving stranded it. It now sits on ground with 0.35 m of relief and can leave in
+any direction. All three named targets are reachable in one run.
+
 ## Notes on the Pyunto backend
 
 The server is Node/TypeScript + Express + Socket.IO (not FastAPI, despite older docs), and
@@ -342,15 +596,36 @@ The server is Node/TypeScript + Express + Socket.IO (not FastAPI, despite older 
 
 ```
 pyunto_robotics/
-  agent.py      message → plan → act → reply
-  comms/        auth, crypto (AES-256-GCM), keys, client (REST + Socket.IO)
-  sim/          robot (step/look/arm), gait (kinematic, RL stub)
-  perception/   depth geometry, object grounding (colour + VLM)
-  nav/          mapless navigation state machine
-  brain/        planner (rules + Gemma 4), skills
+  agent.py          message → plan → act → reply (drives any robot's skills)
+  runner.py         the shared body of every run_*.py script
+  comms/            auth, crypto (AES-256-GCM), keys, client (REST + Socket.IO)
+  sim/
+    robot.py        step/look/arm/reach -- the boundary everything else talks to
+    gait.py         humanoid kinematic gait, RL stub
+    quad_gait.py    quadruped trot + closed-form leg IK
+    wheel_drive.py  rover skid steering + corner steering
+    reach.py        damped least-squares arm IK
+    cloth.py        grasping MuJoCo flex cloth by welding a vertex
+    terrain.py      procedural heightfields (lawn, lunar regolith)
+  perception/       depth geometry, object grounding (colour + VLM)
+  nav/              mapless navigation state machine
+  brain/
+    planner.py      office planner (rules + Gemma 4)
+    domains.py      per-robot vocabularies and LLM prompts
+    skills.py       office humanoid
+    laundry.py      Momo
+    patrol.py       Q1
+    lunar.py        R1
 assets/
-  pyunto_h1.xml custom humanoid: 1.38 m, 23 actuators, grippers, head camera
-  office.xml    3 rooms, corridor, lobby, 3 hinged doors
-scripts/        run_robot.py, view_sim.py, test_comms.py
-tests/          99 tests
+  pyunto_h1.xml   humanoid: 1.38 m, 23 actuators, grippers, head camera
+  office.xml      3 rooms, corridor, lobby, 3 hinged doors
+  momo.xml        companion humanoid: 1.41 m, 24 DoF, neck pitch, face and hair
+  home.xml        laundry room: drum washer, raised basket, counter, 2 flex towels
+  pyunto_q1.xml   quadruped: 21 kg, 12 DoF, mast cameras incl. a downward one
+  campus.xml      building, lawn heightfield, trees, hedges, bollards, 3 steps
+  pyunto_r1.xml   rover: 6 wheels, rocker-bogie, differential, 4 corner steers
+  lunar.xml       60 × 50 m cratered regolith, lander, beacon, ice, 1.62 m/s²
+scripts/          run_robot.py, run_home.py, run_patrol.py, run_lunar.py,
+                  view_sim.py, test_comms.py
+tests/            188 tests (37 of them for the three newer robots)
 ```

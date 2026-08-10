@@ -77,6 +77,34 @@ _PALETTE: dict[str, tuple[tuple[int, int, int], int]] = {
     "table": ((89, 76, 66), 30),
     "desk": ((140, 102, 71), 30),
     "fridge": ((178, 184, 191), 15),
+
+    # --- home / laundry scene (assets/home.xml) ---
+    # The washer is white against a white wall, which colour matching cannot see at all -- so
+    # the cue is its blue trim ring, exactly as the office doors are found by their orange
+    # frames rather than by the leaf.
+    "washer": ((51, 115, 204), 45),
+    "basket": ((242, 184, 56), 45),
+    "counter": ((184, 140, 97), 35),
+    "towel_blue": ((89, 168, 224), 45),
+    "towel_pink": ((245, 184, 199), 35),
+
+    # --- outdoor patrol scene (assets/campus.xml) ---
+    # Foliage and hedges are both green and deliberately separate entries: a canopy is 3 m up
+    # and a landmark, a hedge is at knee height and an obstacle, and telling them apart from
+    # colour alone needs the two greens to be distinguishable.
+    "tree": ((46, 115, 51), 38),
+    "hedge": ((56, 107, 56), 30),
+    "entrance": ((229, 115, 38), 45),
+    "bollard": ((217, 77, 38), 40),
+    "building": ((204, 199, 189), 22),
+    "window": ((89, 140, 178), 35),
+
+    # --- lunar scene (assets/lunar.xml) ---
+    # Everything on the Moon is grey, so the only reliable colour cues are the things people
+    # put there. The lander and the flag are bright by design, for exactly this reason.
+    "lander": ((214, 176, 61), 45),
+    "beacon": ((235, 87, 46), 45),
+    "panel": ((46, 74, 138), 45),
 }
 
 # What a user might say, mapped to what the scene calls it.
@@ -89,6 +117,34 @@ _SYNONYMS: dict[str, str] = {
     "table": "table", "meeting table": "table", "テーブル": "table",
     "desk": "desk", "机": "desk", "デスク": "desk",
     "fridge": "fridge", "refrigerator": "fridge", "冷蔵庫": "fridge",
+
+    # --- home / laundry ---
+    "washer": "washer", "washing machine": "washer", "drum": "washer",
+    "洗濯機": "washer", "ドラム": "washer",
+    "basket": "basket", "laundry basket": "basket", "洗濯かご": "basket",
+    "洗濯カゴ": "basket", "かご": "basket", "カゴ": "basket",
+    "counter": "counter", "vanity": "counter", "washstand": "counter",
+    "洗面台": "counter", "カウンター": "counter", "台": "counter",
+    "towel": "towel_blue", "タオル": "towel_blue",
+    "blue towel": "towel_blue", "青いタオル": "towel_blue",
+    "pink towel": "towel_pink", "ピンクのタオル": "towel_pink",
+
+    # --- outdoor patrol ---
+    "tree": "tree", "trees": "tree", "木": "tree", "樹木": "tree", "植木": "tree",
+    "hedge": "hedge", "bush": "hedge", "生垣": "hedge", "植え込み": "hedge",
+    # NOT "door"/"入口"/"出口": those already mean the office doors, and this table is shared
+    # by every scene. Adding them here silently re-pointed 「オフィスのドアを開けて」 at the
+    # campus building's entrance, because the longest-match rule has no idea which scene is
+    # loaded. Only words that are unambiguous across all four scenes belong here.
+    "entrance": "entrance", "玄関": "entrance", "エントランス": "entrance",
+    "bollard": "bollard", "post": "bollard", "ポール": "bollard", "車止め": "bollard",
+    "building": "building", "ビル": "building", "建物": "building", "建屋": "building",
+    "window": "window", "窓": "window",
+
+    # --- lunar ---
+    "lander": "lander", "着陸機": "lander", "ランダー": "lander",
+    "beacon": "beacon", "marker": "beacon", "ビーコン": "beacon", "目印": "beacon",
+    "panel": "panel", "solar panel": "panel", "ソーラーパネル": "panel", "パネル": "panel",
 }
 
 

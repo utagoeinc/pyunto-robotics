@@ -178,6 +178,19 @@ _SEQUENCERS = (
     "then", "after that", "afterwards", "next,", "and then",
 )
 
+# Japanese chains actions by putting verbs in the て-form and separating them with 「、」, with
+# no conjunction at all:
+#
+#     洗濯機を開けて、洗濯物を取り出して、カゴに入れて、テーブルまで運んで
+#
+# That is four instructions and not one of the words in _SEQUENCERS appears. A real request
+# written exactly like this produced a single-step plan and the robot opened the washer and
+# stopped -- with no warning, because the warning also keyed off _SEQUENCERS.
+#
+# So a comma followed by more text counts as a chain in its own right. Two or more て-form
+# clauses do too, which catches 「開けて出して」 written without commas.
+_TE_FORM_ENDINGS = ("て、", "で、", "てから", "でから")
+
 
 def looks_multi_step(message: str) -> bool:
     """True when an instruction chains several actions together.
@@ -186,9 +199,27 @@ def looks_multi_step(message: str) -> bool:
     returns the wrong one -- 「右のドアを開けて…今度は一番左の部屋に」 came out as
     open(left door), having dropped the first half. Callers use this to warn that --llm is
     needed rather than letting the robot confidently do the wrong thing.
+
+    Detects three shapes of chain:
+
+      * an explicit conjunction -- 「その後」, "and then";
+      * Japanese て-form clauses joined by 「、」, which is how the language chains actions
+        with no conjunction at all;
+      * several imperative clauses separated by commas in either language.
+
+    The second one was missing, and it is the ordinary way to write a sequence in Japanese.
+    A real six-part request -- 「洗濯機を開けて、洗濯物を取り出して、カゴに入れて、テーブル
+    まで運んで」 -- contained none of the conjunctions, so the robot opened the washer, stopped,
+    and reported success, and the warning that would have suggested --llm never fired either.
     """
     text = message.lower()
-    return any(word in text for word in _SEQUENCERS)
+    if any(word in text for word in _SEQUENCERS):
+        return True
+    if any(ending in message for ending in _TE_FORM_ENDINGS):
+        return True
+    # Two or more comma-separated clauses with real content in each.
+    clauses = [c for c in re.split(r"[、,]", message) if len(c.strip()) > 2]
+    return len(clauses) >= 2
 
 
 class RulePlanner:
@@ -443,11 +474,16 @@ class LLMPlanner:
         return self.fallback.plan(message)
 
 
-def parse_plan(text: str) -> list[Step]:
+def parse_plan(text: str, allowed: tuple[str, ...] = ACTIONS) -> list[Step]:
     """Extract steps from a model reply.
 
     Locates the JSON array by bracket matching rather than parsing the whole reply, because
     models routinely wrap it in prose or a code fence.
+
+    `allowed` is the vocabulary the plan is checked against. It defaults to the office robot's
+    verbs so existing callers are unaffected; the other robots pass their own, because a plan
+    naming an action their skills do not have is a misunderstanding worth dropping rather than
+    a step worth attempting. See brain/domains.py.
     """
     match = re.search(r"\[.*]", text, re.DOTALL)
     if not match:
@@ -465,7 +501,9 @@ def parse_plan(text: str) -> list[Step]:
         action = str(entry.get("action", "")).strip().lower()
         if action == "open_door":
             action = "open"
-        if action not in ACTIONS:
+        # `report` is always available: every domain uses it to say something back, and a
+        # model that answers a greeting with one should not have the step thrown away.
+        if action not in allowed and action != "report":
             log.warning("planner emitted unknown action %r, skipping", action)
             continue
         argument = entry.get("argument")

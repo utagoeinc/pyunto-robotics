@@ -33,6 +33,14 @@ log = logging.getLogger(__name__)
 # door does not swing across.
 DOORWAY_HALF_WIDTH_M = 0.55
 
+# How fast to lean on a door, m/s. Well below walking pace: a door opening at speed is a
+# hazard to anyone standing behind it, and nothing about the task needs it done quickly.
+DOOR_PUSH_SPEED = 0.15
+
+# How far open is far enough to walk through, radians. About 75 degrees, which clears a 1.1 m
+# doorway for a 0.67 m body with room to spare.
+DOOR_OPEN_ENOUGH_RAD = 1.15
+
 # Two door sightings this far apart in world heading are different doors. The office doors are
 # 4 m apart, so from anywhere in the corridor they are tens of degrees apart.
 COUNT_SEPARATION_RAD = 0.35
@@ -506,6 +514,17 @@ class Skills:
                     approach = self.nav.goto(target, where=where)
                 if not approach.success:
                     return SkillResult(False, approach.describe())
+            else:
+                # Every retry used up and the check still says this is the wrong door. Opening
+                # it anyway is the failure the check exists to prevent: the robot ended up at
+                # the middle door, was told twice that it was the middle door, and opened it.
+                if self._at_the_right_door(where) is False:
+                    return SkillResult(
+                        False,
+                        f"I could not get to the {where} {target} - I kept ending up at a "
+                        f"different one, so I have not opened anything.",
+                        {"where": where},
+                    )
 
         # Square up using the bearing goto already measured, rather than calling face().
         # face() re-runs detection from scratch, and next to a door the neighbouring one is
@@ -557,9 +576,23 @@ class Skills:
         self.robot.grip(side, 0.35)
         self.robot.stand(0.6)
 
-        # Push: keep walking forward so the extended arm loads the door.
-        for _ in range(160):
-            self.robot.step(vx=0.35)
+        # Push: keep walking forward so the extended arm loads the door. Deliberately slow.
+        # There may be somebody on the other side, and a door that swings open at walking pace
+        # is how you hit them; a person opening a door they cannot see through leans on it
+        # gently and gives whoever is behind it time to notice. Same total travel, taken over
+        # more than twice as long.
+        # Twice the travel, because a slow push loses ground to the door's own spring: the
+        # same distance walked at 0.15 m/s instead of 0.35 swings the door 67 degrees rather
+        # than 109. Walking further at the slow speed reaches the same 109.
+        opened_to = angle_before
+        for _ in range(int(2 * 160 * 0.35 / DOOR_PUSH_SPEED)):
+            self.robot.step(vx=DOOR_PUSH_SPEED)
+            # Stop as soon as it is open enough to walk through. Pushing on past that just
+            # grinds the robot into the frame for the rest of the stroke, and taking the push
+            # slowly made that stretch more than twice as long.
+            opened_to = self._door_angle()
+            if abs(opened_to - angle_before) > DOOR_OPEN_ENOUGH_RAD:
+                break
 
         angle_after = self._door_angle()
         # Judge on how far the door ends up open, not on how much THIS push added. Squeezing

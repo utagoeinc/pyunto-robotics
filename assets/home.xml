@@ -13,15 +13,22 @@
         y=-2 └──────────────────────────────────────────┘
              x=-2.5                                  x=+2.5
 
-  Everything is placed against Momo's measured reach, not guessed. With the arm chain in this
-  model the right hand covers roughly 0.40 m in front of the base, between z=0.67 (reaching
-  down) and z=1.40 (reaching up), shoulders at z=1.06. So:
+  Everything is placed against Momo's MEASURED reach, and the measurements are the whole story
+  of why this room looks the way it does. The hand can be put within 0.25 m of the base -- not
+  the 0.40 m the joint chain spans, because past that the extended arm loads the torso and the
+  body yields -- and it bottoms out at about z=0.70 however hard it reaches down. Momo has no
+  crouch, so that floor is absolute.
 
-    * The drum opening is centred at z=0.75 -- low, as a real front-loader is, and reachable
-      by pitching the shoulder down rather than by crouching. Momo has no crouch.
-    * The fold counter is at z=0.85, standard vanity height and near the middle of the reach
-      band, which is why folding happens there rather than on the floor.
-    * The basket rim is at z=0.32 so a towel can be dropped in from above without a crouch.
+  Every surface therefore sits INSIDE the band z=0.70..1.40:
+
+    * The drum opening is centred at z=0.91. A real front-loader sits lower; at the realistic
+      height the towel was simply below the arm and no amount of positioning helped.
+    * The fold counter is at z=0.85, which is both standard vanity height and comfortably mid-
+      band. Folding happens here because the floor is out of reach entirely.
+    * The basket stands on a plinth with its floor at z=0.62 and rim at z=0.87. On the ground
+      its contents were unreachable -- measured a 0.40 m miss trying to lift a towel back out.
+    * The towel starts toward the drum MOUTH rather than centred in the cavity, which is both
+      0.07 m more reachable and where laundry actually ends up after a cycle.
 
   The task the environment exists to support, in order:
     1. open the drum door        (a hinged disc, like the office doors but smaller)
@@ -256,18 +263,28 @@
          Four walls and a floor, open at the top: a towel is dropped IN, so it cannot be a
          solid box. Rim at z=0.32, low enough to drop into without crouching.
     -->
+    <!--
+      The basket stands on a low plinth, so its floor is at z=0.62 rather than on the ground.
+
+      Not decoration: the arm bottoms out around z=0.70 and cannot go below it, so a towel
+      lying in a basket on the floor is simply unreachable -- measured a 0.40 m miss trying to
+      pick one out again. Everything the robot has to manipulate must live in the band the
+      hand can actually occupy, and a raised laundry basket is an ordinary piece of furniture.
+    -->
     <body name="basket" pos="-0.30 -0.55 0">
-      <geom name="basket_floor" class="h_fixture" size="0.26 0.20 0.015" pos="0 0 0.015"
+      <geom name="basket_stand" class="h_fixture" size="0.24 0.18 0.305" pos="0 0 0.305"
+            material="cabinet"/>
+      <geom name="basket_floor" class="h_fixture" size="0.26 0.20 0.015" pos="0 0 0.625"
             material="basket_mat"/>
-      <geom name="basket_w1" class="h_fixture" size="0.26 0.016 0.155" pos="0 0.19 0.165"
+      <geom name="basket_w1" class="h_fixture" size="0.26 0.016 0.115" pos="0 0.19 0.755"
             material="basket_mat"/>
-      <geom name="basket_w2" class="h_fixture" size="0.26 0.016 0.155" pos="0 -0.19 0.165"
+      <geom name="basket_w2" class="h_fixture" size="0.26 0.016 0.115" pos="0 -0.19 0.755"
             material="basket_mat"/>
-      <geom name="basket_w3" class="h_fixture" size="0.016 0.20 0.155" pos="0.25 0 0.165"
+      <geom name="basket_w3" class="h_fixture" size="0.016 0.20 0.115" pos="0.25 0 0.755"
             material="basket_mat"/>
-      <geom name="basket_w4" class="h_fixture" size="0.016 0.20 0.155" pos="-0.25 0 0.165"
+      <geom name="basket_w4" class="h_fixture" size="0.016 0.20 0.115" pos="-0.25 0 0.755"
             material="basket_mat"/>
-      <site name="basket_site" pos="0 0 0.36" size="0.04" rgba="1 0.8 0.2 0.35"/>
+      <site name="basket_site" pos="0 0 0.90" size="0.04" rgba="1 0.8 0.2 0.35"/>
     </body>
 
     <!-- a little greenery, purely so the room does not look like a lab -->
