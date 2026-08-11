@@ -18,6 +18,7 @@ models/
 
 # Runtime artifacts
 out/
+output/
 logs/
 *.png
 *.jpg
