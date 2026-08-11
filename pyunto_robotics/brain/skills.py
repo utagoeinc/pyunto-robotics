@@ -37,8 +37,20 @@ DOORWAY_HALF_WIDTH_M = 0.55
 # hazard to anyone standing behind it, and nothing about the task needs it done quickly.
 DOOR_PUSH_SPEED = 0.15
 
-# How far open is far enough to walk through, radians. About 75 degrees, which clears a 1.1 m
-# doorway for a 0.67 m body with room to spare.
+# How far open to aim for before walking through, radians. 1.15 is about 66 degrees; the
+# comment here used to claim 75, which it never was.
+#
+# Treat this as the target for the push, not as proof of fit. The geometric requirement looks
+# tighter than it is -- a 0.92 m leaf (assets/office.xml, half-size 0.46) leaves
+# 0.92 * (1 - cos(swing)) of clear width, which for a 0.67 m body wants 74 degrees. But the
+# leaf keeps swinging as the robot moves into it, so the gap at the moment of transit is wider
+# than the angle at the moment of measurement: measured getting through on a 61-degree peak.
+# Raising this to 1.31 to "fix" that only made the push run longer for no gain.
+#
+# Nor is the peak angle a usable pass/fail test. Rejecting anything under 40 degrees as "too
+# narrow to fit through" looked reasonable and broke the errand: doors that the robot does get
+# through peak below that, and the run failed later, in leave(). Whether the robot fits is a
+# question about the gap at the moment it steps through, which this number does not answer.
 DOOR_OPEN_ENOUGH_RAD = 1.15
 
 # Two door sightings this far apart in world heading are different doors. The office doors are
@@ -64,6 +76,14 @@ class SkillResult:
     ok: bool
     message: str
     data: dict[str, Any] = field(default_factory=dict)
+    # Whether a failure should stop the rest of the plan.
+    #
+    # Most failures should: later steps assume the earlier ones worked, and a robot that could
+    # not pick the towel up has no business trying to fold it. But some are simply "I cannot do
+    # that particular thing" -- asking a robot to carry a basket that is bolted to the floor --
+    # and abandoning a five-step errand over one impossible aside is the wrong response.
+    # Skills set this False to say "note it and carry on".
+    fatal: bool = True
 
     def __str__(self) -> str:
         return self.message
@@ -93,6 +113,12 @@ class Skills:
         self._doorway_return: np.ndarray | None = None
         # Heading the robot had when it went through, so leaving can line up on the reverse.
         self._doorway_heading: float | None = None
+        # Corridor-side spots of every doorway this robot has personally been through. A door
+        # it opened itself may later be invisible -- the leaf settles ajar, angled into its
+        # own doorway, and an oblique view sees only the recess -- but the robot's own history
+        # is first-hand: there IS a door there, it walked through it. Used to reconcile "you
+        # said three" with a frame that shows two.
+        self._doors_opened: list[np.ndarray] = []
         # Which way to turn next time a shoulder catches on a door frame; flips each attempt so
         # repeated snags do not walk the robot along the frame into the opposite jamb.
         self._loose_nudge = 1.0
@@ -433,16 +459,31 @@ class Skills:
             return seen
 
         log.info("expected %d %ss in view, can see %d; repositioning", expect, target, seen)
-        for attempt in range(tries):
-            self.return_home()
-            self._straighten_waist()
-            # Settle before counting. The count is taken from one frame, and a frame grabbed
-            # while the body is still rocking from the walk clips a door at the edge of view,
-            # so the robot concludes it can only see two and gives up on a scene where all
-            # three are plainly there.
-            self.robot.stand(0.8)
+        self.return_home()
+        self._straighten_waist()
+        # Settle before counting. The count is taken from one frame, and a frame grabbed
+        # while the body is still rocking from the walk clips a door at the edge of view,
+        # so the robot concludes it can only see two and gives up on a scene where all
+        # three are plainly there.
+        self.robot.stand(0.8)
+        seen = self._count_doors()
+        log.info("look 1: counted %d %ss", seen, target)
+        if seen >= expect:
+            return seen
+
+        # Still short: step BACK for a wider view, rather than recounting from the same spot.
+        # return_home stops anywhere within its arrival tolerance, and a home 0.27 m nearer
+        # the doors than usual (measured (0.26, -2.73) against the (0, -3.0) the count was
+        # tuned at) pushes the outer doors past the edge of the frame -- from there the count
+        # reads 2 however many times it is retaken. Backing up is what a person does when a
+        # row of doors will not fit in view. Half a metre per look, twice at most, keeps well
+        # clear of the wall behind (measured 1.27 m of corridor behind the worst home pose).
+        for attempt in range(1, tries):
+            for _ in range(int(0.5 / (0.25 * self.robot.control_dt))):
+                self.robot.step(vx=-0.25)
+            self.robot.stand(0.6)
             seen = self._count_doors()
-            log.info("look %d: counted %d %ss", attempt + 1, seen, target)
+            log.info("look %d: counted %d %ss (from further back)", attempt + 1, seen, target)
             if seen >= expect:
                 return seen
 
@@ -461,27 +502,74 @@ class Skills:
         The sequence: get close, square up, reach out at handle height, walk into the door so
         the arm loads it, then check the hinge actually moved.
         """
+        # Which room this whole skill started from, for the crossing check at the end. Taken
+        # at the very top: both the approach and the push can carry the robot over the
+        # threshold on their own -- measured the approach drifting into the pantry through
+        # the part-open door, so a check anchored any later called a successful entry a
+        # failure to get through, from inside the room it had supposedly not entered.
+        began_in = self.report_position().data.get("room")
+
         # A spatial qualifier is anchored to where the user was describing from, which is where
         # the robot was standing when it was told. Go back there before choosing: from beside a
         # doorway only one door is in frame, so "the left one" would mean whichever it is next
         # to. When the user also said how many there are, check that too and refuse rather than
         # guess -- opening the wrong door confidently is worse than saying you cannot tell.
+        approach = None
         if where in ("left", "right", "middle"):
             wanted = expect or 3
             seen = self._ensure_expected_in_view(target, wanted)
             if seen < wanted:
-                return SkillResult(
-                    False,
-                    f"You said there were {wanted} {target}s, but I can only see {seen} from "
-                    f"here, so I am not sure which one you mean.",
-                    {"expected": wanted, "seen": seen},
+                # The forward frame will not show the stated number -- but the frame is not
+                # the only way to confirm the scene. A door this robot has already been
+                # through stands ajar, and an ajar leaf seen obliquely through its own
+                # doorway is a sliver the colour match misses: measured counting 2 of 3 from
+                # every spot along home after opening the right-hand door. Turning the head
+                # finds all three (the ajar one gets looked at square-on), and once the
+                # count is confirmed, choose from the survey too -- then walk to the chosen
+                # one and let the wrong-door check below judge the result as usual.
+                # The stated number may still be accounted for. Doors found by turning the
+                # head are one source; doorways this robot has personally walked through are
+                # another, and that history is first-hand. (The landmark map was tried here
+                # and reverted: it carries phantoms -- one logged 90 sightings in the middle
+                # of the corridor -- so "the leftmost remembered door" could name a spot on
+                # open floor.) A door the robot opened settles ajar, angled into its own
+                # doorway, and vanishes from an oblique view; its doorway has not moved.
+                sightings = self.nav.survey(target)
+                spots = [(b, self.nav._world_position(b, d)) for b, d in sightings]
+                for p in self._doors_opened:
+                    if all(
+                        float(np.linalg.norm(p - q)) >= DISTINCT_DOORS_M / 2
+                        for _, q in spots
+                    ):
+                        spots.append((self.nav._relative_to(p)[0], p))
+                chosen = (
+                    self.nav._pick_bearing(spots, where) if len(spots) >= wanted else None
                 )
-
+                if chosen is None:
+                    return SkillResult(
+                        False,
+                        f"You said there were {wanted} {target}s, but I can only see {seen} "
+                        f"from here, so I am not sure which one you mean.",
+                        {"expected": wanted, "seen": seen},
+                    )
+                log.info(
+                    "%d of %d %ss in the frame, but counting the ones I have been through "
+                    "accounts for all of them; choosing among those", seen, wanted, target,
+                )
+                # The default step budget covers about 4.5 m and the far door is 5.5 from
+                # home: walked with the default, the robot stalled midway, and the goto that
+                # followed locked onto a door 5.5 m in the other direction. Walk with room to
+                # spare and face the chosen spot before letting goto pick a door, so the one
+                # it picks is the one just walked to.
+                self.nav._walk_to(chosen[1], max_steps=1500)
+                self.nav._turn_body_to(self.nav._relative_to(chosen[1])[0])
+                approach = self.nav.goto(target)
 
         # Stop within arm's length. The arm reaches ~0.43 m in front of the base at handle
         # height (measured by sweeping the shoulder/elbow range), so the default 0.85 m
         # stand-off leaves the hand half a metre short of the door.
-        approach = self.nav.goto(target, where=where)
+        if approach is None:
+            approach = self.nav.goto(target, where=where)
         if not approach.success:
             return SkillResult(False, approach.describe())
 
@@ -551,6 +639,26 @@ class Skills:
             self.robot.step(vx=0.3)
         self.robot.stand(0.3)
 
+        # Line up on the middle of the OPENING before anything else. Arrival promises only
+        # "within arm's reach of the tracked position", which can just as well be in front of
+        # the frame or the wall beside the opening: measured squaring up there and spending
+        # the whole stroke pushing a blameless wall, reported as "it may be locked". Not on
+        # the handle, though that was the first try -- the handle hangs at the leaf's free
+        # edge, 0.19 m from the frame post, and a body centred there puts a shoulder into the
+        # post on the way through (opened 77 degrees and could not follow). The opening's
+        # middle clears both posts and the arm reaches the leaf from anywhere across it.
+        hinge = self._nearest_hinge_x()
+        if hinge is not None:
+            # Every doorway here spans about a metre from its hinge toward +x.
+            centre = np.array([hinge + DOORWAY_HALF_WIDTH_M, self.robot.position[1]])
+            left_axis = np.array([-math.sin(self.robot.yaw), math.cos(self.robot.yaw)])
+            for _ in range(60):
+                lateral = float((centre - self.robot.position[:2]) @ left_axis)
+                if abs(lateral) < 0.05:
+                    break
+                self.robot.step(0.0, float(np.clip(lateral * 1.5, -0.3, 0.3)), 0.0)
+            self.robot.stand(0.3)
+
         # Remember where we are STANDING, which is the corridor side of the threshold -- that
         # is where leaving has to get back to. Recording the doorway itself (one arm's length
         # ahead) put the target inside the room: measured (4.54, 1.27) for a doorway at y=1.0,
@@ -585,23 +693,36 @@ class Skills:
         # same distance walked at 0.15 m/s instead of 0.35 swings the door 67 degrees rather
         # than 109. Walking further at the slow speed reaches the same 109.
         opened_to = angle_before
+        # The widest the leaf got at any point, not just where it ended up. The hinge has a
+        # spring (assets/office.xml, class "door": stiffness 0.8), so the moment the body
+        # stops bearing on the leaf it starts closing again -- measured swinging to 61 degrees,
+        # carrying the robot 1.26 m into the room, and reading 10 degrees by the time the walk
+        # finished. Judging on the final angle called that a door that never opened.
+        widest = angle_before
         for _ in range(int(2 * 160 * 0.35 / DOOR_PUSH_SPEED)):
             self.robot.step(vx=DOOR_PUSH_SPEED)
             # Stop as soon as it is open enough to walk through. Pushing on past that just
             # grinds the robot into the frame for the rest of the stroke, and taking the push
             # slowly made that stretch more than twice as long.
             opened_to = self._door_angle()
+            if abs(opened_to - angle_before) > abs(widest - angle_before):
+                widest = opened_to
             if abs(opened_to - angle_before) > DOOR_OPEN_ENOUGH_RAD:
                 break
 
-        angle_after = self._door_angle()
-        # Judge on how far the door ends up open, not on how much THIS push added. Squeezing
+        # No pushing past the threshold to park the leaf wide, though it is tempting -- a leaf
+        # left near the threshold settles ajar and half-hides in its own doorway. Tried, and
+        # it backfired: a leaf parked at 109 degrees stands square across the hinge half of
+        # the opening, and the robot, entering on that half, walked into its edge and could
+        # not get through at all. The leaf part-open is what funnels the body through.
+
+        # Judge on how far the door was got open, not on how much THIS push added. Squeezing
         # past a door on the way to it can already have swung it (a detour nudged the pantry
         # door 35 degrees open before the arm ever touched it), and measuring only the delta
         # then reports a door standing wide open as "it did not open".
         swing = max(
-            abs(math.degrees(angle_after)),
-            abs(math.degrees(angle_after - angle_before)),
+            abs(math.degrees(widest)),
+            abs(math.degrees(widest - angle_before)),
         )
 
         if swing < 5.0:
@@ -628,8 +749,49 @@ class Skills:
             if self._clearance_ahead() < 0.9:
                 break
             self.robot.step(vx=0.45)
+
+        # The walk above is blind about rooms, and "went through" is checkable -- pushed from
+        # a stance one step further back, it finished at y=0.89, eleven centimetres short of
+        # the doorway line, and still reported success; leave() then found itself already in
+        # the corridor and failed on a room it had never entered. Creep forward until the room
+        # actually changes, and if it will not, say so instead of claiming it did.
+        #
+        # No clearance test here, deliberately: what reads as an obstacle a hand-width ahead
+        # is the part-open leaf, which yields when leaned on -- breaking on it stranded the
+        # robot at 66 degrees with the doorway centimetres away, which is exactly the trap
+        # the comment above the fixed-distance walk describes. The arm is still out and the
+        # speed is a lean, so a real wall just ends the creep at the same spot when the
+        # budget runs out. The budget is sized generously: 80 steps commands 0.48 m, the
+        # gait delivers less, and starting half a metre from the threshold that finished at
+        # y=0.98 -- two centimetres short, every time.
+        for _ in range(200):
+            if self.report_position().data.get("room") != began_in:
+                break
+            self.robot.step(vx=0.3)
         self.robot.arm_home(side)
         self.robot.stand(0.4)
+
+        if self.report_position().data.get("room") == began_in:
+            return SkillResult(
+                False,
+                f"I opened the {target} (it swung {swing:.0f} degrees) but could not get "
+                f"through the doorway.",
+                {
+                    "swing_degrees": swing,
+                    # Where it gave up, so a failed run says which part of the opening the
+                    # body was pressed against rather than leaving that to guesswork.
+                    "stuck_at": [round(float(self.robot.position[0]), 2),
+                                 round(float(self.robot.position[1]), 2)],
+                    "stuck_heading_deg": round(math.degrees(self.robot.yaw), 1),
+                },
+            )
+
+        # Crossing verified: remember this doorway first-hand, once per door.
+        if self._doorway_return is not None and not any(
+            float(np.linalg.norm(self._doorway_return - p)) < DISTINCT_DOORS_M / 2
+            for p in self._doors_opened
+        ):
+            self._doors_opened.append(self._doorway_return.copy())
 
         return SkillResult(
             True,

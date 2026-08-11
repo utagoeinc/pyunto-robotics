@@ -388,10 +388,12 @@ def test_parse_plan_reads_expect_from_the_model():
 
 
 @pytest.mark.slow
-def test_declines_when_it_cannot_see_the_stated_number():
-    """Told there are three but able to see one, the robot should say so rather than guess.
+def test_resolves_the_stated_number_by_looking_around():
+    """Told there are three but only one fits in the frame, the robot looks around.
 
-    Opening the wrong door confidently is worse than admitting the ambiguity.
+    The forward frame is not the only way to confirm the scene: from beside the doors a head
+    sweep finds all three, and "the leftmost" resolves against the survey. This used to be a
+    refusal, which declined errands a person would settle by simply turning their head.
     """
     robot = Robot("office.xml", keyframe="start")  # right by the doors; only one in frame
     try:
@@ -400,9 +402,27 @@ def test_declines_when_it_cannot_see_the_stated_number():
 
         result = skills.run("open", "door", "left", 3)
 
+        assert result.ok, result.message
+        assert robot.position[0] < -2.0, "the leftmost door is the workspace one at x=-4"
+    finally:
+        robot.close()
+
+
+@pytest.mark.slow
+def test_declines_when_the_stated_number_cannot_be_accounted_for():
+    """Told there are four doors in an office with three, say so rather than guess.
+
+    Opening the wrong door confidently is worse than admitting the ambiguity, and no amount
+    of looking around produces a fourth door.
+    """
+    robot = Robot("office.xml", keyframe="start")
+    try:
+        skills = Skills(robot, ColorGrounder())
+        result = skills.run("open", "door", "left", 4)
+
         assert not result.ok
         assert "only see" in result.message
-        assert result.data["expected"] == 3
+        assert result.data["expected"] == 4
     finally:
         robot.close()
 
