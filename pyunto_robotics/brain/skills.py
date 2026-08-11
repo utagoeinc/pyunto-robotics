@@ -668,6 +668,13 @@ class Skills:
 
         angle_before = self._door_angle()
 
+        # Where the push itself starts from. Distinct from began_in on purpose: began_in is
+        # the room the ERRAND started in and anchors the final did-we-arrive check, while the
+        # push loop needs the room at the door -- an errand that began in the lobby reaches
+        # the door standing in the corridor, and breaking the push on "not in the lobby any
+        # more" stopped it on its first step, against a door that had not moved.
+        at_door_room = self.report_position().data.get("room")
+
         # Push with the arm on the hinge side, so the other one stays clear of the jamb as the
         # robot walks through. The handle is on the far edge from the hinge, so reaching across
         # with the near arm keeps the body out of the opening.
@@ -709,6 +716,12 @@ class Skills:
                 widest = opened_to
             if abs(opened_to - angle_before) > DOOR_OPEN_ENOUGH_RAD:
                 break
+            # Crossing the threshold is the other way a push can be done: a door that let the
+            # body through IS open enough, whatever the hinge reads. Without this, a door that
+            # never quite reached the angle threshold kept the push walking its full budget --
+            # measured 1.5 m into the room, at walking-lean speed, before the loop ran out.
+            if self.report_position().data.get("room") != at_door_room:
+                break
 
         # No pushing past the threshold to park the leaf wide, though it is tempting -- a leaf
         # left near the threshold settles ajar and half-hides in its own doorway. Tried, and
@@ -743,8 +756,17 @@ class Skills:
         # Walking blind, though, means a shoulder that catches the jamb just grinds there for
         # the rest of the push, which is what wedged the robot half in the opening. So drive
         # forward but back off and re-angle whenever it actually snags.
+        # The blind shove runs unconditionally: the room line sits at the doorway itself, so
+        # "crossed" fires with the body still in the opening, and this is the piece that
+        # punches it clear (skipping it when "already inside" left the robot standing in the
+        # leaf's arc, and the spring shoved it back out after success had been reported).
+        # What keeps it from wedging deep is the push loop above stopping at the threshold
+        # instead of marching its full budget first.
         self._push_through(90)
-        # Then continue only while there is room, so it does not end up wedged in a corner.
+        # Then continue only while there is room -- far enough that the closing leaf cannot
+        # reach the body. Stopping right at the threshold was tried: the check passed, the
+        # skill returned, and the spring swung the leaf into the robot and shoved it back
+        # into the corridor after "I went through" had already been said.
         for _ in range(75):
             if self._clearance_ahead() < 0.9:
                 break
@@ -765,7 +787,15 @@ class Skills:
         # gait delivers less, and starting half a metre from the threshold that finished at
         # y=0.98 -- two centimetres short, every time.
         for _ in range(200):
-            if self.report_position().data.get("room") != began_in:
+            if self.report_position().data.get("room") != at_door_room:
+                break
+            self.robot.step(vx=0.3)
+        # One short stride of margin once across, so the leaf can swing shut behind the body
+        # -- not the old 75-step march, which carried the robot past the desks to y=3.1
+        # facing the back wall, from where leave_room could not thread its way out again.
+        # "Through" means just inside the room, standing where the way back is still simple.
+        for _ in range(30):
+            if self._clearance_ahead() < 0.9:
                 break
             self.robot.step(vx=0.3)
         self.robot.arm_home(side)

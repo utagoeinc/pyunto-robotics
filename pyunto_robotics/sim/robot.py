@@ -166,7 +166,7 @@ class Robot:
 
         return Observation(rgb=rgb, depth=depth, position=self.position, yaw=self.yaw)
 
-    def side_clearance(self) -> tuple[float, float]:
+    def side_clearance(self, above_horizon: bool = False) -> tuple[float, float]:
         """How much room there is to the left and right, in metres.
 
         The forward camera cannot answer this. A wall the robot is walking alongside sits at
@@ -177,10 +177,55 @@ class Robot:
         Reports the 5th percentile rather than the minimum: the very closest pixel is often the
         robot's own shoulder at the edge of frame, and a percentile ignores that without
         needing to know the geometry.
+
+        `above_horizon` reads only the top half of each frame -- walls, not floor. The full
+        frame always contains floor within a stride or two, which caps the reading around
+        1.6 m on BOTH sides however far the walls are. That is the right answer to "do I fit
+        beside this" and the wrong one to "which wall is closer": centring on the full frame
+        declared the middle of a 5 m corridor wherever the robot happened to stand.
         """
         left = self.look("look_left").depth
         right = self.look("look_right").depth
+        if above_horizon:
+            half = left.shape[0] // 2
+            left, right = left[:half], right[:half]
         return float(np.percentile(left, 5)), float(np.percentile(right, 5))
+
+    def wall_contact_side(self) -> float | None:
+        """Which side of the body is pressed against a wall or door frame: +1 left, -1 right.
+
+        A person feels a shoulder brush; this robot walked whole corridors pressed against a
+        wall without any part of the control loop knowing -- the test harness counted 663
+        control steps of contact in one errand, every one of them invisible to behaviour.
+        Reads the simulator's contact list the way the door-touch check does; on a real robot
+        this is what joint-current and IMU disturbance sensing are for.
+
+        Door leaves are deliberately excluded: leaning on a leaf is how doors get opened, and
+        a reflex that recoils from it would undo the push. Everything else counts. The first
+        cut listed walls and frames by name, and the robot then spent two thousand steps
+        pressed against the reception counter -- which is neither -- without noticing.
+        """
+        robot_parts = (
+            "torso", "pelvis", "uarm", "farm", "palm", "fing", "thigh", "shin", "foot",
+            "head", "neck", "visor", "chest",
+        )
+        left_axis = np.array([-math.sin(self.yaw), math.cos(self.yaw)])
+        for i in range(self.data.ncon):
+            contact = self.data.contact[i]
+            n1 = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1) or ""
+            n2 = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2) or ""
+            if contact.dist >= 0 or "floor" in n1 or "floor" in n2:
+                continue
+            first_is_body = any(p in n1 for p in robot_parts)
+            second_is_body = any(p in n2 for p in robot_parts)
+            if first_is_body == second_is_body:  # self-contact, or two world geoms
+                continue
+            other = n2 if first_is_body else n1
+            if "door" in other:  # the leaf; pushing it is deliberate
+                continue
+            lateral = float((contact.pos[:2] - self.position[:2]) @ left_axis)
+            return 1.0 if lateral > 0 else -1.0
+        return None
 
     @property
     def half_width(self) -> float:

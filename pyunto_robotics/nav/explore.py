@@ -109,13 +109,11 @@ HEAD_YIELD_M = 0.8
 # roughly level with the door, and turning in from there runs straight at it instead of along
 # the wall. It is how a person walks a corridor: down the middle, then turn in at the door.
 #
-# Off by default: measured but not yet settled. With it on, wall contact on the two-door
-# errand fell from 663 control steps (8.3%) to 0-106 (0-1.1%) -- the mechanism works -- but
-# the second half of the errand became unstable: the oblique corridor view under-ranges the
-# tracked door, arrivals land beside the frame or at the neighbouring door, and tuning
-# HEAD_COMMIT_RAD between 60 and 75 degrees trades "lost sight of it" against "pushed the
-# wall". Enable it to continue that work; the door_swing_survey job in artefacts.yaml is the
-# harness for measuring a change across repeats.
+# The first cut walked the axis at whatever offset the robot started at, and wall contact
+# fell from 663 control steps (8.3%) to 0-106 (0-1.1%) -- but a metre off the far wall the
+# avoidance stack throttled the walk, and a fixed lean toward the target reintroduced the
+# oblique arrival. The current shape centres in the corridor first (side cameras, by feel),
+# walks the true middle, and steps away from anything the body actually touches.
 CORRIDOR_TRAVEL = False
 
 # Neck angle -- the target's bearing off the travel axis -- past which the body gives up the
@@ -132,15 +130,35 @@ HEAD_COMMIT_RAD = 1.31
 # final run at the door, where holding a corridor line would just walk past it.
 CORRIDOR_TRAVEL_MIN_M = 2.0
 
-# How far to angle the travel line off the pure axis, toward the target's side, radians (~20
-# degrees). Walking the axis exactly means walking parallel to BOTH walls at whatever offset
-# the robot happens to start at -- and starting a metre off the far wall, the avoidance stack
-# reads that wall as a hazard the whole way: measured the walk throttled to 0.01 m/s, bent
-# south, and wandering into a detour without ever making a metre along the corridor. A gentle
-# lean toward the target's side opens the clearance from the first step while staying close
-# enough to parallel that the body never comes alongside the target's wall before the turn-in
-# fires.
-CORRIDOR_BIAS_RAD = 0.35
+# Walk the MIDDLE of the corridor, found by feel rather than by map: strafe until the side
+# cameras report the same room on both sides. Walking the axis at whatever offset the robot
+# happens to start at was tried twice and failed twice -- a metre off the far wall the
+# avoidance stack throttled the walk to 0.01 m/s and bent it into detours, and a fixed lean
+# toward the target's side just traded that for arriving alongside the target's wall. The
+# centre is the one line that is far from both.
+CENTRE_TOLERANCE_M = 0.4
+
+# Step budget for finding the middle, and how often to re-render the side cameras while
+# strafing toward it (each look is two renders).
+CENTRE_MAX_STEPS = 200
+CENTRE_LOOK_EVERY = 5
+
+# How long the wall-brush reflex sidesteps away from a touch before rejoining the approach.
+WALL_REFLEX_STEPS = 20
+
+# The slowest forward command the gait actually converts into walking, m/s. Below this the
+# stance friction wins and the robot marches in place.
+MIN_WALK_SPEED = 0.2
+
+# The stuck watchdog: if an approach has moved less than PROGRESS_MIN_M in PROGRESS_WINDOW
+# steps, stop pretending it is going anywhere -- back off a stride and search again. Every
+# stall this session had a different proximate cause (a gait dead zone, an avoid knife-edge,
+# a counter the contact check did not know by name) and the same signature: the position
+# freezing while the loop kept issuing commands. A person who notices they have stopped
+# making progress steps back and reassesses; they do not push on the same spot for two
+# thousand steps.
+PROGRESS_WINDOW = 400
+PROGRESS_MIN_M = 0.25
 
 # How many steps to keep walking toward a remembered position before admitting it is not
 # working and going back to looking. Sized against the room, not against nerves: at blind
@@ -689,6 +707,12 @@ class MaplessNavigator:
         # and whether it has already turned in for good.
         corridor_travelling = False
         committed = False
+        # When the wall-brush reflex last fired, to keep its log line from repeating every
+        # control step while the robot works itself clear.
+        last_reflex_step = -10_000
+        # The stuck watchdog's anchor: where the robot was when the current window opened.
+        progress_step = 0
+        progress_pos = self.robot.position[:2].copy()
         detour_side = 1.0
         detour_steps = 0
 
@@ -808,6 +832,50 @@ class MaplessNavigator:
                 continue
 
             if state is NavState.APPROACH:
+                # Notice going nowhere. Commands can keep flowing while the body is parked --
+                # see PROGRESS_WINDOW -- and every long stall looks the same from here
+                # whatever caused it. Back off a stride and look again, like a person who
+                # realises they have stopped making progress.
+                if steps - progress_step >= PROGRESS_WINDOW:
+                    moved = float(
+                        np.linalg.norm(self.robot.position[:2] - progress_pos)
+                    )
+                    progress_step = steps
+                    progress_pos = self.robot.position[:2].copy()
+                    if moved < PROGRESS_MIN_M:
+                        log.info(
+                            "moved %.2f m in %d steps; backing off to look again",
+                            moved, PROGRESS_WINDOW,
+                        )
+                        for _ in range(40):
+                            self.robot.step(-0.3, 0.0, 0.0)
+                        self.robot.stand(0.3)
+                        state = NavState.SEARCH
+                        searched = 0
+                        last_seen = None
+                        corridor_travelling = False
+                        tracked_at = surveyed.copy() if surveyed is not None else None
+                        continue
+
+                # Feel before looking. Nothing in this loop used to read contact, so the
+                # robot walked whole corridors pressed against a wall without knowing --
+                # the harness counted 663 control steps of it in one errand. A person whose
+                # shoulder brushes a wall steps away from it before thinking about anything
+                # else; do the same, and only then go back to steering.
+                touch = self.robot.wall_contact_side()
+                if touch is not None:
+                    if steps - last_reflex_step > WALL_REFLEX_STEPS * 2:
+                        log.info(
+                            "brushed something on the %s; stepping away",
+                            "left" if touch > 0 else "right",
+                        )
+                    last_reflex_step = steps
+                    for _ in range(WALL_REFLEX_STEPS):
+                        self.robot.step(0.0, -touch * 0.25, 0.0)
+                        if self.robot.wall_contact_side() is None:
+                            break
+                    continue
+
                 if located is None:
                     lost_frames += 1
 
@@ -978,16 +1046,34 @@ class MaplessNavigator:
                     if along is not None:
                         off_axis = abs(((want - along) + math.pi) % (2 * math.pi) - math.pi)
                     if off_axis is not None and off_axis < HEAD_COMMIT_RAD:
-                        # Lean the travel line toward the door's side (see CORRIDOR_BIAS_RAD).
-                        side = ((want - along) + math.pi) % (2 * math.pi) - math.pi
-                        line = along + math.copysign(CORRIDOR_BIAS_RAD, side)
                         if not corridor_travelling:
                             corridor_travelling = True
                             log.info("walking the corridor, watching the %s", target)
-                            self._turn_body_to(line)
+                            # Face down the corridor, then find its middle by feel: strafe
+                            # toward whichever side the cameras say has more room, until both
+                            # report the same. The head faces forward for this, not the door
+                            # -- the side cameras hang off the head, so a head turned toward
+                            # the door points "left" down the corridor and "right" at the
+                            # floor ahead -- and looking along the direction of travel while
+                            # moving is no vice anyway. The door's position is anchored in the
+                            # world; look_at re-pins the gaze the moment the middle is found.
+                            self._turn_body_to(along)
+                            self.robot.face_forward()
+                            imbalance = 0.0
+                            for i in range(CENTRE_MAX_STEPS):
+                                if i % CENTRE_LOOK_EVERY == 0:
+                                    left, right = self.robot.side_clearance(
+                                        above_horizon=True
+                                    )
+                                    imbalance = left - right
+                                    if abs(imbalance) < CENTRE_TOLERANCE_M:
+                                        break
+                                self.robot.step(0.0, math.copysign(0.25, imbalance), 0.0)
+                            self.robot.stand(0.2)
                             self.robot.look_at(tracked_at)
+                            log.info("centred in the corridor")
                             continue
-                        steer_to = line
+                        steer_to = along
                     elif corridor_travelling:
                         # Level with the door now. Turn the body onto it before closing in: the
                         # last metre drops the forward clearance below HEAD_YIELD_M, which snaps
@@ -1021,6 +1107,13 @@ class MaplessNavigator:
                 closing = min(1.0, max(0.25, (distance - self.arrive_distance) / 1.5))
                 straightness = max(0.3, 1.0 - abs(turn))
                 speed = self.cruise_speed * scale * closing * straightness
+                # The gait has a dead zone: commanded 0.14 m/s it stands still against its
+                # own stance friction (watched it parked for two thousand steps at exactly
+                # that command). Three well-meant throttles multiplied together land right in
+                # it. Walking slowly is a speed, not a fraction -- clamp to the slowest walk
+                # that actually walks.
+                if speed > 0.02:
+                    speed = max(speed, MIN_WALK_SPEED)
 
                 # Glance sideways as well as forward. The forward camera cannot see a wall the
                 # robot is walking alongside -- that wall sits at 90 degrees, outside its
@@ -1034,6 +1127,12 @@ class MaplessNavigator:
 
                 self.robot.step(speed, 0.0, turn)
                 # Re-measure the distance we are closing on next refresh.
+                # The decrement assumes the commanded speed closed the gap, which is fiction
+                # when the gait is stalled -- watched the "remaining" tick from 1.43 m to
+                # 0.16 m while the robot stood pinned in one spot. Re-measuring against the
+                # tracked position instead was tried, and it shifted the plain approach's
+                # trajectory enough to land at the wrong door; the stuck watchdog above now
+                # owns the stall case, so the optimistic estimate is tolerable again.
                 last_seen = (located[0], bearing, max(0.0, distance - speed * self.robot.control_dt))
                 continue
 
