@@ -385,6 +385,15 @@ class MaplessNavigator:
                 break
             desired = math.atan2(delta[1], delta[0]) - self.robot.yaw
             desired = (desired + math.pi) % (2 * math.pi) - math.pi
+            # Feel first, as the approach loop does: a walk-to that grazes a doorway edge
+            # used to lean on it for the rest of its budget.
+            touch = self.robot.wall_contact_side()
+            if touch is not None:
+                for _ in range(WALL_REFLEX_STEPS):
+                    self.robot.step(0.0, -touch * 0.25, 0.0)
+                    if self.robot.wall_contact_side() is None:
+                        break
+                continue
             _, space, _, _, _ = self._observe("door")
             # Ease the head forward rather than face_forward(), which stands still for up to
             # 80 control steps while the neck settles -- called once per walking step, that
@@ -854,7 +863,11 @@ class MaplessNavigator:
                         searched = 0
                         last_seen = None
                         corridor_travelling = False
-                        tracked_at = surveyed.copy() if surveyed is not None else None
+                        tracked_at = surveyed.copy() if surveyed is not None else tracked_at
+                        # Keep the last anchor when there is no survey to reset to.
+                        # The door has not moved; forgetting where it was flips the
+                        # loop onto the assumed-progress estimate, which once counted
+                        # its way down from 6.9 m to an "arrival" 8.4 m from the door.
                         continue
 
                 # Feel before looking. Nothing in this loop used to read contact, so the
@@ -907,7 +920,11 @@ class MaplessNavigator:
                         searched = 0
                         lost_frames = 0
                         last_seen = None
-                        tracked_at = surveyed.copy() if surveyed is not None else None
+                        tracked_at = surveyed.copy() if surveyed is not None else tracked_at
+                        # Keep the last anchor when there is no survey to reset to.
+                        # The door has not moved; forgetting where it was flips the
+                        # loop onto the assumed-progress estimate, which once counted
+                        # its way down from 6.9 m to an "arrival" 8.4 m from the door.
                         continue
                     located = last_seen
                     if located is None:
@@ -1145,7 +1162,11 @@ class MaplessNavigator:
                     state = NavState.SEARCH
                     searched = 0
                     last_seen = None
-                    tracked_at = surveyed.copy() if surveyed is not None else None
+                    tracked_at = surveyed.copy() if surveyed is not None else tracked_at
+                        # Keep the last anchor when there is no survey to reset to.
+                        # The door has not moved; forgetting where it was flips the
+                        # loop onto the assumed-progress estimate, which once counted
+                        # its way down from 6.9 m to an "arrival" 8.4 m from the door.
                     continue
 
                 # Rejoin the direct approach once the way ahead genuinely opens up -- but only

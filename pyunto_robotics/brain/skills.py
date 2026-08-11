@@ -631,8 +631,18 @@ class Skills:
         # All the doorways are on the north wall, which is the one piece of layout this uses.
         self._turn_to(math.pi / 2 if self.robot.position[1] < 1.0 else -math.pi / 2)
 
-        # Close the remaining gap until the door is within reach.
+        # Close the remaining gap until the door is within reach. Feel for the doorway's
+        # edges on the way in: this is the stretch where a body slightly off the centre line
+        # leans a shoulder into the frame and, without the reflex, keeps walking against it.
+        # A handful of recoils is a graze being corrected; more than that means the walk is
+        # steering back into the same edge every time, and pressing on serves nothing.
+        recoils = 0
         for _ in range(140):
+            if self._step_off_walls():
+                recoils += 1
+                if recoils > 5:
+                    break
+                continue
             space = self._clearance_ahead()
             if space <= PUSH_STANDOFF_M:
                 break
@@ -652,7 +662,13 @@ class Skills:
             # Every doorway here spans about a metre from its hinge toward +x.
             centre = np.array([hinge + DOORWAY_HALF_WIDTH_M, self.robot.position[1]])
             left_axis = np.array([-math.sin(self.robot.yaw), math.cos(self.robot.yaw)])
+            recoils = 0
             for _ in range(60):
+                if self._step_off_walls():
+                    recoils += 1
+                    if recoils > 5:
+                        break
+                    continue
                 lateral = float((centre - self.robot.position[:2]) @ left_axis)
                 if abs(lateral) < 0.05:
                     break
@@ -789,6 +805,10 @@ class Skills:
         for _ in range(200):
             if self.report_position().data.get("room") != at_door_room:
                 break
+            # Inside the opening a touch means a jamb; the reflex's sidestep away from it is
+            # a sidestep toward the middle of the gap, exactly where the body fits.
+            if self._step_off_walls(budget=10):
+                continue
             self.robot.step(vx=0.3)
         # One short stride of margin once across, so the leaf can swing shut behind the body
         # -- not the old 75-step march, which carried the robot past the desks to y=3.1
@@ -801,7 +821,13 @@ class Skills:
         self.robot.arm_home(side)
         self.robot.stand(0.4)
 
-        if self.report_position().data.get("room") == began_in:
+        # "Went through" means standing in a proper room that is not where the errand began.
+        # Testing only against the starting room left a hole: an errand that began in the
+        # LOBBY and stalled in the CORRIDOR had still "ended somewhere new", and a door that
+        # swung 8 degrees was reported walked-through from the wrong side of it. The corridor
+        # and the lobby are places a door leads FROM, not places one leads to.
+        ended_in = self.report_position().data.get("room")
+        if ended_in == began_in or ended_in in ("in the corridor", "in the lobby"):
             return SkillResult(
                 False,
                 f"I opened the {target} (it swung {swing:.0f} degrees) but could not get "
@@ -1487,6 +1513,36 @@ class Skills:
         for _ in range(8):
             self.robot.step(wz=self._loose_nudge * 0.5)
         self._loose_nudge = -self._loose_nudge
+
+    def _step_off_walls(self, budget: int = 20) -> bool:
+        """If any part of the body is pressed against something static, sidestep clear.
+
+        The navigation loop grew this reflex first, but the walks that actually deliver the
+        body to a door -- closing in, lining up on the opening, walking to a surveyed spot --
+        live here in the skills, and they were still numb: watched the robot lean a shoulder
+        into the doorway's edge through the whole line-up and keep shuffling. One reflex,
+        called wherever the body is driven blind. Returns True if it had to move, so a caller
+        can re-measure before carrying on.
+        """
+        side = self.robot.wall_contact_side()
+        if side is None:
+            return False
+        log.info("brushed something on the %s; stepping clear", "left" if side > 0 else "right")
+        # Keep going a few steps past the moment contact clears. Stopping the instant the
+        # reading goes quiet leaves the body a millimetre off the surface, and the very next
+        # forward step touches it again -- watched the reflex fire hundreds of times in one
+        # approach, each clearing exactly far enough to need the next one.
+        cleared = 0
+        for _ in range(budget + 8):
+            self.robot.step(0.0, -side * 0.25, 0.0)
+            if self.robot.wall_contact_side() is None:
+                cleared += 1
+                if cleared >= 8:
+                    break
+            else:
+                cleared = 0
+        self.robot.stand(0.2)
+        return True
 
     def _clearance_ahead(self) -> float:
         """Distance to whatever is directly in front, from the current depth frame."""
