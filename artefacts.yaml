@@ -1,0 +1,120 @@
+# Artefacts test configuration.
+#
+#   artefacts run door_errand_llm          # the real test, on this Mac
+#   artefacts run door_errand              # rule planner, no model weights needed
+#   artefacts run-remote door_errand       # same, on Artefacts' cloud runners
+#
+#
+# framework is null because this is not a ROS project: Artefacts runs the `run` command as a
+# plain shell command, and passes every param through as an environment variable, which
+# scripts/artefacts_run.py reads (ARTEFACTS_SAY, ARTEFACTS_SCENE, ...).
+version: 0.1.0
+project: pyunto/pyunto-robotics
+
+jobs:
+
+  # The instruction under test, planned by Gemma 4.
+  #
+  # This is the job that actually tests the instruction. The rule planner only ever executes
+  # one step, so it reduces this four-part errand to "open a door"; --llm is what makes it a
+  # real test. Gemma runs through MLX, which is Apple Silicon only, so run this one locally
+  # with `artefacts run`. `run-remote` would land on a Linux runner with no MLX and no
+  # weights, and fall back to the rule planner.
+  door_errand_llm:
+    type: test
+    timeout: 45
+    runtime:
+      simulator: none
+      framework: null
+    scenarios:
+      defaults:
+        output_dirs: ["output"]
+        # For a null-framework job this is a path to a JSON file of scalars, not a list of
+        # topic names (that form is ROS-only).
+        metrics: "output/metrics.json"
+      settings:
+        - name: right_door_then_leftmost_room_llm
+          run: ./.venv/bin/python scripts/artefacts_run.py
+          params:
+            ARTEFACTS_SAY: "最初にいる位置からみて、三つ見えるドアのうち、右のドアを開けて中に入って、その後、廊下に出て、今度は、３つのうち、一番左の部屋に入って。"
+            ARTEFACTS_SCENE: "office.xml"
+            ARTEFACTS_KEYFRAME: "lobby"
+            ARTEFACTS_OUTPUT: "output"
+            ARTEFACTS_LLM: "1"
+
+  # How reliably does a door actually end up wide enough to walk through?
+  #
+  # push_door reports success at anything over 5 degrees, but a 0.92 m leaf needs about 75
+  # to clear the 0.67 m body -- so a run can pass with the robot stopped against the frame.
+  # Read min_door_swing_deg on the dashboard: anything under 75 is a run that reported
+  # success without getting through.
+  #
+  # Only the lobby keyframe is useful here. From `start` the robot is right at the doors and
+  # can see one of the three, so it correctly refuses the errand before any door is touched.
+  #
+  # Measured: three identical repeats all give 109 then 17 degrees. The simulator is
+  # deterministic, so this is not a flaky case to be sampled -- the second door fails to open
+  # far enough on every single run. The repeats stay as a guard: if a change ever makes the
+  # outcome vary between identical runs, that is itself worth knowing.
+  door_swing_survey:
+    type: test
+    timeout: 90
+    runtime:
+      simulator: none
+      framework: null
+    scenarios:
+      defaults:
+        output_dirs: ["output"]
+        metrics: "output/metrics.json"
+      settings:
+        - name: swing_repeat
+          run: ./.venv/bin/python scripts/artefacts_run.py
+          params:
+            ARTEFACTS_SAY: "最初にいる位置からみて、三つ見えるドアのうち、右のドアを開けて中に入って、その後、廊下に出て、今度は、３つのうち、一番左の部屋に入って。"
+            ARTEFACTS_SCENE: "office.xml"
+            ARTEFACTS_KEYFRAME: "lobby"
+            ARTEFACTS_OUTPUT: "output"
+            ARTEFACTS_LLM: "1"
+            # One run per value. The value itself is unused; it is what makes Artefacts
+            # repeat the scenario and chart the spread.
+            ARTEFACTS_REPEAT: [1, 2, 3]
+
+  # Same errand under the rule planner. Needs no model weights, so it is the one that can run
+  # in the cloud — useful as a regression check on the simulator and the recording, but note
+  # its plan is a single step.
+  door_errand:
+    type: test
+    timeout: 20
+    runtime:
+      simulator: none
+      framework: null
+    package:
+      custom:
+        os: ubuntu:24.04
+        include:
+          - assets/
+          - pyunto_robotics/
+          - scripts/
+          - pyproject.toml
+        commands:
+          # MuJoCo renders headlessly through EGL; libosmesa6 is the software fallback for a
+          # runner with no GPU, selected by MUJOCO_GL below.
+          - apt-get update && apt-get install -y --no-install-recommends
+            python3.12 python3.12-venv python3-pip
+            libegl1 libgl1 libosmesa6 libglfw3
+          - python3.12 -m venv /opt/venv
+          - /opt/venv/bin/pip install --upgrade pip
+          - /opt/venv/bin/pip install '.[report]'
+    scenarios:
+      defaults:
+        output_dirs: ["output"]
+        metrics: "output/metrics.json"
+      settings:
+        - name: right_door_then_leftmost_room
+          run: /opt/venv/bin/python scripts/artefacts_run.py
+          params:
+            ARTEFACTS_SAY: "最初にいる位置からみて、三つ見えるドアのうち、右のドアを開けて中に入って、その後、廊下に出て、今度は、３つのうち、一番左の部屋に入って。"
+            ARTEFACTS_SCENE: "office.xml"
+            ARTEFACTS_KEYFRAME: "lobby"
+            ARTEFACTS_OUTPUT: "output"
+            MUJOCO_GL: "osmesa"

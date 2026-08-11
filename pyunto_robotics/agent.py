@@ -14,7 +14,7 @@ import logging
 import queue
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .brain.planner import Plan, RulePlanner
 from .brain.skills import Skills
@@ -32,6 +32,10 @@ class Execution:
     plan: Plan
     messages: list[str]
     ok: bool
+    # What each skill measured, in the order they ran. Kept so a caller can report on the
+    # run rather than just pass/fail -- a door that opened 17 degrees and one that opened
+    # 109 both "worked", and only the number tells them apart.
+    data: list[dict] = field(default_factory=list)
 
     def reply(self) -> str:
         """The text to send back."""
@@ -86,17 +90,37 @@ class RobotAgent:
             return Execution(plan, [plan.reply or "I did not understand that."], ok=True)
 
         messages: list[str] = []
+        measurements: list[dict] = []
         ok = True
         # Cap the plan length: a model that emits twenty steps has misunderstood, and running
         # them would strand the robot somewhere unexpected.
         for step in plan.steps[: self.max_steps_per_message]:
             result = self.skills.run(step.action, step.argument, step.where, step.expect)
             messages.append(result.message)
+            measurements.append({"step": str(step), "ok": result.ok, **result.data})
             if not result.ok:
                 ok = False
-                break  # later steps assume the earlier ones worked
+                # Most failures stop the plan, because later steps assume the earlier ones
+                # worked. A skill can mark its failure non-fatal to say "I could not do that
+                # one, but the rest still makes sense" -- which is the right answer to an
+                # impossible aside inside an otherwise perfectly good errand.
+                if getattr(result, "fatal", True):
+                    break
 
-        return Execution(plan, messages, ok)
+        # SAY SO when the cap bites. A six-part errand truncated to four used to finish with a
+        # cheerful report of the four it did, and the user had no way to tell that the last two
+        # were never attempted -- which is indistinguishable from the robot deciding it was
+        # done. Silently doing less than asked is the one failure mode worth being loud about.
+        dropped = len(plan.steps) - self.max_steps_per_message
+        if dropped > 0 and ok:
+            skipped = ", ".join(str(s) for s in plan.steps[self.max_steps_per_message:])
+            messages.append(
+                f"That was {len(plan.steps)} steps and I only do "
+                f"{self.max_steps_per_message} at a time, so I have not done: {skipped}."
+            )
+            ok = False
+
+        return Execution(plan, messages, ok, measurements)
 
     # -- Pyunto loop --------------------------------------------------------------
 
