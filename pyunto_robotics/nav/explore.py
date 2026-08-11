@@ -51,6 +51,13 @@ def _canonical_label(target: str) -> str:
 # 0.72 m in a single approach step.
 TRACK_GATE_M = 2.0
 
+# The most a single new fix may MOVE the tracked position. Identity (gate above) and update
+# (this) need different scales: a detection 1.5 m from the anchor is still plausibly the same
+# door -- the anchor may simply be poor -- but letting it drag the anchor there in one step is
+# how oblique under-ranged views walked the anchor a metre south of the wall, 0.7-1.0 m per
+# frame. Genuine refinement arrives in decimetres.
+TRACK_REFIX_M = 0.5
+
 # How far either side the head sweeps while searching, and how fast it cycles. Wide enough to
 # reach well past the forward camera's 37 degrees, slow enough that frames are not smeared.
 SEARCH_SWEEP_RAD = 1.0
@@ -88,9 +95,60 @@ TURNING_HARD_RAD = 0.45
 # Clearance below which the head gives up watching the target and looks where the body is going.
 HEAD_YIELD_M = 0.8
 
+# Walk the corridor square-on, and turn in only when level with the target.
+#
+# A door is set into a wall, so steering by its bearing means crossing the corridor diagonally
+# and arriving alongside that wall: measured 663 control steps of this errand with an arm
+# against a door frame, all of it walking past walls rather than going through doorways.
+# Steering away from the wall cannot fix it, because the target is *in* the wall -- every gain
+# tried that way either did nothing or made the scraping worse.
+#
+# So take the two apart. The body follows the corridor's own axis -- the world axis most nearly
+# at right angles to the target, which for a door in the north wall is the east-west line -- and
+# the neck carries the looking. Once the head has had to swing past HEAD_COMMIT_RAD the robot is
+# roughly level with the door, and turning in from there runs straight at it instead of along
+# the wall. It is how a person walks a corridor: down the middle, then turn in at the door.
+#
+# Off by default: measured but not yet settled. With it on, wall contact on the two-door
+# errand fell from 663 control steps (8.3%) to 0-106 (0-1.1%) -- the mechanism works -- but
+# the second half of the errand became unstable: the oblique corridor view under-ranges the
+# tracked door, arrivals land beside the frame or at the neighbouring door, and tuning
+# HEAD_COMMIT_RAD between 60 and 75 degrees trades "lost sight of it" against "pushed the
+# wall". Enable it to continue that work; the door_swing_survey job in artefacts.yaml is the
+# harness for measuring a change across repeats.
+CORRIDOR_TRAVEL = False
+
+# Neck angle -- the target's bearing off the travel axis -- past which the body gives up the
+# corridor line and turns in. The spec's example was 30 degrees, but from the lobby the door
+# already sits 47 degrees off the corridor axis, so 30 fires before a single corridor step is
+# taken and the whole thing degenerates to the old diagonal. 75 means properly level: for a
+# door 4 m across the corridor the turn comes just 1.1 m before being square with it, so the
+# final leg runs at the door nearly straight-on -- at 60 the leg still crossed at an angle,
+# and arrivals landed far enough along the wall to push at the frame, or at the wrong door
+# entirely. Still 25 degrees inside what the neck can hold (100).
+HEAD_COMMIT_RAD = 1.31
+
+# Only travel this way while the target is further off than this. Inside it the approach is the
+# final run at the door, where holding a corridor line would just walk past it.
+CORRIDOR_TRAVEL_MIN_M = 2.0
+
+# How far to angle the travel line off the pure axis, toward the target's side, radians (~20
+# degrees). Walking the axis exactly means walking parallel to BOTH walls at whatever offset
+# the robot happens to start at -- and starting a metre off the far wall, the avoidance stack
+# reads that wall as a hazard the whole way: measured the walk throttled to 0.01 m/s, bent
+# south, and wandering into a detour without ever making a metre along the corridor. A gentle
+# lean toward the target's side opens the clearance from the first step while staying close
+# enough to parallel that the body never comes alongside the target's wall before the turn-in
+# fires.
+CORRIDOR_BIAS_RAD = 0.35
+
 # How many steps to keep walking toward a remembered position before admitting it is not
-# working and going back to looking.
-BLIND_PATIENCE = 120
+# working and going back to looking. Sized against the room, not against nerves: at blind
+# walking speed 120 steps covers under a metre, and a door picked from home is 5.5 m away --
+# the colour match flickers at that range, and a patience shorter than the gaps between its
+# good frames turns every long approach into search-and-give-up. 300 covers about 2.5 m, and
+# the walk is aimed at a fixed world point the whole time, not at a guess.
+BLIND_PATIENCE = 300
 
 # How far past the visible free space a sighting may sit before it is treated as a bad range
 # rather than a real object. Generous, because the free-space columns are coarse and a door set
@@ -310,10 +368,47 @@ class MaplessNavigator:
             desired = math.atan2(delta[1], delta[0]) - self.robot.yaw
             desired = (desired + math.pi) % (2 * math.pi) - math.pi
             _, space, _, _, _ = self._observe("door")
-            self.robot.face_forward()
+            # Ease the head forward rather than face_forward(), which stands still for up to
+            # 80 control steps while the neck settles -- called once per walking step, that
+            # re-launched the gait from a standstill every stride: measured 0.16 m of progress
+            # over 400 iterations against the 3.1 m the commanded speed should give. The head
+            # converges to centre over a few strides at the bounded rate and the walk never
+            # stops.
+            self.robot.look_toward(0.0)
             scale, turn = self._avoid(space, float(np.clip(desired * self.turn_gain, -1.2, 1.2)))
             self.robot.step(self.cruise_speed * scale * 0.7, 0.0, turn)
         self.robot.stand(0.3)
+
+    def _corridor_bearing(self, target_bearing: float) -> float | None:
+        """Body-relative heading that runs along the corridor instead of at the target.
+
+        No map is read and none exists. What is assumed is that the building is rectilinear --
+        walls and corridors run along the world's own axes -- which is the same single piece of
+        layout knowledge skills.py leans on. The corridor direction is then the world axis
+        nearest to right angles with the line of sight, taken in whichever sense still makes
+        progress toward the target.
+
+        Steering at right angles to the line of sight itself, without snapping to an axis, is
+        the tempting version of this and it is wrong: a heading perpendicular to the sight line
+        never changes the distance to the target, so the robot orbits the door at constant
+        range instead of walking the corridor past it.
+
+        Returns None when the sight line already runs along an axis -- there the corridor and
+        the direct approach are the same line, and the caller should just close in.
+        """
+        theta = self.robot.yaw + target_bearing
+        quarter = math.pi / 2
+        best = None
+        best_progress = 0.2  # cos threshold: below this the axis makes no real progress
+        for perpendicular in (theta + quarter, theta - quarter):
+            axis = round(perpendicular / quarter) * quarter
+            progress = math.cos(axis - theta)
+            if progress > best_progress:
+                best_progress = progress
+                best = axis
+        if best is None:
+            return None
+        return (best - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
 
     def _relative_to(self, position: np.ndarray) -> tuple[float, float]:
         """Bearing and range from where the robot is now to a fixed world point."""
@@ -590,6 +685,10 @@ class MaplessNavigator:
         ever_seen = False
         detections: list[Detection] = []
         turn_last = 0.0
+        # Whether the body is currently holding the corridor line rather than facing the target,
+        # and whether it has already turned in for good.
+        corridor_travelling = False
+        committed = False
         detour_side = 1.0
         detour_steps = 0
 
@@ -751,7 +850,36 @@ class MaplessNavigator:
                     blind_steps = 0
                     ever_seen = True
                     last_seen = located
-                    tracked_at = self._world_position(located[1], located[2])
+                    # Do not update the world fix while the body is swinging hard. The bearing
+                    # was measured from a frame rendered a beat ago, and pairing it with the yaw
+                    # the body has ALREADY turned to puts the target somewhere it never was --
+                    # measured the tracked door drifting 0.7-1.0 m per frame during the swing
+                    # onto the corridor axis, ending with a "door" 0.85 m away in the middle of
+                    # open floor and a triumphant phantom arrival. The head learned this lesson
+                    # long ago (turn head or body, not both); the tracker needs the same rule.
+                    #
+                    # And only let a new fix MOVE the anchor by a refinement, not a leap. The
+                    # target is a door; it does not move. A genuine better fix lands within
+                    # decimetres of the old one, while the failure mode this guards against
+                    # moves in strides: viewed obliquely down the corridor the range reads
+                    # short, and each under-ranged fix dragged the anchor 0.7-1.0 m per frame,
+                    # from (-3.6, 0.8) to (-4.4, -0.2) -- a metre south of the wall the door
+                    # is in -- after which every honest detection sat 6-10 m out and the gate
+                    # rejected 356 in a row. Freezing the anchor outright was tried and traded
+                    # one failure for another: it locks in the first fix's error too. Accept
+                    # small corrections, refuse strides.
+                    # The stride rule applies only while walking the corridor: that is where
+                    # the oblique bias lives, and it is the only place the strides were
+                    # measured. On the plain approach a big correction is usually the honest
+                    # one -- the first fix from across the room is the worst one taken.
+                    if abs(turn_last) < TURNING_HARD_RAD:
+                        new_fix = self._world_position(located[1], located[2])
+                        stride = (
+                            tracked_at is not None
+                            and float(np.linalg.norm(new_fix - tracked_at)) >= TRACK_REFIX_M
+                        )
+                        if not (corridor_travelling and stride):
+                            tracked_at = new_fix
 
                 _, bearing, distance = located
 
@@ -813,14 +941,72 @@ class MaplessNavigator:
                     # looks at the door, and glances ahead when something is in the way.
                     if space.clearance_ahead(half_angle=0.35) < HEAD_YIELD_M:
                         self.robot.face_forward()
-                    elif abs(turn_last) < TURNING_HARD_RAD:
+                    elif abs(turn_last) < TURNING_HARD_RAD or corridor_travelling:
+                        # Corridor travel deliberately points the body away from the target, so
+                        # the head has to keep tracking through the turn that sets that up.
+                        # Letting it hold still there loses the door within a few steps.
                         self.robot.look_at(tracked_at)
                     # Else: hold the head still. Turning both at once swings the camera through
                     # the sum of the two, and the target crosses the frame faster than
                     # perception can follow. One at a time is also what a person does -- you
                     # stop moving your eyes while your body is swinging round.
 
-                turn = float(np.clip(bearing * self.turn_gain, -1.2, 1.2))
+                # Walk the corridor square-on rather than cutting the diagonal to the door.
+                # The neck is already holding the target above, so giving the body a different
+                # heading costs no sight of it -- that separation is the whole point of having
+                # a neck. Turn in once the door has swung HEAD_COMMIT_RAD off the travel axis,
+                # which is the robot telling itself it is level with the doorway.
+                #
+                # Every angle in this block comes from the remembered world position, not from
+                # the frame's detection. The two big body turns this feature adds (onto the
+                # axis, and back onto the door) are exactly when a detection's bearing pairs a
+                # stale render with a yaw the body has already left -- measured a turn-in fired
+                # by a phantom sight line 35 degrees off truth, mid-swing, before a single
+                # corridor step was taken. The tracked position holds still through all of it.
+                # And both turns happen on the spot, outside this loop, so no frames are taken
+                # mid-swing in the first place: stop, face down the corridor, walk. Stop, face
+                # the door, walk in. It is how a person does it.
+                steer_to = bearing
+                if CORRIDOR_TRAVEL and not committed and tracked_at is not None:
+                    want, range_geo = self._relative_to(tracked_at)
+                    along = (
+                        self._corridor_bearing(want)
+                        if range_geo > CORRIDOR_TRAVEL_MIN_M
+                        else None
+                    )
+                    off_axis = None
+                    if along is not None:
+                        off_axis = abs(((want - along) + math.pi) % (2 * math.pi) - math.pi)
+                    if off_axis is not None and off_axis < HEAD_COMMIT_RAD:
+                        # Lean the travel line toward the door's side (see CORRIDOR_BIAS_RAD).
+                        side = ((want - along) + math.pi) % (2 * math.pi) - math.pi
+                        line = along + math.copysign(CORRIDOR_BIAS_RAD, side)
+                        if not corridor_travelling:
+                            corridor_travelling = True
+                            log.info("walking the corridor, watching the %s", target)
+                            self._turn_body_to(line)
+                            self.robot.look_at(tracked_at)
+                            continue
+                        steer_to = line
+                    elif corridor_travelling:
+                        # Level with the door now. Turn the body onto it before closing in: the
+                        # last metre drops the forward clearance below HEAD_YIELD_M, which snaps
+                        # the head square to the body, and a body still on the corridor line is
+                        # pointing at the wall when that happens -- measured losing the door at
+                        # 1.0 m every time.
+                        corridor_travelling = False
+                        # Once turned in, stay in: re-entering corridor travel from here swings
+                        # the body back off the door and the pair of them oscillate, arriving
+                        # further out each time -- measured three turn-ins and a final 0.77 m
+                        # against 0.65 m going straight in, which is the difference between
+                        # reaching the leaf and pushing at air.
+                        committed = True
+                        log.info("level with the %s, turning in", target)
+                        self._turn_body_to(want)
+                        self.robot.look_at(tracked_at)
+                        continue
+
+                turn = float(np.clip(steer_to * self.turn_gain, -1.2, 1.2))
                 turn_last = turn
                 scale, turn = self._avoid(
                     space, turn, target_bearing=bearing, target_distance=distance
