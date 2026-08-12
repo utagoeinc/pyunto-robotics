@@ -1426,8 +1426,15 @@ class Skills:
                            shoulder_yaw=0.0, elbow=-0.20)
         self.robot.stand(0.5)
 
-        # Line up on the handle, then close the last of the gap.
+        # Line up on the handle, then close the last of the gap. The line-up is a pure strafe,
+        # which is the one command a body pressed against something cannot execute -- friction
+        # holds it and the loop shuffles in place against the jamb. Feel for that and unstick
+        # first, the way every other walk here now does.
+        recoils = 0
         for _ in range(120):
+            if recoils < 3 and self._step_off_walls(budget=10):
+                recoils += 1
+                continue
             offset = self._handle_offset(side)
             if offset is None or abs(offset) < 0.05:
                 break
