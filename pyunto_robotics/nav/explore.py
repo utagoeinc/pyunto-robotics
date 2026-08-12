@@ -452,9 +452,21 @@ class MaplessNavigator:
         return (bearing + math.pi) % (2 * math.pi) - math.pi, float(np.linalg.norm(delta))
 
     def _turn_body_to(self, bearing: float, max_steps: int = 200) -> None:
-        """Rotate on the spot until `bearing` is straight ahead."""
+        """Rotate on the spot until `bearing` is straight ahead, stepping off walls first.
+
+        A pivot with a shoulder loaded against a jamb grinds round it; step clear, then turn.
+        """
         target = self.robot.yaw + bearing
+        recoils = 0
         for _ in range(max_steps):
+            touch = self.robot.wall_contact_side()
+            if touch is not None and recoils < 3:
+                recoils += 1
+                for _ in range(WALL_REFLEX_STEPS):
+                    self.robot.step(-WALL_REFLEX_BACK, -touch * 0.25, 0.0)
+                    if self.robot.wall_contact_side() is None:
+                        break
+                continue
             error = (target - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
             if abs(error) < 0.06:
                 break
@@ -612,6 +624,16 @@ class MaplessNavigator:
         if ahead < self.safety_distance * 0.8:
             return -0.15, 0.0, turn
         speed = 0.35 if abs(turn) < 0.8 else 0.18
+
+        # Following a wall means travelling BESIDE it, and only the forward camera has a say
+        # in that so far -- so a flank pressed against a door post reads as a clear road and
+        # the robot grinds along it: measured a single unbroken 466-step scrape beside a
+        # doorway, the largest source of contact left in the errand. Lean away from whatever
+        # the body can actually feel while still creeping forward, so the follow keeps its
+        # shape instead of turning into a recoil.
+        touch = self.robot.wall_contact_side()
+        if touch is not None:
+            return speed * 0.5, -touch * 0.25, turn
         return speed, 0.0, turn
 
     # -- steering -----------------------------------------------------------------

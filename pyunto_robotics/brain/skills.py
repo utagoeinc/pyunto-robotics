@@ -723,7 +723,13 @@ class Skills:
         # finished. Judging on the final angle called that a door that never opened.
         widest = angle_before
         for _ in range(int(2 * 160 * 0.35 / DOOR_PUSH_SPEED)):
-            self.robot.step(vx=DOOR_PUSH_SPEED)
+            # Lean off the jamb while pushing. wall_contact_side ignores the leaf -- loading
+            # that is the whole point -- so anything it reports here is the frame or the wall
+            # beside it, and the push was grinding along one for 225 steps of the errand.
+            # A gentle sideways component keeps the stroke going while it slides off the post,
+            # where recoiling outright would abandon a door already half open.
+            jamb = self.robot.wall_contact_side()
+            self.robot.step(vx=DOOR_PUSH_SPEED, vy=-jamb * 0.15 if jamb else 0.0)
             # Stop as soon as it is open enough to walk through. Pushing on past that just
             # grinds the robot into the frame for the rest of the stroke, and taking the push
             # slowly made that stretch more than twice as long.
@@ -1386,8 +1392,19 @@ class Skills:
         return False
 
     def _turn_to(self, heading: float, max_steps: int = 220) -> None:
-        """Rotate on the spot to a world heading."""
+        """Rotate on the spot to a world heading, getting clear of anything touched first.
+
+        Turning is where a body pressed against a jamb does the most damage: it pivots with a
+        shoulder loaded against the post and grinds round it. Measured a single turn beside a
+        doorway spending 51 of its 62 steps in contact -- the longest unbroken scrape of the
+        errand, and the pose in the screenshot that prompted this. Nobody turns like that;
+        you step off the wall first, then turn.
+        """
+        recoils = 0
         for _ in range(max_steps):
+            if recoils < 3 and self._step_off_walls(budget=10):
+                recoils += 1
+                continue
             error = (heading - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
             if abs(error) < 0.05:
                 break
