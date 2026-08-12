@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from ..nav.explore import MaplessNavigator, NavState
+from ..nav.explore import WALL_REFLEX_BACK, MaplessNavigator, NavState
 from ..perception.grounding import Grounder
 from ..sim.robot import Robot
 
@@ -1528,14 +1528,19 @@ class Skills:
         if side is None:
             return False
         log.info("brushed something on the %s; stepping clear", "left" if side > 0 else "right")
-        # Keep going a few steps past the moment contact clears. Stopping the instant the
-        # reading goes quiet leaves the body a millimetre off the surface, and the very next
-        # forward step touches it again -- watched the reflex fire hundreds of times in one
-        # approach, each clearing exactly far enough to need the next one.
+        # Back off as well as sideways. Pressed against a surface, a purely sideways command
+        # is a command to scrub along it, and friction simply wins: measured 60 steps of pure
+        # strafe failing to break contact at all (0.24 m of scrubbing), against 12 steps to
+        # come free once the drive included a component off the surface. Reversing is what
+        # unloads it; the sideways part is what makes the next attempt miss the obstacle.
         cleared = 0
         for _ in range(budget + 8):
-            self.robot.step(0.0, -side * 0.25, 0.0)
+            self.robot.step(-WALL_REFLEX_BACK, -side * 0.25, 0.0)
             if self.robot.wall_contact_side() is None:
+                # Keep going a few steps past the moment contact clears. Stopping the instant
+                # the reading goes quiet leaves the body a millimetre off the surface, and the
+                # very next forward step touches it again -- watched the reflex fire hundreds
+                # of times in one approach, each clearing just far enough to need the next.
                 cleared += 1
                 if cleared >= 8:
                     break

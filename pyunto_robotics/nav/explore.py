@@ -146,6 +146,14 @@ CENTRE_LOOK_EVERY = 5
 # How long the wall-brush reflex sidesteps away from a touch before rejoining the approach.
 WALL_REFLEX_STEPS = 20
 
+# How hard the reflex reverses while it sidesteps, m/s. Pressed against a surface, a purely
+# sideways command scrubs along it and friction wins: measured 60 steps of pure strafe failing
+# to break contact at all, against 12 once the drive had a component off the surface. But the
+# reverse is a component, not the move -- swept over a full errand, 0.15 halves both the
+# contact (14.8% of control steps to 10.6%) and the length of the errand itself, while 0.25
+# backs out of approaches faster than they can close and loses the last door entirely.
+WALL_REFLEX_BACK = 0.15
+
 # The slowest forward command the gait actually converts into walking, m/s. Below this the
 # stance friction wins and the robot marches in place.
 MIN_WALK_SPEED = 0.2
@@ -390,7 +398,7 @@ class MaplessNavigator:
             touch = self.robot.wall_contact_side()
             if touch is not None:
                 for _ in range(WALL_REFLEX_STEPS):
-                    self.robot.step(0.0, -touch * 0.25, 0.0)
+                    self.robot.step(-WALL_REFLEX_BACK, -touch * 0.25, 0.0)
                     if self.robot.wall_contact_side() is None:
                         break
                 continue
@@ -883,8 +891,12 @@ class MaplessNavigator:
                             "left" if touch > 0 else "right",
                         )
                     last_reflex_step = steps
+                    # Back off as well as sideways: pressed against a surface a purely
+                    # sideways command scrubs along it and friction wins -- measured 60 steps
+                    # of pure strafe failing to break contact at all, against 12 with a
+                    # component off the surface.
                     for _ in range(WALL_REFLEX_STEPS):
-                        self.robot.step(0.0, -touch * 0.25, 0.0)
+                        self.robot.step(-WALL_REFLEX_BACK, -touch * 0.25, 0.0)
                         if self.robot.wall_contact_side() is None:
                             break
                     continue
