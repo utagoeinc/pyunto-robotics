@@ -95,6 +95,17 @@ TURNING_HARD_RAD = 0.45
 # Clearance below which the head gives up watching the target and looks where the body is going.
 HEAD_YIELD_M = 0.8
 
+# Sideways steering on the approach, to keep a gap off the walls the forward camera cannot see.
+#
+# Room to want beside the body, on top of its own half-width; how hard to correct per metre
+# missing; and how far the neck may be turned before the side cameras stop meaning anything
+# (they are mounted on the head, so a neck on a door points them down the corridor and at the
+# floor rather than at the flanks).
+SIDE_STEER_MARGIN_M = 0.20
+SIDE_STEER_GAIN = 1.2
+SIDE_STEER_HEAD_RAD = 0.60
+
+
 # Walk the corridor square-on, and turn in only when level with the target.
 #
 # A door is set into a wall, so steering by its bearing means crossing the corridor diagonally
@@ -1176,7 +1187,31 @@ class MaplessNavigator:
                 if distance > SIDE_LOOK_DISABLE_M:
                     self.robot.side_clearance()
 
-                self.robot.step(speed, 0.0, turn)
+                # Hold a gap off the walls on either side while closing in.
+                #
+                # The forward camera cannot see the flank the body is travelling on, and the
+                # width check above stops at CLEARANCE_DISABLE_M -- so the last two metres of
+                # an approach have nothing watching the sides at all. That is exactly where
+                # the scraping is: measured 63 of 86 contact steps on one approach against
+                # the north wall, between 2.0 m and 3.5 m along it, all of them inside the
+                # width check's blind spot.
+                #
+                # Only when the head is roughly forward. The side cameras hang off it, so a
+                # neck turned toward a door aims "left" down the corridor and "right" at the
+                # floor; steering on that was measured making things worse. Straightening the
+                # head is not an option either -- it is what keeps the door in sight.
+                # Not on the last stretch. A doorway is 1.1 m against a 0.67 m body, so from
+                # close up the target itself reads as walls on both sides -- steering off them
+                # there is steering away from the door. Left running to the end, this
+                # zeroed the approach's contact and then failed every errand in the suite,
+                # 50% contact and nothing completed, by refusing to enter any opening.
+                drift = 0.0
+                if abs(self.robot.head_yaw) < SIDE_STEER_HEAD_RAD:
+                    left, right = self.robot.side_clearance()
+                    want = self.robot.half_width + SIDE_STEER_MARGIN_M
+                    encroach = max(0.0, want - right) - max(0.0, want - left)
+                    drift = float(np.clip(encroach * SIDE_STEER_GAIN, -0.25, 0.25))
+                self.robot.step(speed, drift, turn)
                 # Re-measure the distance we are closing on next refresh.
                 # The decrement assumes the commanded speed closed the gap, which is fiction
                 # when the gait is stalled -- watched the "remaining" tick from 1.43 m to
