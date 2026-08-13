@@ -1,0 +1,165 @@
+<!--
+  Asimov 1, adapted to what this project's skills need.
+
+  The body is Menlo Research's open-source humanoid, fetched unmodified by
+  scripts/fetch_asimov.py from github.com/asimovinc/asimov-1 (CERN-OHL-S-2.0): 1.2 m, 32 kg,
+  25 actuated joints plus two passive toes, 28 STL link meshes. It is included here rather
+  than copied, so a re-fetch picks up upstream changes and this file stays a diff.
+
+  Three things it does not ship with, because it is a locomotion-research platform rather than
+  a manipulation one, and all three are load-bearing here:
+
+    * Actuators. The upstream model declares joints and no actuators at all (nu = 0). Every
+      joint gets a position servo, matching how pyunto_h1 is driven -- KinematicGait writes
+      base velocity directly and animates the legs through these, so the gains only have to
+      hold a pose, not walk.
+
+    * A head camera. Navigation in this project is image-based and the robot's exteroception is
+      one forward camera plus two flanking depth views; Asimov ships a monocular camera in
+      hardware but its MJCF has only external tracking cameras for viewing the model. Mounted
+      on neck_pitch_link at the height its own head sits, 75 and 90 degree fields to match
+      pyunto_h1 so perception constants tuned there carry over unchanged.
+
+    * Hands. Asimov's arms end at a wrist yaw. Doors here are opened by pushing a leaf with a
+      palm and pulling a 3.6 cm handle with two fingers, so each wrist gains the same palm and
+      tendon-coupled gripper pyunto_h1 uses -- scaled to this arm, which is shorter.
+
+  Naming is deliberate: head_cam, look_left, look_right, grip_r/l, neck_yaw and the joint
+  names Skills reaches for are all what the existing code expects. The point of this file is
+  that nothing above the model has to know which robot it is driving.
+-->
+<mujoco model="asimov_r1">
+  <include file="asimov/xmls/asimov.xml"/>
+
+  <default>
+    <default class="asimov_finger">
+      <joint type="hinge" damping="0.4" armature="0.002" frictionloss="0.02"/>
+      <geom type="box" friction="1.6 0.02 0.001" condim="4" rgba="0.15 0.16 0.18 1"/>
+    </default>
+  </default>
+
+  <!--
+    A neck_yaw alias. Skills and the navigator read and command "neck_yaw"; upstream calls the
+    same axis neck_yaw_joint. Rather than rename anything in the included file, the actuator
+    below is named neck_yaw, and Robot.head_yaw looks the joint up by either name.
+  -->
+
+  <worldbody>
+    <!--
+      The head camera. Attached by a body welded to the neck so the include stays untouched:
+      MuJoCo cannot add a child to an included body from outside it, but an equality weld
+      gives the same rigid attachment.
+    -->
+    <body name="asimov_head" pos="0 0 1.2">
+      <freejoint name="asimov_head_free"/>
+      <inertial pos="0 0 0" mass="0.01" diaginertia="1e-5 1e-5 1e-5"/>
+      <geom name="asimov_head_g" type="box" size="0.001 0.001 0.001" contype="0" conaffinity="0"
+            rgba="0 0 0 0"/>
+      <camera name="head_cam" pos="0.06 0 0.02" xyaxes="0 -1 0 0 0 1" fovy="75"/>
+      <camera name="look_left" pos="0.03 0.04 0.02" xyaxes="0.866 -0.5 0 0 0 1" fovy="90"/>
+      <camera name="look_right" pos="0.03 -0.04 0.02" xyaxes="-0.866 -0.5 0 0 0 1" fovy="90"/>
+    </body>
+
+    <!--
+      Hands, welded to the wrists the same way. Asimov's arms end at a wrist yaw; the skills
+      here push a door leaf with a palm and pull a 3.6 cm handle between two fingers, so both
+      surfaces have to exist. The weld offset runs along +x, which is elbow-to-wrist in this
+      model -- hanging them downward instead put each palm inside its own elbow, four
+      penetrating contacts at rest before the robot had taken a step. Sized down from pyunto_h1's -- this arm is shorter and the whole
+      robot is 1.2 m against 1.5 m -- but named identically, because Skills addresses palm_r,
+      grip_r and fing_r1/2 by name and the point of this file is that it need not care which
+      robot it is driving.
+    -->
+    <body name="palm_r" pos="0.09 -0.16 0.60">
+      <freejoint name="palm_r_free"/>
+      <inertial pos="0 0 -0.015" mass="0.15" diaginertia="0.0002 0.0002 0.00015"/>
+      <geom name="palm_r_g" type="box" size="0.018 0.030 0.018" rgba="0.15 0.16 0.18 1"/>
+      <site name="grip_r" pos="0 0 -0.050" size="0.010" rgba="0 1 0 0.5"/>
+      <body name="finger_r1" pos="0 -0.026 -0.014">
+        <joint name="grip_r1" axis="1 0 0" range="0 0.9" class="asimov_finger"/>
+        <geom name="fing_r1" type="box" size="0.013 0.008 0.034" pos="0 0 -0.029"
+              class="asimov_finger"/>
+      </body>
+      <body name="finger_r2" pos="0 0.026 -0.014">
+        <joint name="grip_r2" axis="-1 0 0" range="0 0.9" class="asimov_finger"/>
+        <geom name="fing_r2" type="box" size="0.013 0.008 0.034" pos="0 0 -0.029"
+              class="asimov_finger"/>
+      </body>
+    </body>
+
+    <body name="palm_l" pos="0.09 0.16 0.60">
+      <freejoint name="palm_l_free"/>
+      <inertial pos="0 0 -0.015" mass="0.15" diaginertia="0.0002 0.0002 0.00015"/>
+      <geom name="palm_l_g" type="box" size="0.018 0.030 0.018" rgba="0.15 0.16 0.18 1"/>
+      <site name="grip_l" pos="0 0 -0.050" size="0.010" rgba="0 1 0 0.5"/>
+      <body name="finger_l1" pos="0 -0.026 -0.014">
+        <joint name="grip_l1" axis="1 0 0" range="0 0.9" class="asimov_finger"/>
+        <geom name="fing_l1" type="box" size="0.013 0.008 0.034" pos="0 0 -0.029"
+              class="asimov_finger"/>
+      </body>
+      <body name="finger_l2" pos="0 0.026 -0.014">
+        <joint name="grip_l2" axis="-1 0 0" range="0 0.9" class="asimov_finger"/>
+        <geom name="fing_l2" type="box" size="0.013 0.008 0.034" pos="0 0 -0.029"
+              class="asimov_finger"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <tendon>
+    <!-- One actuator per hand, fingers coupled, as on pyunto_h1. -->
+    <fixed name="grip_r_t">
+      <joint joint="grip_r1" coef="1"/>
+      <joint joint="grip_r2" coef="1"/>
+    </fixed>
+    <fixed name="grip_l_t">
+      <joint joint="grip_l1" coef="1"/>
+      <joint joint="grip_l2" coef="1"/>
+    </fixed>
+  </tendon>
+
+  <equality>
+    <weld body1="asimov_head" body2="neck_pitch_link" relpose="0 0 0.05 1 0 0 0"/>
+    <weld body1="palm_r" body2="right_wrist_yaw_link" relpose="0.11 0 0 1 0 0 0"/>
+    <weld body1="palm_l" body2="left_wrist_yaw_link" relpose="0.11 0 0 1 0 0 0"/>
+  </equality>
+
+  <actuator>
+    <!-- Legs. Named as KinematicGait.STANCE addresses them (hip_pitch_r, knee_l, ...) rather
+         than as upstream names the joints: the gait writes a stance by actuator name, and
+         nothing about it should have to know which robot is underneath.
+         Position servos with enough authority to hold a stance against the body's own
+         weight; the gait moves the base itself, so these only have to keep the pose. -->
+    <position name="hip_pitch_l" joint="left_hip_pitch_joint" kp="180" kv="12"/>
+    <position name="hip_roll_l" joint="left_hip_roll_joint" kp="180" kv="12"/>
+    <position name="hip_yaw_l" joint="left_hip_yaw_joint" kp="120" kv="8"/>
+    <position name="knee_l" joint="left_knee_joint" kp="220" kv="14"/>
+    <position name="ank_pitch_l" joint="left_ankle_pitch_joint" kp="120" kv="8"/>
+    <position name="ank_roll_l" joint="left_ankle_roll_joint" kp="80" kv="6"/>
+    <position name="hip_pitch_r" joint="right_hip_pitch_joint" kp="180" kv="12"/>
+    <position name="hip_roll_r" joint="right_hip_roll_joint" kp="180" kv="12"/>
+    <position name="hip_yaw_r" joint="right_hip_yaw_joint" kp="120" kv="8"/>
+    <position name="knee_r" joint="right_knee_joint" kp="220" kv="14"/>
+    <position name="ank_pitch_r" joint="right_ankle_pitch_joint" kp="120" kv="8"/>
+    <position name="ank_roll_r" joint="right_ankle_roll_joint" kp="80" kv="6"/>
+
+    <position name="waist_yaw" joint="waist_yaw_joint" kp="150" kv="10"/>
+    <position name="neck_yaw" joint="neck_yaw_joint" kp="25" kv="2.5"/>
+    <position name="neck_pitch" joint="neck_pitch_joint" kp="25" kv="2.5"/>
+
+    <!-- Arms. Named as Skills addresses them: shoulder_pitch/roll/yaw and elbow per side. -->
+    <position name="shoulder_pitch_r" joint="right_shoulder_pitch_joint" kp="90" kv="6"/>
+    <position name="shoulder_roll_r" joint="right_shoulder_roll_joint" kp="90" kv="6"/>
+    <position name="shoulder_yaw_r" joint="right_shoulder_yaw_joint" kp="60" kv="4"/>
+    <position name="elbow_r" joint="right_elbow_joint" kp="60" kv="4"/>
+    <position name="wrist_r" joint="right_wrist_yaw_joint" kp="30" kv="2"/>
+    <position name="shoulder_pitch_l" joint="left_shoulder_pitch_joint" kp="90" kv="6"/>
+    <position name="shoulder_roll_l" joint="left_shoulder_roll_joint" kp="90" kv="6"/>
+    <position name="shoulder_yaw_l" joint="left_shoulder_yaw_joint" kp="60" kv="4"/>
+    <position name="elbow_l" joint="left_elbow_joint" kp="60" kv="4"/>
+    <position name="wrist_l" joint="left_wrist_yaw_joint" kp="30" kv="2"/>
+
+    <!-- Grippers: one actuator per hand, driving both fingers through the tendon above. -->
+    <position name="grip_r" tendon="grip_r_t" kp="12" kv="0.5" ctrlrange="0 1.8"/>
+    <position name="grip_l" tendon="grip_l_t" kp="12" kv="0.5" ctrlrange="0 1.8"/>
+  </actuator>
+</mujoco>

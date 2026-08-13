@@ -166,6 +166,25 @@ class Robot:
 
         return Observation(rgb=rgb, depth=depth, position=self.position, yaw=self.yaw)
 
+    def _root_body(self) -> int:
+        """The kinematic root of the robot itself, whichever model is loaded.
+
+        Everything that measures the robot -- how wide it is, which contacts are its own --
+        needs to tell its bodies from the room's. Asking for "torso" answered that for
+        pyunto_h1 and returned -1 for Asimov 1, whose root link is the pelvis, and a root of
+        -1 quietly matches the world body: measured half_width coming out at 1.307 m, which
+        is the office, not the robot. So try the names a humanoid might use for its trunk,
+        and fall back to whatever body owns the free joint that moves the whole robot.
+        """
+        for name in ("torso", "pelvis_link", "pelvis", "base_link", "base"):
+            body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
+            if body > 0:
+                return int(self.model.body_rootid[body])
+        for joint in range(self.model.njnt):
+            if self.model.jnt_type[joint] == mujoco.mjtJoint.mjJNT_FREE:
+                return int(self.model.body_rootid[self.model.jnt_bodyid[joint]])
+        return 0
+
     def side_clearance(self, above_horizon: bool = False) -> tuple[float, float]:
         """How much room there is to the left and right, in metres.
 
@@ -205,10 +224,6 @@ class Robot:
         cut listed walls and frames by name, and the robot then spent two thousand steps
         pressed against the reception counter -- which is neither -- without noticing.
         """
-        robot_parts = (
-            "torso", "pelvis", "uarm", "farm", "palm", "fing", "thigh", "shin", "foot",
-            "head", "neck", "visor", "chest",
-        )
         left_axis = np.array([-math.sin(self.yaw), math.cos(self.yaw)])
         for i in range(self.data.ncon):
             contact = self.data.contact[i]
@@ -216,8 +231,14 @@ class Robot:
             n2 = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2) or ""
             if contact.dist >= 0 or "floor" in n1 or "floor" in n2:
                 continue
-            first_is_body = any(p in n1 for p in robot_parts)
-            second_is_body = any(p in n2 for p in robot_parts)
+            # Own-body membership from the kinematic tree, not from a list of names. The name
+            # list is still consulted below for the parts a caller might reason about, but it
+            # cannot decide what belongs to the robot: Asimov's links are elbow_link_collision
+            # and the like, so a palm resting against its own elbow read as a wall and the
+            # recoil fired on the first step of every errand, before the robot had moved.
+            root = self._root_body()
+            first_is_body = self.model.body_rootid[self.model.geom_bodyid[contact.geom1]] == root
+            second_is_body = self.model.body_rootid[self.model.geom_bodyid[contact.geom2]] == root
             if first_is_body == second_is_body:  # self-contact, or two world geoms
                 continue
             other = n2 if first_is_body else n1
@@ -241,9 +262,7 @@ class Robot:
         """
         base = self.position[:2]
         cos_yaw, sin_yaw = math.cos(-self.yaw), math.sin(-self.yaw)
-        root = self.model.body_rootid[
-            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "torso")
-        ]
+        root = self._root_body()
 
         widest = 0.0
         for geom in range(self.model.ngeom):
@@ -263,9 +282,7 @@ class Robot:
         is what lets it back off first and then tuck.
         """
         arm_parts = ("uarm", "farm", "palm", "fing")
-        root = self.model.body_rootid[
-            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "torso")
-        ]
+        root = self._root_body()
         for i in range(self.data.ncon):
             geoms = (self.data.contact.geom1[i], self.data.contact.geom2[i])
             names = [
@@ -312,7 +329,14 @@ class Robot:
     @property
     def head_yaw(self) -> float:
         """Where the head is pointing relative to the body, in radians. + is left."""
+        # Two spellings, because two models: pyunto_h1 calls it neck_yaw, Asimov 1 calls the
+        # same axis neck_yaw_joint. The actuator is named neck_yaw in both, so only the joint
+        # lookup needs to know.
         joint = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "neck_yaw")
+        if joint < 0:
+            joint = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "neck_yaw_joint")
+        if joint < 0:
+            return 0.0
         return float(self.data.qpos[self.model.jnt_qposadr[joint]])
 
     def look_at(self, world_point: np.ndarray) -> float:

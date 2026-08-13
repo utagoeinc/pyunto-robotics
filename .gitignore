@@ -9,6 +9,11 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Third-party robot models, fetched on demand by scripts/fetch_asimov.py. 45 MB of STL and
+# someone else's file: a copy here would go stale silently, where a fetch names its upstream.
+assets/asimov/
+assets/meshes/
+
 # Model weights (downloaded on demand, GBs)
 models/
 *.safetensors
