@@ -83,6 +83,9 @@ class Robot:
         # quadruped and the rover do not -- so constructing an IK solver eagerly would allocate
         # a scratch MjData for a chain that does not exist.
         self._solver: object | None = None
+        # Arm poses found by reach_forward, one per (side, height). The sweep costs a
+        # second, and every door in an errand wants the same one.
+        self._reach_pose: dict[tuple[str, float], tuple[float, float]] = {}
         self.reset(keyframe)
 
     # -- lifecycle ----------------------------------------------------------------
@@ -430,6 +433,66 @@ class Robot:
         return -math.atan2(u - cx, f)
 
     # -- manipulation -------------------------------------------------------------
+
+    def reach_forward(self, side: str = "r", height: float = 0.90) -> float:
+        """Put the hand out in front at roughly `height`, and return the height reached.
+
+        Skills need a hand at a door handle; what shoulder angle does that depends entirely on
+        the robot. Pyunto H1 reaches a 0.90 m handle at shoulder_pitch -1.10 with the elbow
+        slightly bent; Asimov 1's shoulder pitches the other way and sits 0.55 m lower, so the
+        same numbers leave its hand at 0.63 m, a quarter of a metre short and pointing at the
+        floor. Rather than write a pose per robot into every skill, search this model's own
+        arm once and cache what works.
+
+        The search is a coarse sweep, done once per side per process. It costs about a second
+        and removes the last place where a skill had to know which body it was driving.
+        """
+        cached = self._reach_pose.get((side, round(height, 2)))
+        if cached is None:
+            # Try the pose pyunto_h1 was tuned with first. Where it already reaches, the sweep
+            # is 162 arm poses of wasted motion -- and the arm brushes its surroundings while
+            # it runs, which showed up as the errand's wall contact rising from 3.1% of
+            # control steps to 5.3% for no gain.
+            cached = (-1.10, -0.20)
+            self.set_arm(side, shoulder_pitch=-1.10, shoulder_roll=0.0, shoulder_yaw=0.0,
+                         elbow=-0.20)
+            self.stand(0.6)
+            if abs(float(self.hand_position(side)[2]) - height) > 0.08:
+                cached = self._find_reach(side, height)
+            self._reach_pose[(side, round(height, 2))] = cached
+        pitch, elbow = cached
+        self.set_arm(side, shoulder_pitch=pitch, shoulder_roll=0.0, shoulder_yaw=0.0,
+                     elbow=elbow)
+        # Let it arrive before reporting where it got to. Reading the hand on the same step
+        # the command is issued reports where the arm still is, not where it is going.
+        self.stand(0.6)
+        return float(self.hand_position(side)[2])
+
+    def _find_reach(self, side: str, height: float) -> tuple[float, float]:
+        """Sweep the arm for a pose that puts the hand ahead of the body at `height`."""
+        saved = self.data.qpos.copy(), self.data.qvel.copy(), self.data.ctrl.copy()
+        best: tuple[float, float, float] | None = None
+        for pitch in np.linspace(-1.6, 1.8, 18):
+            for elbow in np.linspace(-2.4, 0.0, 9):
+                self.set_arm(side, shoulder_pitch=float(pitch), shoulder_roll=0.0,
+                             shoulder_yaw=0.0, elbow=float(elbow))
+                # Long enough for the servo to actually arrive. At 0.25 s the arm was still
+                # travelling when it was measured, so the sweep scored poses by where the hand
+                # happened to be passing and picked one that reaches nothing.
+                self.stand(0.7)
+                hand = self.hand_position(side)
+                ahead = float((hand[:2] - self.position[:2]) @ np.array(
+                    [math.cos(self.yaw), math.sin(self.yaw)]))
+                if ahead < 0.15:  # not actually reaching out in front
+                    continue
+                error = abs(float(hand[2]) - height)
+                if best is None or error < best[0]:
+                    best = (error, float(pitch), float(elbow))
+        self.data.qpos[:], self.data.qvel[:], self.data.ctrl[:] = saved
+        mujoco.mj_forward(self.model, self.data)
+        # Fall back to the pose pyunto_h1 was tuned with, which is right for it and no worse
+        # than nothing for anything else.
+        return (best[1], best[2]) if best else (-1.10, -0.20)
 
     def set_arm(
         self,

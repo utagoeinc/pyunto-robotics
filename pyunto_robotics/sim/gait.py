@@ -115,9 +115,30 @@ class KinematicGait:
             name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_ACTUATOR, i)
             if name:
                 self._act[name] = i
+        # Which way each leg joint bends, read off the model rather than assumed.
+        #
+        # STANCE is written for pyunto_h1, whose knee flexes positive (range 0..2.2). Asimov 1
+        # flexes the other way (-1.5..0), so the same numbers land outside the limit and the
+        # servo holds a straight leg through the whole gait cycle -- the robot slid along on a
+        # frozen pose. A joint that cannot reach the stance value in the sign STANCE assumes,
+        # but can reach its mirror, is simply the other convention.
+        self._flip = {}
+        for joint, base in self.STANCE.items():
+            index = self._act.get(joint)
+            if index is None or base == 0.0:
+                continue
+            low, high = model.jnt_range[model.actuator_trnid[index, 0]]
+            if low == high:  # unlimited
+                continue
+            self._flip[joint] = not (low <= base <= high) and low <= -base <= high
+
         # Remember the height the robot was placed at; the base is held there.
         self._base_z = float(data.qpos[2])
         self._write_stance(model, data, 0.0, 0.0)
+
+    def _stance(self, joint: str) -> float:
+        """The stance target for a joint, in this model's own sign convention."""
+        return -self.STANCE[joint] if self._flip.get(joint) else self.STANCE[joint]
 
     def _set(self, model: mujoco.MjModel, data: mujoco.MjData, joint: str, value: float) -> None:
         idx = self._act.get(joint)
@@ -137,18 +158,30 @@ class KinematicGait:
         s = math.sin(self._phase)
         c = math.cos(self._phase)
 
-        for joint, base in self.STANCE.items():
-            self._set(model, data, joint, base)
+        # Each target goes through _stance, so a model whose joints bend the other way gets
+        # the mirrored value -- the swing amplitudes flip with it, or a flipped knee would
+        # lift by straightening.
+        for joint in self.STANCE:
+            self._set(model, data, joint, self._stance(joint))
+
+        def sign(joint: str) -> float:
+            return -1.0 if self._flip.get(joint) else 1.0
 
         # Right leg leads, left leg trails by pi.
-        self._set(model, data, "hip_pitch_r", self.STANCE["hip_pitch_r"] + swing * s)
-        self._set(model, data, "hip_pitch_l", self.STANCE["hip_pitch_l"] - swing * s)
+        self._set(model, data, "hip_pitch_r",
+                  self._stance("hip_pitch_r") + sign("hip_pitch_r") * swing * s)
+        self._set(model, data, "hip_pitch_l",
+                  self._stance("hip_pitch_l") - sign("hip_pitch_l") * swing * s)
         # Knee lifts only while the leg is swinging forward (positive half of the cycle).
-        self._set(model, data, "knee_r", self.STANCE["knee_r"] + lift * max(c, 0.0))
-        self._set(model, data, "knee_l", self.STANCE["knee_l"] + lift * max(-c, 0.0))
+        self._set(model, data, "knee_r",
+                  self._stance("knee_r") + sign("knee_r") * lift * max(c, 0.0))
+        self._set(model, data, "knee_l",
+                  self._stance("knee_l") + sign("knee_l") * lift * max(-c, 0.0))
         # Ankles counter-rotate so the foot stays roughly flat.
-        self._set(model, data, "ank_pitch_r", self.STANCE["ank_pitch_r"] - 0.4 * swing * s)
-        self._set(model, data, "ank_pitch_l", self.STANCE["ank_pitch_l"] + 0.4 * swing * s)
+        self._set(model, data, "ank_pitch_r",
+                  self._stance("ank_pitch_r") - sign("ank_pitch_r") * 0.4 * swing * s)
+        self._set(model, data, "ank_pitch_l",
+                  self._stance("ank_pitch_l") + sign("ank_pitch_l") * 0.4 * swing * s)
 
     def apply(
         self, model: mujoco.MjModel, data: mujoco.MjData, vx: float, vy: float, wz: float, dt: float

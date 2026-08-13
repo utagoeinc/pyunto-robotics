@@ -712,8 +712,10 @@ class Skills:
 
         # Best forward reach at handle height, found by sweeping the joint ranges:
         # shoulder pitch -1.10, elbow -0.20 puts the gripper 0.43 m ahead at z=1.03.
-        self.robot.set_arm(side, shoulder_pitch=-1.10, shoulder_roll=0.0,
-                           shoulder_yaw=0.0, elbow=-0.20)
+        # Reach for handle height rather than a fixed shoulder angle: the pose that does that
+        # is a property of the robot, not of the door, and the two bodies here disagree about
+        # it by a quarter of a metre.
+        self.robot.reach_forward(side, height=0.90)
         self.robot.grip(side, 0.35)
         self.robot.stand(0.6)
 
@@ -909,8 +911,10 @@ class Skills:
         # the handle at the other, so stopping square to the leaf leaves the hand about half a
         # metre off to the side -- measured 0.486 m, against a 0.064 m gripper opening.
         self.robot.grip(side, 0.0)
-        self.robot.set_arm(side, shoulder_pitch=-1.10, shoulder_roll=0.0,
-                           shoulder_yaw=0.0, elbow=-0.20)
+        # Reach for handle height rather than a fixed shoulder angle: the pose that does that
+        # is a property of the robot, not of the door, and the two bodies here disagree about
+        # it by a quarter of a metre.
+        self.robot.reach_forward(side, height=0.90)
         self.robot.stand(0.6)
 
         for _ in range(200):
