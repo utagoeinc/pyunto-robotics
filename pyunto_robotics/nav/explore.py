@@ -105,6 +105,11 @@ SIDE_STEER_MARGIN_M = 0.20
 SIDE_STEER_GAIN = 1.2
 SIDE_STEER_HEAD_RAD = 0.60
 
+# Sideways push away from something the body is actually touching, m/s, folded into the same
+# command the approach already issues. Touch is the only flank sense that stays true when the
+# neck turns away, and this is where the scraping survived every camera-based correction.
+SIDE_TOUCH_PUSH = 0.25
+
 
 # Walk the corridor square-on, and turn in only when level with the target.
 #
@@ -219,6 +224,20 @@ class NavState(Enum):
 # Detour tuning. A target can be plainly visible with no route to it -- doors are seen across a
 # corridor long before the robot can walk to them -- and heading straight at one just presses it
 # into the intervening wall.
+# Wall-following detours are off.
+#
+# The manoeuvre exists to round an obstacle between the robot and a visible target, and it
+# does that by sliding along the obstruction -- contact is its method, not a failure of it.
+# Which makes it the source of the scraping: attributing every contact step on the approach
+# to the code that issued it put 30 of 30 inside _wall_follow, and none in the approach
+# itself. It also fires on the target: the trigger distance below is shorter than the
+# distance an approach stops at, so a door filling the view reads as a wall to round.
+#
+# Without it the plain approach still avoids obstacles -- _avoid steers around what the depth
+# frame sees and refuses commands that would not fit -- it simply does not seek walls out to
+# hug them.
+DETOUR_ENABLED = False
+
 DETOUR_TRIGGER_M = 0.75  # clearance below which a straight approach is judged blocked
 DETOUR_CLEAR_M = 1.6  # clearance above which the route ahead counts as open again
 DETOUR_MIN_STEPS = 40  # commit for at least this long, or it oscillates in and out
@@ -632,8 +651,13 @@ class MaplessNavigator:
         turn = float(np.clip(aim * self.turn_gain, -1.2, 1.2))
 
         # Back off if genuinely nose-first into something, otherwise keep edging forward.
+        # Reverse AND slide off whatever the body is loaded against: this return fires before
+        # the touch check below, and it was where every contact on the approach ended up --
+        # 30 of 30, commanding vx=-0.15 with vy=0.00 while a flank was hard against a wall.
+        # Pure reverse does not unload a surface the body is pressed along.
         if ahead < self.safety_distance * 0.8:
-            return -0.15, 0.0, turn
+            loaded = self.robot.wall_contact_side()
+            return -0.15, (-loaded * WALL_PUSH_OFF if loaded else 0.0), turn
         speed = 0.35 if abs(turn) < 0.8 else 0.18
 
         # Following a wall means travelling BESIDE it, and only the forward camera has a say
@@ -1031,6 +1055,38 @@ class MaplessNavigator:
                 if distance <= self.arrive_distance and (
                     abs(bearing) <= ARRIVE_BEARING_RAD or at_the_target
                 ):
+                    # Look again before believing it. The range that satisfied the test came
+                    # from a frame taken while walking, and the estimate it is measured against
+                    # is only as good as the view that built it -- measured arriving at (2.61,
+                    # 0.52) for a door at (4.00, 1.00), having reached an estimate that was
+                    # itself 0.91 m out. A standstill frame settles that in a few tenths of a
+                    # second: stop, look, and if the door is still further off than this,
+                    # carry on toward where it actually is.
+                    self.robot.stand(0.3)
+                    detections, space, fovy, size, depth = self._observe(target)
+                    # Re-apply the qualifier, not the tracking. Tracking re-acquires whatever
+                    # is nearest the estimate, and the estimate is exactly what is in doubt:
+                    # measured stopping at (2.61, 0.52) with two doors in view, the correct one
+                    # 1.85 m off and a nearer sliver 0.85 m away that matched the drifted
+                    # anchor. From a standstill in front of the row, "the right-hand one" is a
+                    # question the frame can answer directly.
+                    confirm = self._locate(detections, depth, fovy, size, where=where)
+                    if confirm is None:
+                        confirm = self._locate(detections, depth, fovy, size, tracking=tracked_at)
+                    if confirm is not None and confirm[2] > self.arrive_distance * 1.3:
+                        log.info(
+                            "thought I was at the %s, but it is %.1f m off; closing in",
+                            target, confirm[2],
+                        )
+                        last_seen = confirm
+                        tracked_at = self._world_position(confirm[1], confirm[2])
+                        # A confirmed sighting is a fresh start on the approach, not a
+                        # continuation of the one that went astray: the blind budget spent
+                        # walking to the wrong estimate must not count against walking to the
+                        # right one, or the correction runs out of patience before it arrives.
+                        blind_steps = 0
+                        lost_frames = 0
+                        continue
                     log.info("arrived at %s (%.2f m)", target, distance)
                     # Face front again before handing back. Everything after arrival -- lining
                     # up on a handle, pushing, walking through -- reads the forward camera, and
@@ -1046,7 +1102,7 @@ class MaplessNavigator:
 
                 # A wall between here and a visible target means the straight line is not the
                 # route. Switch to following the obstacle instead of grinding against it.
-                if space.clearance_ahead(half_angle=0.30) < DETOUR_TRIGGER_M:
+                if DETOUR_ENABLED and space.clearance_ahead(half_angle=0.30) < DETOUR_TRIGGER_M:
                     detour_side = 1.0 if self._openest_side(space) >= 0 else -1.0
                     detour_steps = 0
                     state = NavState.DETOUR
@@ -1211,6 +1267,20 @@ class MaplessNavigator:
                     want = self.robot.half_width + SIDE_STEER_MARGIN_M
                     encroach = max(0.0, want - right) - max(0.0, want - left)
                     drift = float(np.clip(encroach * SIDE_STEER_GAIN, -0.25, 0.25))
+
+                # Touch overrides the cameras, on the same command rather than in place of it.
+                #
+                # This is where the scraping survived every camera-based fix: measured five
+                # contact episodes on one approach, all between x=2.4 and x=3.0 with the body
+                # 0.33 m off a wall it is 0.336 m wide -- short by centimetres, with the head
+                # turned toward the door and nothing looking at the flank. The reflex elsewhere
+                # in this loop handles a body already stuck; this handles a body still walking,
+                # by folding "something is touching my left" into the sideways term the
+                # approach was going to use anyway. One command, one place, no second
+                # controller to fight the first.
+                touching = self.robot.wall_contact_side()
+                if touching is not None:
+                    drift = float(np.clip(drift - touching * SIDE_TOUCH_PUSH, -0.3, 0.3))
                 self.robot.step(speed, drift, turn)
                 # Re-measure the distance we are closing on next refresh.
                 # The decrement assumes the commanded speed closed the gap, which is fiction
