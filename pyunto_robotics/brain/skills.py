@@ -204,6 +204,16 @@ class Skills:
             error = (desired - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
             turn = float(np.clip(error * 1.4, -1.0, 1.0))
 
+            # Walking home was the single biggest source of contact left in the errand -- 123
+            # steps of it, mostly fingers and forearm against a wall -- because this loop
+            # watched only what was ahead and whether a door was in the way, never whether the
+            # body was already dragging along something. Back off and take the wall's own line
+            # instead of grinding across it.
+            touching = self.robot.wall_contact_side()
+            if touching is not None:
+                self._slide_along_wall(touching, desired)
+                continue
+
             if self._clearance_ahead() < 0.55 or self._touching_door():
                 # Something in the way, most likely the door just opened. Turn to face home
                 # first, then push through: creeping around it drove the robot further onto the
@@ -1364,6 +1374,10 @@ class Skills:
         # Keep pushing for a moment after contact breaks. Stopping the instant the leaf lets go
         # leaves the robot still in the opening, where the spring closes it again -- it reached
         # 0.11 m short of the threshold that way and got squeezed a second time.
+        # Sliding off the jamb here was tried and reverted: it halves contact on the held-out
+        # routes but nearly triples it on the errand (3.1% of control steps to 8.4%), because
+        # a doorway is barely wider than the body and stepping sideways in one puts the other
+        # shoulder into the far post.
         clear_for = 0
         for _ in range(steps):
             self.robot.step(0.3, 0.0, 0.0)
@@ -1537,6 +1551,43 @@ class Skills:
         for _ in range(8):
             self.robot.step(wz=self._loose_nudge * 0.5)
         self._loose_nudge = -self._loose_nudge
+
+    def _slide_along_wall(self, side: float, toward: float, steps: int = 30) -> None:
+        """Back off a touched wall, then travel parallel to it in the direction of `toward`.
+
+        Scraping along a surface is what happens when a walk keeps its heading while a flank
+        is loaded: friction holds the body against the wall and the commanded course never
+        arrives. What a person does instead is unweight, square up, and walk the wall's line
+        until it runs out.
+
+        `side` is which flank is touching (+1 left), `toward` the world heading the walk
+        actually wants. The wall runs at right angles to the touch, so its two directions are
+        the heading rotated a quarter turn each way; take whichever is nearer to `toward`.
+        """
+        # Unload first -- a body pressed to a surface cannot strafe along it (measured 60
+        # steps of pure sideways failing to break contact, 12 with a component off the face).
+        for _ in range(10):
+            self.robot.step(-0.2, -side * 0.2, 0.0)
+            if self.robot.wall_contact_side() is None:
+                break
+
+        # The touched face is beside the body, so its normal is the body's own left/right and
+        # the wall runs fore-and-aft from here. Pick the way along it that heads for `toward`.
+        along = [self.robot.yaw + math.pi / 2, self.robot.yaw - math.pi / 2]
+        best = min(along, key=lambda h: abs((h - toward + math.pi) % (2 * math.pi) - math.pi))
+
+        # Turn and travel in the same commands rather than pivoting first. _turn_to rotates on
+        # the spot beside a wall it has only just come off, and the swing puts an arm straight
+        # back into it: measured the errand's contact rising from 2.8% of control steps to
+        # 6.6% with a pivot here. Walking the turn keeps the body moving away while it comes
+        # round.
+        for _ in range(steps):
+            if self.robot.wall_contact_side() is not None:
+                break
+            error = (best - self.robot.yaw + math.pi) % (2 * math.pi) - math.pi
+            if abs(error) < 0.08:
+                break
+            self.robot.step(0.3, 0.0, float(np.clip(error * 1.2, -0.6, 0.6)))
 
     def _step_off_walls(self, budget: int = 20) -> bool:
         """If any part of the body is pressed against something static, sidestep clear.
