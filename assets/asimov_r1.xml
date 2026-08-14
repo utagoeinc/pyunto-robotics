@@ -68,12 +68,16 @@
       Hands, welded to the wrists the same way. Asimov's arms end at a wrist yaw; the skills
       here push a door leaf with a palm and pull a 3.6 cm handle between two fingers, so both
       surfaces have to exist. The weld offset runs along +x, which is elbow-to-wrist in this
-      model. The offset is (0.035, 0, -0.030), which is 0.046 m along the forearm's real
-      direction: measured in the wrist's own frame that runs [0.766, 0, -0.643], not down +x
-      as the first three attempts assumed. Placing the hand on +x alone left it hanging 8 cm
-      off the end of the arm -- the gap visible in the viewer -- because the offset was
-      mostly perpendicular to the limb rather than along it. 0.046 m is the wrist mesh's
-      radius (0.028) plus half the palm box (0.018), so the two meet without overlapping. An earlier attempt hung them downward instead, which
+      model. The offset is 0.046 m along the forearm's real direction, which in the wrist's
+      own frame runs [0.766, 0, -0.643] -- not down +x, as the first attempts assumed, so a
+      hand placed on +x hung 8 cm off the side of the arm. 0.046 m is the wrist mesh's radius
+      (0.028) plus half the palm box (0.018), so the two meet without overlapping.
+
+      The relpose is written NEGATED, because MuJoCo reads a weld's relpose as the pose of
+      body2 in body1's frame -- here the wrist in the hand's frame, the opposite of what it
+      looks like. Measured directly: asking for [0.0352, 0, -0.0296] put the hand at
+      [-0.036, 0, +0.029], four centimetres up the arm instead of past the end of it, which
+      is the hand sprouting backwards out of the forearm in the viewer. An earlier attempt hung them downward instead, which
       put each palm inside its own elbow. The palm is left in the
       wrist's own orientation: turning it a quarter turn so the fingers continue the line of
       the arm looks more like a hand, and costs the errand outright -- the rotated hand rides
@@ -155,9 +159,9 @@
   </contact>
 
   <equality>
-    <weld body1="asimov_head" body2="neck_pitch_link" relpose="0.0352 0 -0.0296 1 0 0 0"/>
-    <weld body1="palm_r" body2="right_wrist_yaw_link" relpose="0.0352 0 -0.0296 1 0 0 0"/>
-    <weld body1="palm_l" body2="left_wrist_yaw_link" relpose="0.0352 0 -0.0296 1 0 0 0"/>
+    <weld body1="asimov_head" body2="neck_pitch_link" relpose="-0.0352 0 0.0296 1 0 0 0"/>
+    <weld body1="palm_r" body2="right_wrist_yaw_link" relpose="-0.0352 0 0.0296 1 0 0 0"/>
+    <weld body1="palm_l" body2="left_wrist_yaw_link" relpose="-0.0352 0 0.0296 1 0 0 0"/>
   </equality>
 
   <actuator>
