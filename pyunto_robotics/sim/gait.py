@@ -71,6 +71,12 @@ class KinematicGait:
     commanded speed, so the feet visually keep pace with the body instead of sliding.
 
     Arms are left alone: whoever is doing manipulation owns those joints.
+
+    The amplitudes are modest on purpose. Raising them to 0.9/1.6 lifts the feet 9-12 cm
+    instead of 3, which looks far more like walking -- and rocks the body enough that Asimov
+    stopped fitting through a 1.1 m doorway, taking the errand from 4/4 to 0/4 with 63% of
+    control steps in contact. Legs that look right are worth less than a robot that gets
+    through the door.
     """
 
     # Joint targets for a neutral stance, applied to whichever of these joints exist.
@@ -130,7 +136,15 @@ class KinematicGait:
             low, high = model.jnt_range[model.actuator_trnid[index, 0]]
             if low == high:  # unlimited
                 continue
-            self._flip[joint] = not (low <= base <= high) and low <= -base <= high
+            # Which way this joint bends, from where its travel lies rather than from whether
+            # a particular value fits. Asimov's legs are mirrored -- right knee [-1.5, 0],
+            # left knee [0, 1.5] -- so a stance of +0.5 is inside the left one's range and
+            # outside the right's. Testing only for "does it fit" therefore flipped the right
+            # knee and left the left alone, and the two legs drove in phase instead of
+            # opposed: measured the right leg travelling 0.246 rad against the left's 0.504,
+            # which is a robot dragging one foot. A joint whose range runs mostly negative
+            # wants a negative stance, whatever the sign STANCE happens to use.
+            self._flip[joint] = (low + high < 0.0) != (base < 0.0)
 
         # Remember the height the robot was placed at; the base is held there.
         self._base_z = float(data.qpos[2])
@@ -140,11 +154,37 @@ class KinematicGait:
         """The stance target for a joint, in this model's own sign convention."""
         return -self.STANCE[joint] if self._flip.get(joint) else self.STANCE[joint]
 
+    def _room(self, model: mujoco.MjModel, joint: str, want: float) -> float:
+        """Nudge a stance target inward if the swing around it would hit the joint's limit.
+
+        A stance sitting on a limit has travel in one direction only, and half the cycle is
+        clipped away. Asimov's left knee stops at 0 and its stance lands there, so that leg
+        lifted 0.055 m where the right, whose stance sits mid-range, lifted 0.123 m -- one
+        straight leg and one bent one, which is not a walk.
+        """
+        index = self._act.get(joint)
+        if index is None:
+            return want
+        low, high = model.jnt_range[model.actuator_trnid[index, 0]]
+        if low >= high:
+            return want
+        margin = min(abs(want), (high - low) * 0.25)
+        return float(np.clip(want, low + margin, high - margin))
+
     def _set(self, model: mujoco.MjModel, data: mujoco.MjData, joint: str, value: float) -> None:
         idx = self._act.get(joint)
         if idx is None:
             return
         lo, hi = model.actuator_ctrlrange[idx]
+        # Clip to the JOINT's limit too, not just the actuator's. A command outside the joint
+        # range is not refused, it is simply not reached, and the half of the cycle that lies
+        # outside is silently flattened: Asimov's left knee runs [0, 1.5] and the swing took
+        # the command to -0.14, so that leg lifted 0.046 m where the right lifted 0.094 and
+        # the robot walked with one straight leg. Clipping here makes the loss visible to the
+        # caller instead of leaving it to the physics.
+        joint_lo, joint_hi = model.jnt_range[model.actuator_trnid[idx, 0]]
+        if joint_lo < joint_hi:
+            lo, hi = max(lo, joint_lo), min(hi, joint_hi)
         data.ctrl[idx] = float(np.clip(value, lo, hi))
 
     def _write_stance(
@@ -162,26 +202,49 @@ class KinematicGait:
         # the mirrored value -- the swing amplitudes flip with it, or a flipped knee would
         # lift by straightening.
         for joint in self.STANCE:
-            self._set(model, data, joint, self._stance(joint))
+            self._set(model, data, joint, self._room(model, joint, self._stance(joint)))
 
         def sign(joint: str) -> float:
             return -1.0 if self._flip.get(joint) else 1.0
 
         # Right leg leads, left leg trails by pi.
+        #
+        # The half-cycle offset is the gait's own, and must survive whatever sign convention
+        # the model uses: on a mirrored pair of legs -- Asimov's right knee runs [-1.5, 0] and
+        # its left [0, 1.5] -- flipping each side independently negates the left leg twice,
+        # once for the mirror and once for the phase, and the two legs drive together.
+        # Measured a hip correlation of +0.88 that way, against -0.94 on a robot that walks.
+        # So the phase is applied first, in the gait's own frame, and the model's sign is put
+        # on the result.
+        # One sign for the pair, not one per joint. A mirrored robot has hip_pitch_r flipped
+        # and hip_pitch_l not, so signing each separately cancels the half-cycle offset
+        # between them and both legs swing together -- measured a command correlation of
+        # +1.00, where a robot that walks reads -1.00. The gait's own left/right opposition
+        # has to survive whatever convention the model uses, so take the sign from one side
+        # and apply it to the pair.
+        leg = sign("hip_pitch_r")
         self._set(model, data, "hip_pitch_r",
-                  self._stance("hip_pitch_r") + sign("hip_pitch_r") * swing * s)
+                  self._room(model, "hip_pitch_r", self._stance("hip_pitch_r")) + leg * swing * s)
         self._set(model, data, "hip_pitch_l",
-                  self._stance("hip_pitch_l") - sign("hip_pitch_l") * swing * s)
+                  self._room(model, "hip_pitch_l", self._stance("hip_pitch_l")) - leg * swing * s)
         # Knee lifts only while the leg is swinging forward (positive half of the cycle).
+        # A knee lifts by FLEXING, and which way that is depends on the joint, not on the
+        # gait's convention -- so each knee takes its own sign here rather than sharing the
+        # right one's. Sharing it drove Asimov's left knee from its stance at +0.50 down to 0,
+        # its own limit, straightening the leg on the half-cycle it was meant to lift:
+        # measured that foot rising 0.058 m against the right's 0.124.
         self._set(model, data, "knee_r",
-                  self._stance("knee_r") + sign("knee_r") * lift * max(c, 0.0))
+                  self._room(model, "knee_r", self._stance("knee_r"))
+                  + sign("knee_r") * lift * max(c, 0.0))
         self._set(model, data, "knee_l",
-                  self._stance("knee_l") + sign("knee_l") * lift * max(-c, 0.0))
+                  self._room(model, "knee_l", self._stance("knee_l"))
+                  + sign("knee_l") * lift * max(-c, 0.0))
         # Ankles counter-rotate so the foot stays roughly flat.
+        ankle = sign("ank_pitch_r")
         self._set(model, data, "ank_pitch_r",
-                  self._stance("ank_pitch_r") - sign("ank_pitch_r") * 0.4 * swing * s)
+                  self._room(model, "ank_pitch_r", self._stance("ank_pitch_r")) - ankle * 0.4 * swing * s)
         self._set(model, data, "ank_pitch_l",
-                  self._stance("ank_pitch_l") + sign("ank_pitch_l") * 0.4 * swing * s)
+                  self._room(model, "ank_pitch_l", self._stance("ank_pitch_l")) + ankle * 0.4 * swing * s)
 
     def apply(
         self, model: mujoco.MjModel, data: mujoco.MjData, vx: float, vy: float, wz: float, dt: float

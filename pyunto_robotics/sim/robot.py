@@ -457,7 +457,14 @@ class Robot:
             self.set_arm(side, shoulder_pitch=-1.10, shoulder_roll=0.0, shoulder_yaw=0.0,
                          elbow=-0.20)
             self.stand(0.6)
-            if abs(float(self.hand_position(side)[2]) - height) > 0.08:
+            hand = self.hand_position(side)
+            ahead = float((hand[:2] - self.position[:2])
+                          @ np.array([math.cos(self.yaw), math.sin(self.yaw)]))
+            # Height alone is not enough: on a mirrored pair of arms the same shoulder angle
+            # sends one hand forward and the other back, and both land at the right height.
+            # Measured the right hand 0.39 m BEHIND the body while the left reached 0.22 m in
+            # front of it, which is a robot pushing a door with its elbow.
+            if abs(float(hand[2]) - height) > 0.08 or ahead < 0.15:
                 cached = self._find_reach(side, height)
             self._reach_pose[(side, round(height, 2))] = cached
         pitch, elbow = cached

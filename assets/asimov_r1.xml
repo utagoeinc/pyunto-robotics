@@ -68,8 +68,13 @@
       Hands, welded to the wrists the same way. Asimov's arms end at a wrist yaw; the skills
       here push a door leaf with a palm and pull a 3.6 cm handle between two fingers, so both
       surfaces have to exist. The weld offset runs along +x, which is elbow-to-wrist in this
-      model -- hanging them downward instead put each palm inside its own elbow, four
-      penetrating contacts at rest before the robot had taken a step. The palm is left in the
+      model. The offset is (0.035, 0, -0.030), which is 0.046 m along the forearm's real
+      direction: measured in the wrist's own frame that runs [0.766, 0, -0.643], not down +x
+      as the first three attempts assumed. Placing the hand on +x alone left it hanging 8 cm
+      off the end of the arm -- the gap visible in the viewer -- because the offset was
+      mostly perpendicular to the limb rather than along it. 0.046 m is the wrist mesh's
+      radius (0.028) plus half the palm box (0.018), so the two meet without overlapping. An earlier attempt hung them downward instead, which
+      put each palm inside its own elbow. The palm is left in the
       wrist's own orientation: turning it a quarter turn so the fingers continue the line of
       the arm looks more like a hand, and costs the errand outright -- the rotated hand rides
       against the hip through the whole gait cycle, 55% of control steps in contact against
@@ -125,10 +130,34 @@
     </fixed>
   </tendon>
 
+  <contact>
+    <!-- A hand does not collide with the arm carrying it. Asimov's elbow has a collision
+         radius of 0.087 m against the wrist's 0.028, so it envelops the end of the limb
+         entirely: any hand placed where the arm actually ends is inside the elbow's bound,
+         and every offset tried between 0.046 and 0.077 m reported contact from the first
+         control step. Excluding the pair is what a real arm does implicitly -- the joint
+         limits, not the meshes, are what stop a hand reaching its own elbow. -->
+    <exclude body1="palm_r" body2="right_elbow_link"/>
+    <exclude body1="palm_l" body2="left_elbow_link"/>
+    <exclude body1="palm_r" body2="right_wrist_yaw_link"/>
+    <exclude body1="palm_l" body2="left_wrist_yaw_link"/>
+    <exclude body1="palm_r" body2="right_hip_pitch_link"/>
+    <exclude body1="palm_l" body2="left_hip_pitch_link"/>
+    <!-- The fingers are separate bodies, so excluding the palm alone leaves them colliding. -->
+    <exclude body1="finger_r1" body2="right_elbow_link"/>
+    <exclude body1="finger_r2" body2="right_elbow_link"/>
+    <exclude body1="finger_l1" body2="left_elbow_link"/>
+    <exclude body1="finger_l2" body2="left_elbow_link"/>
+    <exclude body1="finger_r1" body2="right_hip_pitch_link"/>
+    <exclude body1="finger_r2" body2="right_hip_pitch_link"/>
+    <exclude body1="finger_l1" body2="left_hip_pitch_link"/>
+    <exclude body1="finger_l2" body2="left_hip_pitch_link"/>
+  </contact>
+
   <equality>
-    <weld body1="asimov_head" body2="neck_pitch_link" relpose="0 0 0.05 1 0 0 0"/>
-    <weld body1="palm_r" body2="right_wrist_yaw_link" relpose="0.11 0 0 1 0 0 0"/>
-    <weld body1="palm_l" body2="left_wrist_yaw_link" relpose="0.11 0 0 1 0 0 0"/>
+    <weld body1="asimov_head" body2="neck_pitch_link" relpose="0.0352 0 -0.0296 1 0 0 0"/>
+    <weld body1="palm_r" body2="right_wrist_yaw_link" relpose="0.0352 0 -0.0296 1 0 0 0"/>
+    <weld body1="palm_l" body2="left_wrist_yaw_link" relpose="0.0352 0 -0.0296 1 0 0 0"/>
   </equality>
 
   <actuator>
@@ -143,18 +172,18 @@
          nothing about it should have to know which robot is underneath.
          Position servos with enough authority to hold a stance against the body's own
          weight; the gait moves the base itself, so these only have to keep the pose. -->
-    <position name="hip_pitch_l" joint="left_hip_pitch_joint" kp="180" kv="12" ctrlrange="-3.2 3.2"/>
-    <position name="hip_roll_l" joint="left_hip_roll_joint" kp="180" kv="12" ctrlrange="-3.2 3.2"/>
-    <position name="hip_yaw_l" joint="left_hip_yaw_joint" kp="120" kv="8" ctrlrange="-3.2 3.2"/>
-    <position name="knee_l" joint="left_knee_joint" kp="220" kv="14" ctrlrange="-3.2 3.2"/>
-    <position name="ank_pitch_l" joint="left_ankle_pitch_joint" kp="120" kv="8" ctrlrange="-3.2 3.2"/>
-    <position name="ank_roll_l" joint="left_ankle_roll_joint" kp="80" kv="6" ctrlrange="-3.2 3.2"/>
-    <position name="hip_pitch_r" joint="right_hip_pitch_joint" kp="180" kv="12" ctrlrange="-3.2 3.2"/>
-    <position name="hip_roll_r" joint="right_hip_roll_joint" kp="180" kv="12" ctrlrange="-3.2 3.2"/>
-    <position name="hip_yaw_r" joint="right_hip_yaw_joint" kp="120" kv="8" ctrlrange="-3.2 3.2"/>
-    <position name="knee_r" joint="right_knee_joint" kp="220" kv="14" ctrlrange="-3.2 3.2"/>
-    <position name="ank_pitch_r" joint="right_ankle_pitch_joint" kp="120" kv="8" ctrlrange="-3.2 3.2"/>
-    <position name="ank_roll_r" joint="right_ankle_roll_joint" kp="80" kv="6" ctrlrange="-3.2 3.2"/>
+    <position name="hip_pitch_l" joint="left_hip_pitch_joint" kp="400" kv="20" ctrlrange="-3.2 3.2"/>
+    <position name="hip_roll_l" joint="left_hip_roll_joint" kp="400" kv="20" ctrlrange="-3.2 3.2"/>
+    <position name="hip_yaw_l" joint="left_hip_yaw_joint" kp="250" kv="14" ctrlrange="-3.2 3.2"/>
+    <position name="knee_l" joint="left_knee_joint" kp="450" kv="24" ctrlrange="-3.2 3.2"/>
+    <position name="ank_pitch_l" joint="left_ankle_pitch_joint" kp="250" kv="14" ctrlrange="-3.2 3.2"/>
+    <position name="ank_roll_l" joint="left_ankle_roll_joint" kp="160" kv="10" ctrlrange="-3.2 3.2"/>
+    <position name="hip_pitch_r" joint="right_hip_pitch_joint" kp="400" kv="20" ctrlrange="-3.2 3.2"/>
+    <position name="hip_roll_r" joint="right_hip_roll_joint" kp="400" kv="20" ctrlrange="-3.2 3.2"/>
+    <position name="hip_yaw_r" joint="right_hip_yaw_joint" kp="250" kv="14" ctrlrange="-3.2 3.2"/>
+    <position name="knee_r" joint="right_knee_joint" kp="450" kv="24" ctrlrange="-3.2 3.2"/>
+    <position name="ank_pitch_r" joint="right_ankle_pitch_joint" kp="250" kv="14" ctrlrange="-3.2 3.2"/>
+    <position name="ank_roll_r" joint="right_ankle_roll_joint" kp="160" kv="10" ctrlrange="-3.2 3.2"/>
 
     <position name="waist_yaw" joint="waist_yaw_joint" kp="150" kv="10" ctrlrange="-3.2 3.2"/>
     <position name="neck_yaw" joint="neck_yaw_joint" kp="25" kv="2.5" ctrlrange="-3.2 3.2"/>
