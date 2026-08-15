@@ -303,6 +303,214 @@ class KinematicGait:
         data.qvel[5] = self._wz
 
 
+class DynamicGait:
+    """A walking controller that pushes the robot along with its legs.
+
+    KinematicGait writes the base velocity directly and animates the legs to match, which
+    cannot fall over and cannot walk either: the feet slide because nothing connects them to
+    the motion. This one commands only joints. Everything the body does -- forward motion,
+    turning, staying upright -- has to come out of the feet pressing on the floor, which is
+    what makes a leg that does not take its share immediately visible.
+
+    Three loops, in the order they matter:
+
+      Balance   The ankles hold the torso upright, reading pitch and roll from the base and
+                pushing back through whichever foot is loaded. Without this the robot tips
+                inside a second: measured every stance the servos can hold statically ending
+                up past 0.2 rad of lean.
+
+      Weight    A walk is a controlled fall from one foot to the other. The hips roll the
+                body over the stance leg before the swing leg lifts, so there is something to
+                stand on when it does. Skipping this is what leaves one foot glued down --
+                measured the left foot in contact for 300 of 300 control steps.
+
+      Swing     The unloaded leg lifts, reaches, and plants. Hip pitch sets the step length,
+                knee flexion the ground clearance, ankle pitch keeps the sole flat so it
+                lands on the whole foot rather than a toe or a heel.
+
+    Signs come from the model. Asimov's legs are mirrored -- right knee [-1.5, 0], left knee
+    [0, 1.5] -- so every target is expressed as "flex" or "extend" and turned into a number
+    per joint from its own range.
+
+    STATUS: the gait cycle works, the stiffness does not. Foot alternation is exactly right --
+    measured 200 of 400 control steps on each foot, against the kinematic gait's 300 and 66 --
+    which is the shuffle this was written to fix. What is unresolved is holding 32 kg up while
+    doing it. The knees need about 46 Nm in single support, which a position servo only
+    delivers after sagging: at kp 500 the robot folds to a pelvis height of 0.16 m, and at the
+    2000 that holds it upright the legs diverge instead, hitting 19740 rad/s within three
+    control steps. Refining the timestep to 1 ms removes the divergence and leaves the sag.
+
+    The gap is that a position servo is the wrong actuator for this. Holding a pose against
+    gravity wants feedforward -- gravity compensation from the model's own inverse dynamics,
+    with the servo correcting only the residual -- or torque actuators under a policy trained
+    for it, which is what PolicyGait below is reserved for. Both are real work rather than a
+    gain to be found, which is why KinematicGait remains the default.
+
+    Not wired to any scene: pass it explicitly, `Robot(scene, gait=DynamicGait())`, to
+    continue this.
+    """
+
+    # Nominal stance, as flexion magnitudes rather than signed angles.
+    HIP_FLEX = 0.25
+    KNEE_FLEX = 0.50
+    ANKLE_FLEX = 0.25
+
+    def __init__(
+        self,
+        step_freq: float = 1.3,        # gait cycles per second
+        step_length: float = 0.28,     # hip swing, radians
+        step_height: float = 0.35,     # knee flexion during swing, radians
+        hip_roll: float = 0.08,        # weight shift onto the stance leg, radians
+        balance_gain: float = 1.8,     # ankle response to torso lean
+        balance_damp: float = 0.25,
+        turn_gain: float = 0.5,        # hip yaw per rad/s of commanded turn
+        accel: float = 2.0,
+    ):
+        self.step_freq = step_freq
+        self.step_length = step_length
+        self.step_height = step_height
+        self.hip_roll = hip_roll
+        self.balance_gain = balance_gain
+        self.balance_damp = balance_damp
+        self.turn_gain = turn_gain
+        self.accel = accel
+
+        self._phase = 0.0
+        self._vx = self._vy = self._wz = 0.0
+        self._act: dict[str, int] = {}
+        self._flex: dict[str, float] = {}
+
+    # -- setup --------------------------------------------------------------------
+
+    def reset(self, model: mujoco.MjModel, data: mujoco.MjData) -> None:
+        self._phase = 0.0
+        self._vx = self._vy = self._wz = 0.0
+        self._act = {}
+        for i in range(model.nu):
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_ACTUATOR, i)
+            if name:
+                self._act[name] = i
+
+        # Which direction is "flex" for each leg joint, from its own travel. A joint whose
+        # range lies mostly below zero flexes negative; mostly above, positive. This is what
+        # lets one controller drive a mirrored pair without a table of per-robot signs.
+        #
+        # The stance is then written into qpos as well as ctrl, not just commanded. A keyframe
+        # saved for the kinematic gait puts the legs somewhere this controller does not want
+        # them, and at the stiffness needed to hold 32 kg upright that error is an impulse:
+        # measured qacc of 2.4 million on the second control step, which is the solver being
+        # handed a spring compressed by half a radian and asked to integrate it at 5 ms.
+        self._flex = {}
+        for joint in ("hip_pitch_r", "hip_pitch_l", "hip_roll_r", "hip_roll_l",
+                      "hip_yaw_r", "hip_yaw_l", "knee_r", "knee_l",
+                      "ank_pitch_r", "ank_pitch_l", "ank_roll_r", "ank_roll_l"):
+            index = self._act.get(joint)
+            if index is None:
+                continue
+            low, high = model.jnt_range[model.actuator_trnid[index, 0]]
+            self._flex[joint] = -1.0 if (low + high) < 0.0 else 1.0
+
+        # Put the body in the stance this controller holds, so step one has nothing to correct.
+        for joint, amount in (("hip_pitch_r", self.HIP_FLEX), ("hip_pitch_l", self.HIP_FLEX),
+                              ("knee_r", self.KNEE_FLEX), ("knee_l", self.KNEE_FLEX),
+                              ("ank_pitch_r", self.ANKLE_FLEX), ("ank_pitch_l", self.ANKLE_FLEX)):
+            index = self._act.get(joint)
+            if index is None:
+                continue
+            target = self._flex.get(joint, 1.0) * amount
+            data.qpos[model.jnt_qposadr[model.actuator_trnid[index, 0]]] = target
+            data.ctrl[index] = target
+        data.qvel[:] = 0.0
+        mujoco.mj_forward(model, data)
+
+    # -- helpers ------------------------------------------------------------------
+
+    def _set(self, model: mujoco.MjModel, data: mujoco.MjData, joint: str, value: float) -> None:
+        index = self._act.get(joint)
+        if index is None:
+            return
+        low, high = model.actuator_ctrlrange[index]
+        joint_low, joint_high = model.jnt_range[model.actuator_trnid[index, 0]]
+        if joint_low < joint_high:
+            low, high = max(low, joint_low), min(high, joint_high)
+        data.ctrl[index] = float(np.clip(value, low, high))
+
+    def _flexed(self, joint: str, amount: float) -> float:
+        """`amount` of flexion at `joint`, in that joint's own sign."""
+        return self._flex.get(joint, 1.0) * amount
+
+    # -- the loop -----------------------------------------------------------------
+
+    def apply(
+        self, model: mujoco.MjModel, data: mujoco.MjData, vx: float, vy: float, wz: float, dt: float
+    ) -> None:
+        if not self._act:
+            self.reset(model, data)
+
+        self._vx += float(np.clip(vx - self._vx, -self.accel * dt, self.accel * dt))
+        self._vy += float(np.clip(vy - self._vy, -self.accel * dt, self.accel * dt))
+        self._wz += float(np.clip(wz - self._wz, -self.accel * 3 * dt, self.accel * 3 * dt))
+
+        speed = math.hypot(self._vx, self._vy)
+        moving = speed > 0.02 or abs(self._wz) > 0.05
+        if moving:
+            self._phase = (self._phase + 2 * math.pi * self.step_freq * dt) % (2 * math.pi)
+
+        # Torso attitude, for the balance term. Pitch is lean fore-aft, roll side to side.
+        quat = data.qpos[3:7]
+        w, x, y, z = quat
+        pitch = math.asin(max(-1.0, min(1.0, 2.0 * (w * y - z * x))))
+        roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+        pitch_rate, roll_rate = float(data.qvel[4]), float(data.qvel[3])
+
+        # Ankles resist the lean. This is the whole of the balance controller: the feet are
+        # the only things touching the ground, so it is the only place a correction can act.
+        ankle_pitch = self.balance_gain * pitch + self.balance_damp * pitch_rate
+        ankle_roll = self.balance_gain * roll + self.balance_damp * roll_rate
+
+        cycle = math.sin(self._phase)
+        # Right leg swings on the first half of the cycle, left on the second.
+        swing_r = max(math.sin(self._phase), 0.0)
+        swing_l = max(-math.sin(self._phase), 0.0)
+
+        # Weight rolls toward whichever leg is about to take the load, a quarter cycle early
+        # so the body is already over the foot when the other one lifts.
+        shift = self.hip_roll * math.sin(self._phase - math.pi / 2) if moving else 0.0
+
+        stride = self.step_length * float(np.clip(self._vx / 0.5, -1.0, 1.0))
+        yaw_offset = self.turn_gain * self._wz
+
+        for side, swing, lead in (("r", swing_r, 1.0), ("l", swing_l, -1.0)):
+            hip_pitch = f"hip_pitch_{side}"
+            knee = f"knee_{side}"
+            ank_pitch = f"ank_pitch_{side}"
+            hip_roll = f"hip_roll_{side}"
+            hip_yaw = f"hip_yaw_{side}"
+            ank_roll = f"ank_roll_{side}"
+
+            # Hip: nominal crouch, plus the stride, plus the balance correction. The swinging
+            # leg reaches forward while the stance leg drives back -- that push is what moves
+            # the robot, since nothing else does.
+            reach = stride * lead * cycle
+            self._set(model, data, hip_pitch,
+                      self._flexed(hip_pitch, self.HIP_FLEX) - reach - pitch * 0.6)
+
+            # Knee: crouch plus lift while swinging, so the foot clears the floor.
+            self._set(model, data, knee,
+                      self._flexed(knee, self.KNEE_FLEX + self.step_height * swing))
+
+            # Ankle: hold the sole flat against the hip's motion, and take the balance term.
+            self._set(model, data, ank_pitch,
+                      self._flexed(ank_pitch, self.ANKLE_FLEX) + reach * 0.5 - ankle_pitch)
+
+            # Roll: shift the weight, and keep the foot flat sideways.
+            self._set(model, data, hip_roll, self._flexed(hip_roll, 0.0) + shift * lead)
+            self._set(model, data, ank_roll, -ankle_roll)
+            self._set(model, data, hip_yaw, yaw_offset * lead)
+
+        self._set(model, data, "waist_yaw", 0.0)
+
+
 class PolicyGait:
     """Placeholder for a trained RL locomotion policy (phase 6).
 
