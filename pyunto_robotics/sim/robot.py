@@ -107,6 +107,14 @@ class Robot:
             self.data.ctrl[idx] = self.data.qpos[self.model.jnt_qposadr[joint]]
 
         mujoco.mj_forward(self.model, self.data)
+        # Then put the arms where a standing robot holds them. The keyframe leaves Asimov's
+        # shoulders at 0.01 rad, and on that shoulder zero is not "hanging down" but "swung
+        # back": measured the hand 0.4 m behind the body, and it stayed there for 2499 of the
+        # door skill's 3001 steps because nothing else ever commanded the arm. Whoever looked
+        # at the robot saw it push a door with its arm pointing backwards.
+        for side in ("r", "l"):
+            if f"sh_pitch_{side}" in self._act:
+                self.arm_home(side)
         self.gait.reset(self.model, self.data)
 
     def close(self) -> None:
@@ -449,26 +457,52 @@ class Robot:
         """
         cached = self._reach_pose.get((side, round(height, 2)))
         if cached is None:
-            # Try the pose pyunto_h1 was tuned with first. Where it already reaches, the sweep
+            # Try two known poses before sweeping. Where one of them already reaches, the sweep
             # is 162 arm poses of wasted motion -- and the arm brushes its surroundings while
             # it runs, which showed up as the errand's wall contact rising from 3.1% of
-            # control steps to 5.3% for no gain.
-            cached = (-1.10, -0.20)
-            self.set_arm(side, shoulder_pitch=-1.10, shoulder_roll=0.0, shoulder_yaw=0.0,
-                         elbow=-0.20)
-            self.stand(0.6)
-            hand = self.hand_position(side)
-            ahead = float((hand[:2] - self.position[:2])
-                          @ np.array([math.cos(self.yaw), math.sin(self.yaw)]))
-            # Height alone is not enough: on a mirrored pair of arms the same shoulder angle
-            # sends one hand forward and the other back, and both land at the right height.
-            # Measured the right hand 0.39 m BEHIND the body while the left reached 0.22 m in
-            # front of it, which is a robot pushing a door with its elbow.
-            if abs(float(hand[2]) - height) > 0.08 or ahead < 0.15:
-                cached = self._find_reach(side, height)
+            # control steps to 5.3% for no gain. Worse on a robot whose shoulder is mirrored:
+            # the sweep spans -1.6..+1.8 rad, so two thirds of the door skill's 8637 steps went
+            # on swinging the arm through every angle including straight backwards, which is
+            # what an onlooker sees as "it is pushing the door with the back of its arm".
+            #
+            # The first candidate is the pose pyunto_h1 was tuned with. The second is that pose
+            # in the loaded model's own sign, which is what Asimov needs -- its shoulder runs
+            # [-0.87, 3.14] where H1's runs [-3.1, 1.6], and the sweep it used to run picked
+            # (+0.60, -1.80) every time.
+            candidates = [(-1.10, -0.20)]
+            if self._pitch_sign(side) < 0:
+                candidates.append((0.60, -1.80))
+            cached = candidates[0]
+            best: tuple[float, float, float] | None = None
+            for pitch, elbow in candidates:
+                self.set_arm(side, shoulder_pitch=pitch, shoulder_roll=0.0, shoulder_yaw=0.0,
+                             raw=True, elbow=elbow)
+                self.stand(0.6)
+                hand = self.hand_position(side)
+                ahead = float((hand[:2] - self.position[:2])
+                              @ np.array([math.cos(self.yaw), math.sin(self.yaw)]))
+                # Height alone is not enough: on a mirrored pair of arms the same shoulder
+                # angle sends one hand forward and the other back, and both land at the right
+                # height. Measured the right hand 0.39 m BEHIND the body while the left reached
+                # 0.22 m in front of it, which is a robot pushing a door with its elbow.
+                error = abs(float(hand[2]) - height)
+                if ahead >= 0.15 and (best is None or error < best[0]):
+                    best = (error, pitch, elbow)
+                if error <= 0.08 and ahead >= 0.15:
+                    cached = (pitch, elbow)
+                    break
+            else:
+                # A candidate that reaches out in front but lands off-height still beats the
+                # sweep. Pyunto H1's own pose misses 0.90 m by 0.12 and used to send it through
+                # all 162 poses to come back with something barely different, at the cost of a
+                # minute of arm-waving next to a wall. Only sweep when nothing reached forward.
+                if best is not None:
+                    cached = (best[1], best[2])
+                else:
+                    cached = self._find_reach(side, height)
             self._reach_pose[(side, round(height, 2))] = cached
         pitch, elbow = cached
-        self.set_arm(side, shoulder_pitch=pitch, shoulder_roll=0.0, shoulder_yaw=0.0,
+        self.set_arm(side, shoulder_pitch=pitch, shoulder_roll=0.0, shoulder_yaw=0.0, raw=True,
                      elbow=elbow)
         # Let it arrive before reporting where it got to. Reading the hand on the same step
         # the command is issued reports where the arm still is, not where it is going.
@@ -481,7 +515,7 @@ class Robot:
         best: tuple[float, float, float] | None = None
         for pitch in np.linspace(-1.6, 1.8, 18):
             for elbow in np.linspace(-2.4, 0.0, 9):
-                self.set_arm(side, shoulder_pitch=float(pitch), shoulder_roll=0.0,
+                self.set_arm(side, shoulder_pitch=float(pitch), shoulder_roll=0.0, raw=True,
                              shoulder_yaw=0.0, elbow=float(elbow))
                 # Long enough for the servo to actually arrive. At 0.25 s the arm was still
                 # travelling when it was measured, so the sweep scored poses by where the hand
@@ -508,8 +542,19 @@ class Robot:
         shoulder_roll: float | None = None,
         shoulder_yaw: float | None = None,
         elbow: float | None = None,
+        raw: bool = False,
     ) -> None:
-        """Command arm joint angles directly (radians). Unset joints keep their target."""
+        """Command arm joint angles directly (radians). Unset joints keep their target.
+
+        Shoulder pitch is written in pyunto_h1's sign, where negative swings the arm forward,
+        because every call site here was authored against that robot. Asimov's shoulder runs
+        the other way (range [-0.87, 3.14] against [-3.1, 1.6]), so the same numbers threw its
+        arm backwards -- measured the hand 0.42 m behind the body while it walked to a door.
+        Flip it to match whichever model is loaded. Callers that searched for a pose in the
+        model's own sign, like reach_forward, pass raw=True to be left alone.
+        """
+        if shoulder_pitch is not None and not raw:
+            shoulder_pitch *= self._pitch_sign(side)
         targets = {
             f"sh_pitch_{side}": shoulder_pitch,
             f"sh_roll_{side}": shoulder_roll,
@@ -524,6 +569,16 @@ class Robot:
                 continue
             lo, hi = self.model.actuator_ctrlrange[idx]
             self.data.ctrl[idx] = float(np.clip(value, lo, hi))
+
+    def _pitch_sign(self, side: str) -> float:
+        """+1 if this shoulder swings the arm forward on negative angles, -1 if it reverses."""
+        index = self._act.get(f"sh_pitch_{side}")
+        if index is None:
+            return 1.0
+        low, high = self.model.jnt_range[self.model.actuator_trnid[index, 0]]
+        # A shoulder with room to spare below zero reaches forward there; one whose travel is
+        # almost all positive, like Asimov's, reaches forward the other way.
+        return 1.0 if low >= high or (low + high) < 0.0 else -1.0
 
     def grip(self, side: str = "r", closed: float = 1.0) -> None:
         """Close (1.0) or open (0.0) a gripper."""
@@ -610,6 +665,11 @@ class Robot:
     def arm_home(self, side: str = "r") -> None:
         """Return the arm to its resting pose."""
         sign = -1.0 if side == "r" else 1.0
+        # -0.25 rests pyunto_h1's arm at its side; on Asimov the shoulder pitches the other
+        # way (range [-0.87, 3.14] against [-3.1, 1.6]) and the same number swings the arm
+        # BACKWARDS -- measured the hand 0.14 m behind the body where the other robot's sits
+        # 0.24 m in front, so it spent the door skill reaching away from the door. Take the
+        # direction from the joint rather than the constant.
         self.set_arm(side, shoulder_pitch=-0.25, shoulder_roll=sign * 0.12,
                      shoulder_yaw=0.0, elbow=-0.35)
         self.grip(side, 0.0)
