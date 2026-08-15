@@ -165,7 +165,14 @@
   </equality>
 
   <actuator>
-    <!-- ctrlrange on every servo, because a position actuator without one defaults to [0, 0]
+    <!-- Leg servos at kp 550. The stance gains were far too soft for this body: the left hip
+         tracked only 0.25 rad of a 0.36 rad command while the right managed 0.44, so the left
+         foot never left the ground -- measured down on 300 of 300 control steps against the
+         right's 66, which is one leg walking and one shuffling. 550 tracks symmetrically
+         (1.62 against 1.60 rad) and both feet lift. Higher was tried and diverges: at 700 the
+         hip integrated to 11892 rad.
+
+         ctrlrange on every servo, because a position actuator without one defaults to [0, 0]
          and KinematicGait clips its command to that: measured every ctrl at 0.000 while the
          gait was writing a full walking cycle, so the legs never moved and the robot slid
          along on a held pose. The range is deliberately wider than any joint here; MuJoCo
@@ -176,36 +183,41 @@
          nothing about it should have to know which robot is underneath.
          Position servos with enough authority to hold a stance against the body's own
          weight; the gait moves the base itself, so these only have to keep the pose. -->
-    <position name="hip_pitch_l" joint="left_hip_pitch_joint" kp="400" kv="20" ctrlrange="-3.2 3.2"/>
-    <position name="hip_roll_l" joint="left_hip_roll_joint" kp="400" kv="20" ctrlrange="-3.2 3.2"/>
+    <position name="hip_pitch_l" joint="left_hip_pitch_joint" kp="500" kv="22" ctrlrange="-3.2 3.2"/>
+    <position name="hip_roll_l" joint="left_hip_roll_joint" kp="500" kv="22" ctrlrange="-3.2 3.2"/>
     <position name="hip_yaw_l" joint="left_hip_yaw_joint" kp="250" kv="14" ctrlrange="-3.2 3.2"/>
-    <position name="knee_l" joint="left_knee_joint" kp="450" kv="24" ctrlrange="-3.2 3.2"/>
-    <position name="ank_pitch_l" joint="left_ankle_pitch_joint" kp="250" kv="14" ctrlrange="-3.2 3.2"/>
+    <position name="knee_l" joint="left_knee_joint" kp="500" kv="22" ctrlrange="-3.2 3.2"/>
+    <position name="ank_pitch_l" joint="left_ankle_pitch_joint" kp="500" kv="22" ctrlrange="-3.2 3.2"/>
     <position name="ank_roll_l" joint="left_ankle_roll_joint" kp="160" kv="10" ctrlrange="-3.2 3.2"/>
-    <position name="hip_pitch_r" joint="right_hip_pitch_joint" kp="400" kv="20" ctrlrange="-3.2 3.2"/>
-    <position name="hip_roll_r" joint="right_hip_roll_joint" kp="400" kv="20" ctrlrange="-3.2 3.2"/>
+    <position name="hip_pitch_r" joint="right_hip_pitch_joint" kp="500" kv="22" ctrlrange="-3.2 3.2"/>
+    <position name="hip_roll_r" joint="right_hip_roll_joint" kp="500" kv="22" ctrlrange="-3.2 3.2"/>
     <position name="hip_yaw_r" joint="right_hip_yaw_joint" kp="250" kv="14" ctrlrange="-3.2 3.2"/>
-    <position name="knee_r" joint="right_knee_joint" kp="450" kv="24" ctrlrange="-3.2 3.2"/>
-    <position name="ank_pitch_r" joint="right_ankle_pitch_joint" kp="250" kv="14" ctrlrange="-3.2 3.2"/>
+    <position name="knee_r" joint="right_knee_joint" kp="500" kv="22" ctrlrange="-3.2 3.2"/>
+    <position name="ank_pitch_r" joint="right_ankle_pitch_joint" kp="500" kv="22" ctrlrange="-3.2 3.2"/>
     <position name="ank_roll_r" joint="right_ankle_roll_joint" kp="160" kv="10" ctrlrange="-3.2 3.2"/>
 
     <position name="waist_yaw" joint="waist_yaw_joint" kp="150" kv="10" ctrlrange="-3.2 3.2"/>
     <position name="neck_yaw" joint="neck_yaw_joint" kp="25" kv="2.5" ctrlrange="-3.2 3.2"/>
     <position name="neck_pitch" joint="neck_pitch_joint" kp="25" kv="2.5" ctrlrange="-3.2 3.2"/>
 
-    <!-- Arms, named as Robot.set_arm addresses them: sh_pitch_r, sh_roll_r, sh_yaw_r, elbow_r.
+    <!-- Arm servos at kp 150. At the original 90 the shoulder reached its commanded angle
+         but slowly, and the hand fell 2 cm short of a 0.90 m handle; 150 tracks 0.60 rad to
+         within 0.04 and puts the hand at 0.91. Higher diverges: at 600 the shoulder
+         integrated to 11.93 rad on the first control step.
+
+         Arms, named as Robot.set_arm addresses them: sh_pitch_r, sh_roll_r, sh_yaw_r, elbow_r.
          Spelling them shoulder_* instead was silently a no-op -- set_arm looks the actuator up
          by name and skips what it cannot find, so the arm never moved and the hand stayed at
          0.63 m against a door handle at 0.90. -->
-    <position name="sh_pitch_r" joint="right_shoulder_pitch_joint" kp="90" kv="6" ctrlrange="-3.2 3.2"/>
-    <position name="sh_roll_r" joint="right_shoulder_roll_joint" kp="90" kv="6" ctrlrange="-3.2 3.2"/>
-    <position name="sh_yaw_r" joint="right_shoulder_yaw_joint" kp="60" kv="4" ctrlrange="-3.2 3.2"/>
-    <position name="elbow_r" joint="right_elbow_joint" kp="60" kv="4" ctrlrange="-3.2 3.2"/>
+    <position name="sh_pitch_r" joint="right_shoulder_pitch_joint" kp="150" kv="12" ctrlrange="-3.2 3.2"/>
+    <position name="sh_roll_r" joint="right_shoulder_roll_joint" kp="150" kv="12" ctrlrange="-3.2 3.2"/>
+    <position name="sh_yaw_r" joint="right_shoulder_yaw_joint" kp="105" kv="8" ctrlrange="-3.2 3.2"/>
+    <position name="elbow_r" joint="right_elbow_joint" kp="105" kv="8" ctrlrange="-3.2 3.2"/>
     <position name="wrist_r" joint="right_wrist_yaw_joint" kp="30" kv="2" ctrlrange="-3.2 3.2"/>
-    <position name="sh_pitch_l" joint="left_shoulder_pitch_joint" kp="90" kv="6" ctrlrange="-3.2 3.2"/>
-    <position name="sh_roll_l" joint="left_shoulder_roll_joint" kp="90" kv="6" ctrlrange="-3.2 3.2"/>
-    <position name="sh_yaw_l" joint="left_shoulder_yaw_joint" kp="60" kv="4" ctrlrange="-3.2 3.2"/>
-    <position name="elbow_l" joint="left_elbow_joint" kp="60" kv="4" ctrlrange="-3.2 3.2"/>
+    <position name="sh_pitch_l" joint="left_shoulder_pitch_joint" kp="150" kv="12" ctrlrange="-3.2 3.2"/>
+    <position name="sh_roll_l" joint="left_shoulder_roll_joint" kp="150" kv="12" ctrlrange="-3.2 3.2"/>
+    <position name="sh_yaw_l" joint="left_shoulder_yaw_joint" kp="105" kv="8" ctrlrange="-3.2 3.2"/>
+    <position name="elbow_l" joint="left_elbow_joint" kp="105" kv="8" ctrlrange="-3.2 3.2"/>
     <position name="wrist_l" joint="left_wrist_yaw_joint" kp="30" kv="2" ctrlrange="-3.2 3.2"/>
 
     <!-- Grippers: one actuator per hand, driving both fingers through the tendon above. -->
