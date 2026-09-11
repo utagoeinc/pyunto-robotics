@@ -30,8 +30,16 @@ log = logging.getLogger(__name__)
 # Verbs the skill layer understands. The planner may only emit these.
 ACTIONS = (
     "goto", "face", "open", "leave", "close", "home", "point_at", "look_around", "describe",
-    "where", "report",
+    "where", "report", "raise_arm", "wave", "lower_arm",
 )
+
+
+def _which_arm(text: str) -> str:
+    """Left or right, from the words. Right when unsaid, which is what a person would do."""
+    lowered = text.lower()
+    if "左" in text or "left" in lowered:
+        return "l"
+    return "r"
 
 
 @dataclass(frozen=True)
@@ -94,6 +102,13 @@ _OBJECTS: dict[str, tuple[str, ...]] = {
 # "look around" / 「周りを見て」 has to beat "look at" / 「見て」, and "open" has to beat "go"
 # in "go open the door", or the robot does the wrong thing for a perfectly clear instruction.
 _VERBS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # Waving before raising: 「手を振って」 would otherwise be read as "raise", since both
+    # sentences name a hand and only the second verb tells them apart.
+    ("wave", ("wave", "手を振って", "手をふって", "振って", "ふって", "手を振る")),
+    ("raise_arm", ("raise your", "put your hand up", "lift your", "hold up your",
+                   "挙げて", "上げて", "あげて", "掲げて")),
+    ("lower_arm", ("lower your", "put your hand down", "put your arm down",
+                   "下ろして", "おろして", "下げて")),
     ("open", ("open", "push open", "開けて", "開けろ", "あけて", "開いて")),
     ("home", ("go back to where you started", "back to the start", "元の位置に戻って",
               "最初の位置に戻って", "スタート地点に戻って")),
@@ -258,6 +273,8 @@ class RulePlanner:
                 target = _unknown_target(text) or "door"
                 return Plan([Step(verb, target, where, expect)])
             return Plan([Step(verb, obj, where, expect)])
+        if verb in ("wave", "raise_arm", "lower_arm"):
+            return Plan([Step(verb, _which_arm(text))])
         if verb in ("look_around", "describe", "where", "leave", "close", "home"):
             return Plan([Step(verb)])
 
@@ -271,7 +288,8 @@ class RulePlanner:
         return Plan(
             [],
             reply=(
-                "I can walk to things, look around, describe what I see, and open doors. "
+                "I can walk to things, look around, describe what I see, open doors, "
+                "and raise or wave a hand. "
                 "Try: \"open the door\" / 「オフィスのドアを開けて」"
             ),
         )
@@ -327,6 +345,9 @@ Available actions:
   describe           say what is currently in view
   where              report which room the robot is in
   report <text>      say something to the user
+  raise_arm <l|r>    put one arm up and hold it there
+  wave <l|r>         raise one arm, swing it a few times, and lower it
+  lower_arm <l|r>    put the arm back at the robot's side
 
 Each step may also carry "where" to pick between identical objects. Use it whenever the user
 says which one they mean:

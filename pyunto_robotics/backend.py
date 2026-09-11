@@ -1,0 +1,63 @@
+"""Making a robot the other half of a diary conversation.
+
+`pyunto_agent.Bridge` already does the hard parts of being a diary member: receiving encrypted
+entries, filtering out its own posts and undecryptable ones, keeping thread history, rate
+limiting, replying in the right thread. It asks a `Backend` what to say.
+
+A robot is simply a `Backend` whose "what to say" is "go and do it, then report back".
+
+This is why the robot needs no message loop of its own -- an earlier version of this package
+had one, duplicating Bridge's job with fewer safeguards.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from pyunto_agent.backends import Context
+
+from .agent import RobotAgent
+from .reporting import ThreadReporter
+
+log = logging.getLogger(__name__)
+
+
+class RobotBackend:
+    """Adapts a `RobotAgent` to the `pyunto_agent.backends.Backend` protocol."""
+
+    name = "robot"
+
+    def __init__(self, agent: RobotAgent, client=None, robot=None, camera: str = "head_cam",
+                 send_images: bool = True):  # noqa: ANN001
+        self.agent = agent
+        # Given a client, the robot narrates into the thread as it works instead of going
+        # quiet and posting one sentence at the end. Without one it behaves as before.
+        self.client = client
+        self.robot = robot if robot is not None else getattr(agent, "robot", None)
+        self.camera = camera
+        self.send_images = send_images
+
+    def reply(self, ctx: Context) -> str | None:
+        """Act on the newest entry and return what happened, as a sentence.
+
+        Only the latest turn is acted on. Diary entries are instructions, not a conversation to
+        be summarised: replying to a three-day-old "open the door" would be surprising.
+        """
+        if not ctx.turns:
+            return None
+        instruction = ctx.turns[-1].text.strip()
+        if not instruction:
+            return None
+        log.info("instruction: %s", instruction)
+        reporter = None
+        if self.client is not None and ctx.chat_space_id:
+            reporter = ThreadReporter(
+                self.client, ctx.chat_space_id, ctx.thread_id,
+                robot=self.robot, camera=self.camera, send_images=self.send_images,
+            )
+        execution = self.agent.execute(instruction, report=reporter)
+        if reporter is not None:
+            # The narration already said everything the summary would repeat, and a final
+            # duplicate of it reads as the robot saying the same thing twice.
+            return None
+        return execution.reply()

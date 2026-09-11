@@ -18,8 +18,9 @@ from dataclasses import dataclass, field
 
 from .brain.planner import Plan, RulePlanner
 from .brain.skills import Skills
-from .comms.client import IncomingMessage, PyuntoClient
+from pyunto_agent.client import IncomingMessage, PyuntoClient
 from .perception.grounding import Grounder
+from .reporting import NullReporter, Reporter
 from .sim.robot import Robot
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class RobotAgent:
         client: PyuntoClient | None = None,
         planner: RulePlanner | None = None,
         max_steps_per_message: int = 4,
+        max_replans: int = 2,
         on_idle: Callable[[], None] | None = None,
         skills: object | None = None,
     ):
@@ -71,6 +73,10 @@ class RobotAgent:
             skills if skills is not None else Skills(robot, grounder, planner=self.planner)
         )
         self.max_steps_per_message = max_steps_per_message
+        # How many times one message may be re-planned after a step fails. Two is enough to
+        # get out of the situations that actually arise (something moved, something is in the
+        # way) and few enough that a planner stuck on a bad idea cannot spin.
+        self.max_replans = max_replans
         # Called repeatedly while waiting for work. Used to keep a viewer window responsive;
         # it runs on the same thread as the simulation, which is where MuJoCo needs it.
         self.on_idle = on_idle
@@ -81,36 +87,93 @@ class RobotAgent:
 
     # -- executing ----------------------------------------------------------------
 
-    def execute(self, text: str) -> Execution:
-        """Plan and carry out one instruction."""
+    def execute(self, text: str, report: Reporter | None = None) -> Execution:
+        """Plan and carry out one instruction.
+
+        `report`, when given, is told what is happening as it happens: what the robot
+        understood before it moves, each step as it finishes, and a camera frame at the end.
+        Without it the behaviour is unchanged -- everything arrives in one reply at the end.
+        """
         plan = self.planner.plan(text)
         log.info("plan for %r: %s", text, plan)
 
         if not plan.steps:
-            return Execution(plan, [plan.reply or "I did not understand that."], ok=True)
+            # Not understood. Say what was heard and what the robot does know how to do, so the
+            # person can rephrase rather than guess. This is a far more common outcome than a
+            # failed action, and answering it with silence is the worst of the options.
+            message = plan.reply or self._did_not_understand(text)
+            if report is not None:
+                report.say(message)
+            return Execution(plan, [message], ok=True)
+
+        if report is not None:
+            report.say(self._understood(text, plan))
 
         messages: list[str] = []
         measurements: list[dict] = []
         ok = True
         # Cap the plan length: a model that emits twenty steps has misunderstood, and running
         # them would strand the robot somewhere unexpected.
-        for step in plan.steps[: self.max_steps_per_message]:
+        remaining = list(plan.steps[: self.max_steps_per_message])
+        replans = 0
+        while remaining:
+            step = remaining.pop(0)
+            if report is not None:
+                report.step_started(step)
             result = self.skills.run(step.action, step.argument, step.where, step.expect)
             messages.append(result.message)
             measurements.append({"step": str(step), "ok": result.ok, **result.data})
-            if not result.ok:
-                ok = False
-                # Most failures stop the plan, because later steps assume the earlier ones
-                # worked. A skill can mark its failure non-fatal to say "I could not do that
-                # one, but the rest still makes sense" -- which is the right answer to an
-                # impossible aside inside an otherwise perfectly good errand.
-                if getattr(result, "fatal", True):
-                    break
+            if report is not None:
+                report.step_finished(step, result)
+            if result.ok:
+                continue
+
+            ok = False
+            # Most failures stop the plan, because later steps assume the earlier ones
+            # worked. A skill can mark its failure non-fatal to say "I could not do that
+            # one, but the rest still makes sense" -- which is the right answer to an
+            # impossible aside inside an otherwise perfectly good errand.
+            if not getattr(result, "fatal", True):
+                continue
+
+            # STOP AND THINK AGAIN before abandoning the errand.
+            #
+            # A step failing does not always mean the errand is impossible; more often the
+            # world has moved on from what the plan assumed. Carrying the basket to the washer
+            # puts it exactly where the robot wanted to stand to reach into the drum, and the
+            # original plan has no way to know that -- it was written before the basket moved.
+            #
+            # So the robot describes what is actually true now (what it can see, what it is
+            # holding, what just failed) and asks the planner for the rest of the errand from
+            # here. That is the third and last tier of recovery, after looking around and
+            # wandering, both of which live in the skills where the target is known.
+            #
+            # Bounded to `max_replans`: a planner that keeps proposing the same failing step
+            # would otherwise loop until the step cap, and repeating a failure is not thinking.
+            if replans >= self.max_replans:
+                break
+            revised = self._replan(plan, step, result, remaining)
+            if revised is None:
+                break
+            replans += 1
+            log.info("replanned after %s failed: %s", step.action,
+                     " -> ".join(str(s) for s in revised))
+            messages.append("Let me try that a different way.")
+            if report is not None:
+                report.say("🤖 Let me try that a different way.")
+            remaining = revised[: self.max_steps_per_message]
+            ok = True  # the revised plan gets a fair chance to succeed
 
         # SAY SO when the cap bites. A six-part errand truncated to four used to finish with a
         # cheerful report of the four it did, and the user had no way to tell that the last two
         # were never attempted -- which is indistinguishable from the robot deciding it was
         # done. Silently doing less than asked is the one failure mode worth being loud about.
+        if report is not None:
+            # One picture at the end of the errand, not one per step. A frame after every
+            # step buries the thread in near-identical images; a frame at the end answers
+            # the question the person actually has, which is "so what does it look like now".
+            report.show("🤖 " + text.strip())
+
         dropped = len(plan.steps) - self.max_steps_per_message
         if dropped > 0 and ok:
             skipped = ", ".join(str(s) for s in plan.steps[self.max_steps_per_message:])
@@ -121,6 +184,87 @@ class RobotAgent:
             ok = False
 
         return Execution(plan, messages, ok, measurements)
+
+    def _understood(self, text: str, plan) -> str:
+        """What the robot is about to do, said before it moves.
+
+        The person has just written a sentence to a machine and has no idea whether it landed.
+        Saying "I heard X, so I will do Y" first means a misunderstanding is caught in the two
+        seconds before the robot walks off, not after.
+        """
+        steps = " → ".join(self._describe_step(s) for s in plan.steps[: self.max_steps_per_message])
+        return f"🤖 Understood: “{text.strip()}”\nI will: {steps}"
+
+    def _did_not_understand(self, text: str) -> str:
+        """Explain the failure to understand, and offer the vocabulary that would work."""
+        known = self._known_actions()
+        lines = [f"🤖 I did not understand “{text.strip()}”."]
+        if known:
+            lines.append("I know how to: " + ", ".join(known) + ".")
+        return "\n".join(lines)
+
+    def _known_actions(self) -> list[str]:
+        """The verbs this robot actually has, asked of the skills rather than hard-coded."""
+        for attr in ("actions", "verbs"):
+            value = getattr(self.skills, attr, None)
+            if callable(value):
+                try:
+                    value = value()
+                except Exception:  # noqa: BLE001 - introspection must never break a reply
+                    value = None
+            if value:
+                return sorted(str(v) for v in value)
+        domain = getattr(self.planner, "domain", None)
+        if domain is not None and getattr(domain, "verbs", None):
+            return sorted({action for action, _ in domain.verbs})
+        return []
+
+    @staticmethod
+    def _describe_step(step) -> str:
+        parts = [str(step.action)]
+        if getattr(step, "argument", None):
+            parts.append(str(step.argument))
+        if getattr(step, "where", None):
+            parts.append(f"({step.where})")
+        return " ".join(parts)
+
+    def _replan(
+        self,
+        plan: Plan,
+        failed: object,
+        result: object,
+        remaining: list,
+    ) -> list | None:
+        """Ask the planner for the rest of the errand, given what just went wrong.
+
+        Returns the new steps, or None if the planner cannot help -- which includes the rule
+        matcher, since it has no way to reason about a failure. Only the LLM planner is asked.
+        """
+        describe = getattr(self.planner, "replan", None)
+        if not callable(describe):
+            return None
+
+        # What the robot can see right now. This is the part that makes re-planning worth
+        # doing: without it the planner is guessing from the same information that produced
+        # the plan which just failed.
+        view = ""
+        try:
+            look = self.skills.run("describe", None, None, None)
+            view = look.message
+        except Exception:  # noqa: BLE001 - a failed look must not break recovery
+            log.debug("could not look around before replanning", exc_info=True)
+
+        try:
+            return describe(
+                original=str(plan),
+                failed_step=str(failed),
+                failure=getattr(result, "message", ""),
+                remaining=[str(s) for s in remaining],
+                view=view,
+            )
+        except Exception:  # noqa: BLE001 - the planner is remote/model code; never fatal
+            log.exception("replanning failed")
+            return None
 
     # -- Pyunto loop --------------------------------------------------------------
 

@@ -1740,6 +1740,86 @@ class Skills:
                 return name
         return argument
 
+    # The vocabulary, published so a refusal can say what would have worked. Kept next to the
+    # dispatch table because the two drift apart the moment they live in different files.
+    actions = (
+        "goto", "face", "open", "pull", "open_door", "point_at", "leave", "close", "home",
+        "look_around", "describe", "where", "report", "raise_arm", "wave", "lower_arm",
+    )
+
+    # -- gestures -----------------------------------------------------------------
+    #
+    # These are the first things people ask a humanoid to do. "Raise your right hand" and
+    # "wave" are how someone checks that the machine is listening at all, before trusting it
+    # with an errand -- and until now they were answered with "I do not know how to do that",
+    # on a robot whose arms work perfectly well.
+
+    # Arm held up and slightly out: unmistakable from across a room, and inside the joint
+    # limits of every humanoid in the package.
+    RAISED_SHOULDER_PITCH = -2.2
+    RAISED_ELBOW = -0.3
+    WAVE_SWING_RAD = 0.5
+    WAVE_CYCLES = 3
+    GESTURE_SETTLE_STEPS = 120
+
+    def _side(self, argument: str | None) -> tuple[str, str]:
+        """Which arm, as (code, name). Defaults to the right, as a person would."""
+        text = (argument or "").strip().lower()
+        if text in ("l", "left") or "左" in text:
+            return "l", "left"
+        return "r", "right"
+
+    def raise_arm(self, argument: str | None = None) -> SkillResult:
+        """Put one arm up and hold it there."""
+        side, name = self._side(argument)
+        sign = -1.0 if side == "r" else 1.0
+        self.robot.set_arm(
+            side,
+            shoulder_pitch=self.RAISED_SHOULDER_PITCH,
+            shoulder_roll=sign * 0.25,
+            shoulder_yaw=0.0,
+            elbow=self.RAISED_ELBOW,
+        )
+        self._settle()
+        return SkillResult(True, f"I raised my {name} hand.", {"side": side})
+
+    def lower_arm(self, argument: str | None = None) -> SkillResult:
+        """Put the arm back at the robot's side."""
+        side, name = self._side(argument)
+        self.robot.arm_home(side)
+        self._settle()
+        return SkillResult(True, f"I lowered my {name} arm.", {"side": side})
+
+    def wave(self, argument: str | None = None) -> SkillResult:
+        """Raise the arm and swing it side to side a few times, then lower it.
+
+        The arm is left at its side afterwards. A robot standing with one arm in the air is
+        alarming, and the next instruction would inherit the pose.
+        """
+        side, name = self._side(argument)
+        sign = -1.0 if side == "r" else 1.0
+        base_roll = sign * 0.25
+        self.raise_arm(side)
+        for cycle in range(self.WAVE_CYCLES):
+            for direction in (1.0, -1.0):
+                self.robot.set_arm(
+                    side,
+                    shoulder_pitch=self.RAISED_SHOULDER_PITCH,
+                    shoulder_roll=base_roll + direction * self.WAVE_SWING_RAD,
+                    elbow=self.RAISED_ELBOW,
+                )
+                self._settle(self.GESTURE_SETTLE_STEPS // 2)
+        self.robot.arm_home(side)
+        self._settle()
+        return SkillResult(
+            True, f"I waved my {name} hand.", {"side": side, "cycles": self.WAVE_CYCLES}
+        )
+
+    def _settle(self, steps: int | None = None) -> None:
+        """Let the servos actually get there. Commanding a target is not reaching it."""
+        for _ in range(steps if steps is not None else self.GESTURE_SETTLE_STEPS):
+            self.robot.step()
+
     def run(
         self,
         action: str,
@@ -1764,6 +1844,9 @@ class Skills:
             "describe": lambda: self.describe_view(),
             "where": lambda: self.report_position(),
             "report": lambda: SkillResult(True, argument or "Done."),
+            "raise_arm": lambda: self.raise_arm(argument or "r"),
+            "wave": lambda: self.wave(argument or "r"),
+            "lower_arm": lambda: self.lower_arm(argument or "r"),
         }
         handler = handlers.get(action)
         if handler is None:
