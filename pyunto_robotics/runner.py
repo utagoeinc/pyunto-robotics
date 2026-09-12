@@ -24,68 +24,17 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from pyunto_agent.auth import AuthError
+
 from .agent import RobotAgent
 from .brain.domains import DOMAINS, Domain, DomainLLMPlanner, DomainRulePlanner
-from .comms.auth import AuthError, Session
-from .comms.client import PyuntoClient
-from .comms.keys import RawSpaceKeyProvider
 from .brain.planner import looks_multi_step
+from . import registry
+from .connect import connect
+from .registry import RobotSetup
+from .viewer import open_viewer
 from .perception.grounding import ColorGrounder, VLMGrounder
 from .sim.robot import Robot
-
-
-@dataclass
-class RobotSetup:
-    """What one robot needs that the others do not."""
-
-    name: str
-    scene: str
-    domain: Domain
-    # Builds the skills object. Takes (robot, grounder) and returns something with a
-    # `run(action, argument, where, expect)` method -- the same contract brain/skills.Skills
-    # has, which is what lets RobotAgent drive any of them.
-    skills: Callable[[Robot, object], object]
-    # Builds the gait, or None to use the humanoid default.
-    gait: Callable[[], object] | None = None
-    default_keyframe: str = "start"
-    keyframe_help: str = ""
-    examples: tuple[str, ...] = ()
-
-
-def _open_viewer(robot: Robot, speed: float) -> object | None:
-    """Open the simulator window and make every robot.step redraw it.
-
-    All of this stays on the main thread on purpose: MuJoCo binds its renderer to the thread
-    that created it, and calling Robot.look() from anywhere else aborts the process on macOS.
-    The Pyunto listener is the part that gets a background thread.
-    """
-    try:
-        import mujoco
-        import mujoco.viewer
-    except ImportError:
-        print("mujoco.viewer is unavailable; running without a window")
-        return None
-
-    if sys.platform == "darwin" and getattr(mujoco.viewer, "_MJPYTHON", None) is None:
-        launcher = Path(sys.executable).with_name("mjpython")
-        # shlex.quote each argument: instructions contain spaces and Japanese punctuation, so
-        # an unquoted suggestion cannot be pasted back in.
-        argv = " ".join(shlex.quote(a) for a in sys.argv[1:])
-        print("\nThe simulator window needs mjpython on macOS. Run:")
-        print(f"    {launcher} {sys.argv[0]} {argv}".rstrip())
-        return None
-
-    viewer = mujoco.viewer.launch_passive(robot.model, robot.data)
-    real_step = robot.step
-
-    def step_and_draw(*a, **kw):
-        real_step(*a, **kw)
-        viewer.sync()
-        time.sleep(max(0.0, robot.control_dt / max(speed, 0.1) - 0.002))
-
-    robot.step = step_and_draw  # type: ignore[method-assign]
-    print("simulator window open - watch the robot carry out what you message it")
-    return viewer
 
 
 def build_parser(setup: RobotSetup, description: str) -> argparse.ArgumentParser:
@@ -108,6 +57,12 @@ def build_parser(setup: RobotSetup, description: str) -> argparse.ArgumentParser
                         help="open the simulator window (macOS: run under mjpython)")
     parser.add_argument("--speed", type=float, default=3.0,
                         help="playback speed when --view is on (1 = real time)")
+    parser.add_argument("--hold", type=float, default=0.0, metavar="SECONDS",
+                        help="with --view and --say, close the window after this many seconds "
+                             "instead of waiting for you to close it (0 = wait)")
+    parser.add_argument("--pose", action="store_true",
+                        help="just stand in the scene and hold the window open, for looking "
+                             "at the model (needs --view)")
     parser.add_argument("--verbose", "-v", action="store_true")
     return parser
 
@@ -127,7 +82,9 @@ def main(setup: RobotSetup, description: str) -> int:
 
     grounder = VLMGrounder() if args.vlm else ColorGrounder()
     planner = (
-        DomainLLMPlanner(setup.domain) if args.llm else DomainRulePlanner(setup.domain)
+        setup.planner(args.llm)
+        if setup.planner is not None
+        else (DomainLLMPlanner(setup.domain) if args.llm else DomainRulePlanner(setup.domain))
     )
 
     # A chained instruction under the rule matcher silently does the wrong single thing.
@@ -147,48 +104,93 @@ def main(setup: RobotSetup, description: str) -> int:
     )
     print(f"scene   : {args.scene} (starting {args.keyframe})")
 
-    viewer_ctx = _open_viewer(robot, args.speed) if args.view else None
+    viewer_ctx = open_viewer(robot, args.speed, setup.camera) if args.view else None
     if args.view and viewer_ctx is None:
         robot.close()
         return 1
 
-    skills = setup.skills(robot, grounder)
+    try:
+        skills = setup.skills(robot, grounder, planner=planner)
+    except TypeError:
+        skills = setup.skills(robot, grounder)
+
+    # 8, not the office robot's 4. A household errand is genuinely long -- "open the washer,
+    # take the laundry out, shut the door, put it in the basket, carry it to the folding
+    # table" is five actions before anything unusual is asked for -- and at 4 the tail of a
+    # perfectly reasonable request was dropped.
+    max_steps = 8
+
+    # -- look at the robot, do nothing else --------------------------------------------
+    #
+    # For inspecting the model itself. Without this the only way to get a window open was to
+    # give it an errand and watch, which takes minutes and moves the robot away from wherever
+    # you wanted to look at it.
+    if args.pose:
+        if viewer_ctx is None:
+            print("--pose needs --view (macOS: run under mjpython)")
+            robot.close()
+            return 1
+        print("\nholding the start pose - close the window to exit")
+        try:
+            while viewer_ctx.running:
+                robot.step()
+                # robot.step already syncs the viewer when --view is on, but sync again so the
+                # window stays responsive even if the physics is paused from the UI.
+                viewer_ctx.sync()
+        except KeyboardInterrupt:
+            print("\nclosing...")
+        viewer_ctx.close()
+        robot.close()
+        return 0
 
     # -- one-shot mode: no network, just do the thing ---------------------------------
     if args.say:
-        agent = RobotAgent(robot, grounder, planner=planner, skills=skills)
+        agent = RobotAgent(
+            robot, grounder, planner=planner, skills=skills,
+            max_steps_per_message=max_steps,
+        )
         print(f"\ninstruction: {args.say!r}")
         execution = agent.execute(args.say)
         print(f"plan       : {execution.plan}")
         print(f"reply      : {execution.reply()}")
         if viewer_ctx is not None:
-            # Hold the finished pose long enough to see it.
-            end = time.time() + 4.0
-            while viewer_ctx.is_running() and time.time() < end:
-                viewer_ctx.sync()
-                time.sleep(1 / 60)
+            # Leave the window OPEN when the errand finishes, and let the user close it.
+            #
+            # It used to hold the final pose for four seconds and then shut itself, which is
+            # long enough to confirm a skill worked and far too short to actually look at the
+            # robot -- and looking at the robot is most of what this window is for while the
+            # model is being worked on. Waiting on `is_running()` costs nothing: the loop is
+            # just redrawing, and it ends the moment the window is closed.
+            #
+            # `--hold 4` restores the old behaviour for a scripted run that should not block.
+            if args.hold > 0:
+                end = time.time() + args.hold
+                while viewer_ctx.running and time.time() < end:
+                    viewer_ctx.sync()
+                    time.sleep(1 / 60)
+            else:
+                print("\nsimulator window is open - close it to exit")
+                try:
+                    while viewer_ctx.running:
+                        viewer_ctx.sync()
+                        time.sleep(1 / 60)
+                except KeyboardInterrupt:
+                    print("\nclosing...")
             viewer_ctx.close()
         robot.close()
         return 0 if execution.ok else 1
 
     # -- connected mode ----------------------------------------------------------------
-    email = os.getenv("PYUNTO_EMAIL")
-    password = os.getenv("PYUNTO_PASSWORD")
-    base_url = os.getenv("PYUNTO_BASE_URL", "https://api.pyunto.com")
-    if not email or not password:
-        print("ERROR: set PYUNTO_EMAIL and PYUNTO_PASSWORD in .env (see .env.example)")
-        robot.close()
-        return 2
-
-    session = Session(base_url, email, password)
+    # No credentials needed: an anonymous robot account is created and remembered.
     try:
-        identity = session.login()
+        connection = connect(display_name=setup.name)
     except AuthError as e:
         print(f"ERROR: {e}")
         robot.close()
         return 1
 
-    client = PyuntoClient(session, RawSpaceKeyProvider(session))
+    client = connection.client
+    identity = connection.identity
     print(f"account : {identity}")
 
     if args.join:
@@ -204,11 +206,12 @@ def main(setup: RobotSetup, description: str) -> int:
         )
 
     def redraw() -> None:
-        if viewer_ctx is not None and viewer_ctx.is_running():
+        if viewer_ctx is not None and viewer_ctx.running:
             viewer_ctx.sync()
 
     agent = RobotAgent(
         robot, grounder, client=client, planner=planner, skills=skills,
+        max_steps_per_message=max_steps,
         on_idle=redraw if viewer_ctx is not None else None,
     )
     print("\nlistening - message the robot from the Pyunto app (Ctrl-C to stop)")
@@ -229,44 +232,5 @@ def main(setup: RobotSetup, description: str) -> int:
 
 
 def setup_for(name: str) -> RobotSetup:
-    """Look up a robot by name. Used by the tests and by scripts/run_all.py."""
-    from .brain.laundry import LaundrySkills  # noqa: PLC0415 - avoids import cycles
-    from .brain.lunar import LunarSkills  # noqa: PLC0415
-    from .brain.patrol import PatrolSkills  # noqa: PLC0415
-    from .sim.quad_gait import TrotGait  # noqa: PLC0415
-    from .sim.wheel_drive import SkidDrive  # noqa: PLC0415
-
-    setups = {
-        "home": RobotSetup(
-            name="Momo (home assistant)",
-            scene="home.xml",
-            domain=DOMAINS["home"],
-            skills=lambda robot, grounder: LaundrySkills(robot, grounder),
-            default_keyframe="start",
-            keyframe_help="start (at the washer), middle (centre of room), counter (at the counter)",
-            examples=("タオルを洗濯機から出して畳んで", "open the washing machine"),
-        ),
-        "patrol": RobotSetup(
-            name="Q1 (patrol quadruped)",
-            scene="campus.xml",
-            domain=DOMAINS["patrol"],
-            skills=lambda robot, grounder: PatrolSkills(robot, grounder),
-            gait=TrotGait,
-            default_keyframe="start",
-            keyframe_help="start (south of the building), corner (SE corner), steps (at the stairs)",
-            examples=("ビルの周りを1周して", "patrol around the building"),
-        ),
-        "lunar": RobotSetup(
-            name="R1 (lunar rover)",
-            scene="lunar.xml",
-            domain=DOMAINS["lunar"],
-            skills=lambda robot, grounder: LunarSkills(robot, grounder),
-            gait=SkidDrive,
-            default_keyframe="plain",
-            keyframe_help="plain (open surface), start (beside the lander)",
-            examples=("クレーターの縁まで行って", "drive to the beacon"),
-        ),
-    }
-    if name not in setups:
-        raise KeyError(f"unknown robot {name!r}; known: {', '.join(sorted(setups))}")
-    return setups[name]
+    """Look up a robot by name. Kept for the tests and older scripts; see registry.get."""
+    return registry.get(name)

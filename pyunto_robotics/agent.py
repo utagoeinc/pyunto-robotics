@@ -107,6 +107,10 @@ class RobotAgent:
             return Execution(plan, [message], ok=True)
 
         if report is not None:
+            # Phase 1: what the robot can see BEFORE it moves, then how it read the
+            # instruction. The picture comes first so the plan is read against the scene it
+            # was made in -- afterwards there is no way to know what the robot was looking at.
+            report.show("🤖 Before: “" + text.strip() + "”")
             report.say(self._understood(text, plan))
 
         messages: list[str] = []
@@ -168,11 +172,6 @@ class RobotAgent:
         # cheerful report of the four it did, and the user had no way to tell that the last two
         # were never attempted -- which is indistinguishable from the robot deciding it was
         # done. Silently doing less than asked is the one failure mode worth being loud about.
-        if report is not None:
-            # One picture at the end of the errand, not one per step. A frame after every
-            # step buries the thread in near-identical images; a frame at the end answers
-            # the question the person actually has, which is "so what does it look like now".
-            report.show("🤖 " + text.strip())
 
         dropped = len(plan.steps) - self.max_steps_per_message
         if dropped > 0 and ok:
@@ -182,6 +181,12 @@ class RobotAgent:
                 f"{self.max_steps_per_message} at a time, so I have not done: {skipped}."
             )
             ok = False
+
+        if report is not None:
+            # Phase 4: one closing message that stands on its own -- did it work, what
+            # happened at each step, and a final picture. Someone scrolling back a day later
+            # reads this one entry instead of reassembling the running commentary.
+            report.finished(text, ok, measurements)
 
         return Execution(plan, messages, ok, measurements)
 

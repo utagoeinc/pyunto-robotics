@@ -173,6 +173,85 @@ class DomainLLMPlanner:
             log.warning("planner model unavailable (%s); falling back to rules", e)
         return self.fallback.plan(message)
 
+    def replan(
+        self,
+        original: str,
+        failed_step: str,
+        failure: str,
+        remaining: list[str],
+        view: str = "",
+    ) -> list[Step] | None:
+        """Rework the rest of an errand after a step failed. None if it cannot help.
+
+        This is the last tier of recovery, after looking around and wandering. Those two live
+        in the skills, where the target is known and the problem is "I cannot see it". This one
+        handles the other case: the robot knows exactly where things are, and the PLAN has been
+        overtaken by events.
+
+        The case it was written for: carrying the basket to the washer puts the basket exactly
+        where the robot needed to stand to reach into the drum. Nothing is broken and nothing
+        is lost -- the plan was simply written before the basket moved, and the fix is to do
+        the remaining steps in a different order or from a different place. A planner that only
+        ever sees the original sentence cannot work that out; one that is told what the robot
+        can see and what just went wrong usually can.
+        """
+        try:
+            self._load()
+            from mlx_vlm import generate  # noqa: PLC0415
+            from mlx_vlm.prompt_utils import apply_chat_template  # noqa: PLC0415
+
+            question = _REPLAN_PROMPT.format(
+                actions="\n".join(
+                    f"  {action}" for action, _ in self.domain.verbs
+                ),
+                original=original,
+                failed_step=failed_step,
+                failure=failure,
+                remaining=", ".join(remaining) or "(nothing)",
+                view=view or "(nothing in particular)",
+            )
+            prompt = apply_chat_template(self._tokenizer, self._config, question, num_images=0)
+            reply = generate(
+                self._model, self._tokenizer, prompt, [],
+                max_tokens=self.max_tokens, verbose=False,
+            )
+            text = reply if isinstance(reply, str) else getattr(reply, "text", str(reply))
+            steps = parse_plan(text, allowed=tuple(a for a, _ in self.domain.verbs))
+            return steps or None
+        except Exception as e:  # noqa: BLE001 - recovery must never itself be fatal
+            log.warning("could not replan (%s)", e)
+            return None
+
+
+_REPLAN_PROMPT = """A household robot was carrying out an errand and one step failed.
+
+Available actions:
+{actions}
+
+The plan it was following:
+  {original}
+
+The step that failed:
+  {failed_step}
+
+What the robot reported:
+  {failure}
+
+Steps it had not reached yet:
+  {remaining}
+
+What the robot can see from where it is standing:
+  {view}
+
+Work out what it should do NOW to finish the errand. The failure is usually not fatal -- more
+often something has moved, or the robot is standing in the wrong place, and doing the same
+steps in a different order or after repositioning will work.
+
+Reply with ONLY a JSON array of the remaining steps, no other text. For example:
+[{{"action": "open_washer"}}, {{"action": "take_out"}}]
+
+If the errand genuinely cannot be finished, reply with an empty array: []"""
+
 
 # ======================================================================================
 # The home / laundry domain
@@ -196,8 +275,11 @@ HOME = Domain(
         # do it -- the basket is fixed scenery. Having the verb means it can say so, instead of
         # falling through to "I do not know how to that".
         ("bring_basket", ("bring the basket", "fetch the basket", "get the basket",
+                          "carry the basket", "move the basket", "basket to the washer",
                           "籠をもってきて", "かごをもってきて", "カゴをもってきて",
-                          "籠を持ってきて", "かごを持ってきて", "カゴを持ってきて")),
+                          "籠を持ってきて", "かごを持ってきて", "カゴを持ってきて",
+                          "洗濯かごを", "洗濯カゴを", "かごを運んで", "カゴを運んで",
+                          "籠を運んで", "かごを持って", "カゴを持って")),
         ("take_out", ("take out", "take it out", "get the towel", "take the towel",
                       "unload", "pull it out", "取り出して", "出して", "取って")),
         ("to_basket", ("in the basket", "into the basket", "to the basket", "in the hamper",
@@ -217,7 +299,9 @@ HOME = Domain(
         "pink": ("pink towel", "the pink one", "ピンクのタオル", "ピンク"),
         "towel": ("towel", "laundry", "washing", "タオル", "洗濯物", "洗濯もの"),
     },
-    intransitive=frozenset({"open_washer", "to_basket", "describe", "where", "home"}),
+    intransitive=frozenset(
+        {"open_washer", "close_washer", "to_basket", "describe", "where", "home"}
+    ),
     help_text=(
         "I can open the washing machine, take the laundry out, put it in the basket or on "
         "the counter, and fold it. Try: 「タオルを洗濯機から出して畳んで」"
@@ -228,10 +312,13 @@ counter with room to lay laundry out flat.
 
 Available actions:
   open_washer        open the washing machine door
+  close_washer       push the washing machine door shut again
   take_out <towel>   take a towel out of the drum and hold it
   to_basket          put whatever is being held into the laundry basket
   to_counter <towel> put a towel down on the washstand counter
   fold <towel>       fold a towel that is lying on the counter
+  bring_basket <where>  pick the laundry basket up and carry it somewhere
+                     (washer, counter -- defaults to the washer)
   describe           say what is currently in view
   where              report where in the room the robot is
   home               go back to where the robot started
@@ -243,8 +330,27 @@ Rules:
 - The washing machine has to be opened before anything can be taken out of it.
 - A towel has to be ON THE COUNTER before it can be folded -- folding needs a flat surface.
   So "take the towel out and fold it" is: open_washer -> take_out -> to_counter -> fold.
+- But ONLY fetch a towel when the user actually asks for it to be fetched. If they just say
+  "fold the towel" and say nothing about the washing machine, the towel is already out and
+  the whole plan is: fold. Do not add open_washer or take_out to a bare folding request --
+  the robot would walk to the washer and rummage in an empty drum while the towel sits on
+  the counter in front of it. Saying WHERE the towel is ("the towel on the counter",
+  「カウンターの上のタオル」) is the same bare request: it is already on the counter, so the
+  plan is still just: fold. Only the washing machine being named means fetching.
+- The robot has ONE pair of hands and can hold one towel at a time. Put a towel down before
+  picking anything else up.
+- close_washer needs BOTH HANDS, so it cannot be done while carrying laundry. If the user asks
+  to shut the door after taking the washing out, put the laundry down first and close the door
+  after: take_out -> to_basket -> close_washer, or take_out -> to_counter -> close_washer.
+- The counter IS the table laundry is folded on. "carry it to the folding table" is to_counter.
+- The basket CAN be carried now. "bring the basket to the washer" is bring_basket with
+  argument "washer"; it is a real errand, not a refusal.
+- bring_basket needs BOTH HANDS, like close_washer, so it cannot be done while holding a
+  towel. Fetch the basket BEFORE taking the laundry out, which is also the sensible order.
 - Only use the action names listed above.
 - Break a multi-part instruction into one step per action, in the order the user said them.
+  Japanese chains actions with the て-form and 「、」 and no conjunction -- 「開けて、出して、
+  畳んで」 is three actions, not one.
 
 The user said: "{message}"
 
@@ -259,6 +365,24 @@ Reply with ONLY a JSON array of steps, no other text. Examples:
 "take the blue towel out of the washer and fold it"
 [{{"action": "open_washer"}}, {{"action": "take_out", "argument": "blue"}}, \
 {{"action": "to_counter", "argument": "blue"}}, {{"action": "fold", "argument": "blue"}}]
+
+"タオルを畳んで"
+  (nothing was said about the washing machine, so the towel is already out: just fold it)
+[{{"action": "fold"}}]
+
+"カウンターの上のタオルを畳んでください"
+  (the towel is on the counter already; naming the counter is not a request to fetch it)
+[{{"action": "fold"}}]
+
+"洗濯カゴを洗濯機の前に持ってきて、洗濯機のドアを開けて、洗濯物をカゴに入れて、ドアを閉めて"
+  (fetch the basket FIRST -- carrying it needs both hands, as does shutting the door)
+[{{"action": "bring_basket", "argument": "washer"}}, {{"action": "open_washer"}}, \
+{{"action": "take_out"}}, {{"action": "to_basket"}}, {{"action": "close_washer"}}]
+
+"洗濯機を開けて、洗濯物を取り出して、洗濯機のドアを閉めて、畳むテーブルまで運んで"
+  (the door is shut AFTER the laundry is put down, because closing needs both hands)
+[{{"action": "open_washer"}}, {{"action": "take_out"}}, {{"action": "to_counter"}}, \
+{{"action": "close_washer"}}]
 
 If the request is just conversation, reply with:
 [{{"action": "report", "argument": "<your reply>"}}]""",

@@ -12,6 +12,7 @@ The bottleneck is the vision model, not the renderer.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,7 +21,8 @@ import numpy as np
 
 from .gait import Gait, KinematicGait
 
-ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
+# Scenes ship inside the package, so `pip install pyunto-robotics` gives a working robot.
+ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
 # Depth beyond this is treated as "no return". mac OpenGL lacks ARB_clip_control, so far-field
 # depth precision is poor; the navigation logic only ever needs the near field anyway.
@@ -68,6 +70,11 @@ class Robot:
         self.data = mujoco.MjData(self.model)
 
         self.gait: Gait = gait if gait is not None else KinematicGait()
+        #: Called after every control step. The viewer sets this to redraw the window, so a long
+        #: walk animates instead of jumping to its end. An explicit hook rather than the monkey
+        #: patch this used to be: patching `robot.step` from outside is invisible at the call
+        #: site and quietly breaks anyone who wraps the robot themselves.
+        self.on_step: Callable[[], None] | None = None
         self.control_dt = 1.0 / control_hz
         self._steps_per_control = max(1, round(self.control_dt / self.model.opt.timestep))
 
@@ -155,6 +162,8 @@ class Robot:
         self.gait.apply(self.model, self.data, vx, vy, wz, self.control_dt)
         for _ in range(self._steps_per_control):
             mujoco.mj_step(self.model, self.data)
+        if self.on_step is not None:
+            self.on_step()
 
     def stand(self, seconds: float = 0.5) -> None:
         """Hold still, letting the physics settle."""
@@ -588,21 +597,27 @@ class Robot:
         lo, hi = self.model.actuator_ctrlrange[idx]
         self.data.ctrl[idx] = float(lo + (hi - lo) * np.clip(closed, 0.0, 1.0))
 
-    def grasp(self, body: str) -> bool:
-        """Weld the right palm to `body`, freezing the current relative pose.
+    def grasp(self, body: str, side: str = "r") -> bool:
+        """Weld a palm to `body`, freezing the current relative pose.
 
         A friction grasp does not hold in MuJoCo -- the fingers slip off a 3.6 cm handle long
         before the arm can move a 20 kg door leaf -- so a firm grip is modelled as a weld. The
         relative pose has to be written into eq_data at the moment of contact; without it the
         solver enforces whatever offset was compiled in and the door teleports into the hand.
 
+        `side` picks which hand. It defaults to the right, which is what every earlier caller
+        assumed, but it has to be selectable: carrying a basket is two-handed, and welding both
+        palms to it needs the LEFT weld as well as the right. A scene may define a weld per
+        hand per body (`grasp_basket_r`, `grasp_basket_l`); when it defines only one, that one
+        is used whichever side is asked for, which keeps single-weld scenes working unchanged.
+
         Returns False if there is no weld defined for that body.
         """
-        eq = self._weld_for(body)
+        eq = self._weld_for(body, side)
         if eq is None:
             return False
 
-        palm = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "palm_r")
+        palm = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"palm_{side}")
         target = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body)
 
         # eq_data layout for a weld: [anchor(3), relpose(7: pos + quat), torquescale(1)].
@@ -645,17 +660,28 @@ class Robot:
                 self.data.eq_active[eq] = 0
         mujoco.mj_forward(self.model, self.data)
 
-    def _weld_for(self, body: str) -> int | None:
-        """The equality index whose weld targets `body`, if any."""
+    def _weld_for(self, body: str, side: str = "r") -> int | None:
+        """The equality index whose weld joins `body` to that hand's palm, if any.
+
+        Prefers a weld that names the requested palm; falls back to any weld on the body, so a
+        scene defining a single weld per object still works from either hand.
+        """
         target = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body)
         if target < 0:
             return None
+        palm = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"palm_{side}")
+        fallback = None
         for i in range(self.model.neq):
             if self.model.eq_type[i] != mujoco.mjtEq.mjEQ_WELD:
                 continue
-            if target in (self.model.eq_obj1id[i], self.model.eq_obj2id[i]):
+            pair = (self.model.eq_obj1id[i], self.model.eq_obj2id[i])
+            if target not in pair:
+                continue
+            if palm in pair:
                 return i
-        return None
+            if fallback is None:
+                fallback = i
+        return fallback
 
     def hand_position(self, side: str = "r") -> np.ndarray:
         """World position of a gripper tip."""

@@ -969,10 +969,27 @@ class MaplessNavigator:
                     if tracked_at is not None and blind_steps < BLIND_PATIENCE:
                         blind_steps += 1
                         want, range_to = self._relative_to(tracked_at)
-                        if space.clearance_ahead(half_angle=0.35) >= HEAD_YIELD_M:
-                            self.robot.look_toward(want)
-                        else:
+                        # LOOK AT IT. Turning the head costs nothing and is how the target is
+                        # re-acquired -- it is the body that must not be pointed at obstacles.
+                        #
+                        # The head used to yield whenever clearance ahead fell below 0.8 m,
+                        # which sounds prudent and is exactly backwards in a small room:
+                        # approaching a washing machine the clearance IS the machine, measured
+                        # at 0.18 m, so the head locked forward for the whole approach and the
+                        # robot walked the last metre and a half blind. The log filled with
+                        # hundreds of "lost sight of washer" lines while the washer sat a
+                        # head-turn away.
+                        #
+                        # The head is now only forced forward when the target is behind the
+                        # robot -- past the neck's own limit, where tracking would crane it
+                        # round and see nothing anyway -- or while the body is turning hard
+                        # enough that a moving head would smear every frame.
+                        behind = abs(want) > self.robot.NECK_LIMIT_RAD
+                        spinning = abs(float(self.robot.data.qvel[5])) > TURNING_HARD_RAD
+                        if behind or spinning:
                             self.robot.face_forward()
+                        else:
+                            self.robot.look_toward(want)
                         if blind_steps == 1:
                             log.info(
                                 "lost sight of %s; heading for where it was, %.1f m away",

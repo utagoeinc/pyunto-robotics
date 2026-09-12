@@ -26,19 +26,39 @@ which edge they sit on.
 
 Known limitation, stated plainly because it is the one thing here that does not work:
 
-    Folding a towel that has just come out of the drum does not reliably succeed.
+    Folding a towel that has just come out of the drum does not produce a properly folded towel.
 
-Every individual step does. `open_washer`, `take_out` and `put_on_counter` all pass, and `fold`
-is deterministic and repeatable on a towel that is lying flat -- 0.50 m across to 0.28 m, twice
-out of two from the `counter` keyframe. But a towel carried out of the washer lands bunched, and
-folding a bunched sheet drags the whole gathered mass off the counter instead of folding it.
-`_spread` was written to flatten it first and does not do enough: the pull moves the bundle
-rather than opening it out.
+Every other step does. `open_washer`, `take_out`, `close_washer`, `put_in_basket` and
+`put_on_counter` all pass in sequence, and `fold` is deterministic and repeatable on a towel
+that is lying flat -- 0.50 m across to 0.28 m, from the `counter` keyframe.
 
-What that costs, concretely: the chain "take the towel out and fold it" gets three steps in and
-then reports honestly that it pulled the towel off the surface. The fix is a proper two-handed
-spread -- pin one corner and drag the opposite one -- which needs the arms to work together in
-a way nothing else here requires.
+What remains is the cloth's shape rather than the robot's aim. The towel is carried by a single
+vertex, because a grasp is a weld to one point, so in the air it hangs as a curtain (measured
+dz=0.363 against dx=0.253) and lands gathered however carefully it is set down. `put_on_counter`
+now lays it out -- touching the far edge down and drawing the hand back, which trails the cloth
+along the surface instead of dropping it in a heap -- and that roughly doubles the span it
+lands at. It is still short of flat, and `_spread` cannot finish the job one-handed: pulling
+one corner of a gathered sheet moves the bundle as much as it opens it.
+
+A proper fold is TWO-HANDED and the two corners must move TOGETHER: take the two ends of the
+near edge, carry them across in parallel, and lay them on the two ends of the far edge, so the
+sheet hinges along the middle. That is what `fold` aims at, and it is why it walks between the
+two corners rather than dragging one of them: measured a one-corner carry taking the near-left
+corner from x=0.85 to x=1.22, right across the towel, while y barely moved -- the span fell
+0.50 -> 0.21 m, which passes a naive "smaller than before" check and is a sheet pulled into a
+diagonal, not a fold.
+
+Doing both corners at the same instant was tried and does not work on this robot: the corners
+are 0.40 m apart, the shoulders only 0.30 m, and the best standing spot found by a sweep that
+scores candidates with BOTH arms out at once still leaves the worse hand 0.19 m away against a
+0.075 m grasp tolerance. So the corners are carried one at a time from a spot chosen for each,
+with the landing positions snapshotted BEFORE anything moves -- read them live and the second
+corner aims at wherever the first one has already dragged the far edge.
+
+So the honest summary is that the fold at the end of the errand is a carry-across rather than a
+crease. `fold` measures the span before and after and says which it achieved; it will not claim
+a fold it did not perform. The real fix is a two-handed spread -- pin one corner and drag the
+opposite one -- which needs the arms to work together in a way nothing else here requires.
 """
 
 from __future__ import annotations
@@ -52,14 +72,17 @@ import numpy as np
 from ..perception.grounding import Grounder
 from ..sim.cloth import ClothGrasp, ClothSheet
 from ..sim.reach import WORKING_REACH_M
+from ..nav.explore import MaplessNavigator
 from ..sim.robot import Robot
 from .skills import SkillResult
 
 log = logging.getLogger(__name__)
 
-# Where to stand relative to something being manipulated. Slightly inside the working reach, so
-# a little drift while turning does not push the target out of the envelope.
-STAND_OFF_M = 0.22
+# Where to stand relative to something being manipulated. Comfortably inside the working reach
+# (0.45 m on AN-01), so a little drift while turning does not push the target out of the
+# envelope -- but not so close that the body ends up pressed against the fixture, which is its
+# own failure mode: a robot leaning on a counter cannot walk away from it.
+STAND_OFF_M = 0.34
 
 # How close the hand has to get before a grasp is attempted. The gripper spans 6 cm, so a miss
 # larger than this would weld the palm to a vertex it is not actually touching -- the towel
@@ -86,15 +109,25 @@ class LaundrySkills:
 
     robot: Robot
     grounder: Grounder
+    # Vision-driven navigation for crossing the room. Everything that walks any distance goes
+    # through this rather than through _walk_to: it looks with the head camera, steers by what
+    # it sees, and searches again when the target goes out of frame. _walk_to remains for the
+    # last few decimetres, where the target is a computed point rather than a thing to see.
+    nav: MaplessNavigator | None = None
     cloth: ClothGrasp = field(init=False)
     _home: np.ndarray = field(init=False)
     _home_heading: float = field(init=False)
+    _holding_basket: bool = field(default=False, init=False)
+    # Which hand(s) hold the basket. One on this robot; see basket_grip in home.xml.
+    _basket_hands: tuple = field(default=(), init=False)
     # Which sheet the current errand is about. Set by whichever skill first names a towel, so
     # "take it out and fold it" does not need the towel named twice.
     _subject: str | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         self.cloth = ClothGrasp(self.robot.model, self.robot.data)
+        if self.nav is None:
+            self.nav = MaplessNavigator(self.robot, self.grounder)
         self._home = self.robot.position[:2].copy()
         self._home_heading = self.robot.yaw
 
@@ -130,6 +163,175 @@ class LaundrySkills:
             self._subject = best
             return self.cloth.sheets[best]
         return None
+
+    # -- getting there ------------------------------------------------------------
+    #
+    # Two ways to move, and the difference matters. `_travel_to` CROSSES THE ROOM: it steers by
+    # what the head camera sees, so it copes with the target having moved, with the robot
+    # having drifted, and with something being in the way. `_walk_to` below is dead reckoning
+    # toward a computed point, which is right only for the last few decimetres where the
+    # target is a coordinate rather than a thing that can be looked at.
+
+    # Where the named places are, for a robot that has lost track of one. These are fallbacks:
+    # the camera is asked first, and this is what "walk toward roughly where it should be"
+    # means when nothing is visible.
+    _PLACES = {
+        "washer": "drum_ring_b",
+        "counter": "counter_g",
+        "basket": None,          # a free body now; found via basket_site
+    }
+
+    def _place_position(self, name: str) -> np.ndarray | None:
+        """Where a named place is, by site or geom lookup."""
+        name = name.strip().lower()
+        if name in ("basket", "hamper", "kago"):
+            return self._site_position("basket_site")
+        geom = self._PLACES.get(name)
+        if geom:
+            return self._geom_position(geom)
+        # Unknown name: let the grounder try, since it knows more words than this table.
+        return None
+
+    def _beside(self, target: np.ndarray, clearance: float) -> np.ndarray:
+        """A spot `clearance` metres to the SIDE of `target`, along the room's long axis.
+
+        Used for putting things down near an appliance without putting them in the way of it.
+        The side is chosen as whichever leaves more room, so this works at the washer (against
+        the north wall) and at the counter without a table of special cases.
+        """
+        target = np.asarray(target, dtype=float)[:2]
+        # The appliances stand against the north wall, so "beside" means offset in x. Pick the
+        # side with more floor: the washer sits at x=-1.45 in a room spanning -2.5..2.5, so
+        # there is far more space to its +x side.
+        room_centre = 0.0
+        direction = 1.0 if target[0] < room_centre else -1.0
+        # Stand off in y as well, or the drop point is inside the appliance's own footprint.
+        return np.array([target[0] + direction * clearance, target[1] - 0.42])
+
+    def _approach_point(self, target: np.ndarray, standoff: float) -> np.ndarray:
+        """A spot `standoff` metres short of `target`, on the line from where we stand."""
+        here = self.robot.position[:2]
+        offset = np.asarray(target)[:2] - here
+        distance = float(np.linalg.norm(offset))
+        if distance < 1e-6:
+            return here.copy()
+        return np.asarray(target)[:2] - offset / distance * standoff
+
+    def _travel_to(self, point: np.ndarray, target: str, tolerance: float = 0.45) -> float:
+        """Cross the room to `point`, using the camera to find `target` on the way.
+
+        Returns the final distance to `point`.
+
+        The camera leads and dead reckoning follows. `MaplessNavigator.goto` walks toward what
+        it can SEE, which is what makes this robust to the things that actually go wrong -- the
+        basket is not where it was last time, the robot drifted while turning, a door is in the
+        way -- and then the last stretch is closed by walking to the computed point, because a
+        centroid in an image is not accurate to the centimetre.
+
+        When the target cannot be found, escalate rather than give up, which is what a person
+        does in an unfamiliar room:
+
+            1. survey        turn on the spot and look again
+            2. wander        take a few steps to change the viewpoint, then survey again
+            3. dead reckon   walk to where the thing is supposed to be
+
+        Only after all three does it return short, and the caller decides what that means.
+        """
+        goal = np.asarray(point, dtype=float)[:2]
+
+        # DO NOT let the navigator drive the last stretch to something light.
+        #
+        # `goto` walks up to what it sees and stops against it, which is correct for a door or
+        # a counter and destructive for a laundry basket: measured it driving the robot into
+        # the basket and knocking it from level to a 0.85 quaternion before any hand was
+        # raised. Everything downstream was then trying to pick up a box that had already been
+        # shoved over.
+        #
+        # So for movable things the camera is used to FIND them and the approach is finished by
+        # walking to the computed standoff, which is a point in free floor rather than the
+        # object itself.
+        movable = target in ("basket", "hamper")
+
+        # FACE THE DESTINATION BEFORE LOOKING FOR IT.
+        #
+        # After fetching the basket the robot stands where the basket was, which can be
+        # anywhere: measured it at (-0.36, 0.03) with the washing machine 173 degrees behind
+        # it -- almost exactly at its back. The neck reaches +-100 degrees, so no amount of
+        # head-turning can see something there, and the navigator then spends the whole
+        # approach reporting "lost sight of washer" while walking on dead reckoning.
+        #
+        # Turning the body first is cheap and it is what a person does before setting off.
+        # After it, the head sweep in `survey` has a real chance of finding the target.
+        offset = goal - self.robot.position[:2]
+        if float(np.linalg.norm(offset)) > 0.15:
+            self._turn_to(math.atan2(offset[1], offset[0]))
+
+        if self.nav is not None and target:
+            if movable:
+                if not self.nav.survey(target):
+                    log.info("could not see the %s; looking around", target)
+                    self._look_around_for(target)
+                result = None
+            else:
+                result = self.nav.goto(target, max_steps=1600, search_steps=220)
+            if result is not None and not getattr(result, "ok", False):
+                log.info("could not see the %s; looking around", target)
+                if not self._look_around_for(target):
+                    log.info("still cannot see the %s; walking to where it should be", target)
+
+        # Close the remainder by dead reckoning. Even a successful `goto` stops at a distance
+        # judged from an image, which is not the centimetre-accurate spot a grasp needs.
+        gap = float(np.linalg.norm(goal - self.robot.position[:2]))
+        if gap > tolerance:
+            gap = self._walk_to(goal, max_steps=1200, stop_at=min(0.12, tolerance))
+        return gap
+
+    def _look_around_for(self, target: str) -> bool:
+        """Look for `target`, escalating only as far as necessary. True if found.
+
+        The order is the point, and it is the order a person uses:
+
+            1. TURN THE HEAD.   `survey` sweeps the neck across +-80 degrees, which is most of
+                                what is in front of the robot, and costs nothing but a few
+                                camera frames. Almost everything is found here.
+            2. TURN THE BODY.   Only if the head sweep found nothing. Three 120-degree turns
+                                cover the rest of the room from where the robot already
+                                stands, each followed by another head sweep.
+            3. WALK.            Only if turning found nothing, because the target may be behind
+                                something -- the washer hides the basket from half this room --
+                                and no amount of turning on the spot sees round an obstacle.
+
+        Doing this in the wrong order is what the errand used to look like: the robot span its
+        whole body through a full circle to find a washing machine that was already within a
+        head-turn of straight ahead. Turning the body is slow, it drags whatever is being
+        carried through the air, and it loses the standing position that the next step wants.
+        """
+        if self.nav is None:
+            return False
+
+        # 1. Head only.
+        if self.nav.survey(target):
+            log.info("found the %s by looking around", target)
+            return True
+
+        # 2. Body turns, with a head sweep at each.
+        for _ in range(2):
+            log.info("cannot see the %s; turning to look further round", target)
+            self._turn_to(self.robot.yaw + 2.09)  # 120 degrees
+            if self.nav.survey(target):
+                log.info("found the %s after turning", target)
+                return True
+
+        # 3. Walk, to see round whatever is in the way.
+        for attempt in range(2):
+            log.info("still cannot see the %s; moving to get a different view", target)
+            for _ in range(45):
+                self.robot.step(vx=0.24, wz=0.35 if attempt == 0 else -0.35)
+            self.robot.stand(0.4)
+            if self.nav.survey(target):
+                log.info("found the %s after moving", target)
+                return True
+        return False
 
     def _turn_to(self, heading: float, max_steps: int = 200) -> None:
         """Turn the body to a world heading."""
@@ -187,6 +389,13 @@ class LaundrySkills:
         # missed by 0.22 m against a 0.25 m reach, on a corner that was actually within range.
         # Walking forward until the body meets the appliance recovers that: she can get to
         # y=1.132 against a drum mouth at y=1.273, which puts the near corner in reach.
+        # Stop at 0.9 of the working reach, NOT closer.
+        #
+        # Pressing in to two thirds of it was tried on AN-01 and is worse: the fold corner
+        # went from 0.118 m to 0.240 m. A longer arm wants to work at arm's length, and
+        # walking the body further in leaves the shoulder folded up with nowhere to put the
+        # elbow -- the same reason a person steps BACK from a counter to work on it rather
+        # than pressing against it.
         gap = float(np.linalg.norm(target[:2] - self.robot.position[:2]))
         stalled = 0
         for _ in range(160):
@@ -321,8 +530,13 @@ class LaundrySkills:
             mujoco.mj_forward(self.robot.model, self.robot.data)
 
         best = (float("inf"), graspable[0], "r", origin)
+        # The dy range runs from right up against the target out to the arm's working reach.
+        # It was 0.18..0.60 when the arm reached 0.25 m; AN-01 reaches 0.45 m, so standing that
+        # close is not merely unnecessary, it is counterproductive -- the body ends up against
+        # the fixture and the shoulder is left with nowhere to put the elbow. Sweeping out to
+        # the real envelope is what lets the search find the spot it needs.
         for dx in np.linspace(-span, span, 9):
-            for dy in np.linspace(0.18, span + 0.15, 5):
+            for dy in np.linspace(0.15, WORKING_REACH_M + 0.10, 6):
                 # Candidates are laid out around the cloth, not around the robot, so the sweep
                 # stays useful however badly the approach ended up placed.
                 # Candidates run from right up against the target out to arm's length. The
@@ -416,13 +630,25 @@ class LaundrySkills:
                 continue
 
             # Drag outward along the line from the centre, staying just above the surface.
+            #
+            # The distance is the SHORTFALL, not a fixed step. A flat sheet spans 0.50 m, and
+            # a fixed 0.16 m pull is sized for a towel that is nearly there already: on one
+            # gathered into a 0.21 m bundle it moves the corner a fraction of the way out and
+            # the span barely changes, which is why repeated pulls used to plateau around
+            # 0.14 m. Pulling out by roughly what is missing gets the corner clear of the pile
+            # in one go, which is what actually opens the sheet.
+            #
+            # Capped at 0.22 m: the arm reaches 0.25 m from the shoulder, and asking for more
+            # than that just drags the whole towel along with the hand.
             here = self.cloth.vertex_position(sheet, vertex)
             direction = here[:2] - centre[:2]
             norm = float(np.linalg.norm(direction))
             direction = direction / norm if norm > 1e-6 else np.array([1.0, 0.0])
+            shortfall = max(0.0, 0.50 - self.cloth.sheet_extent(sheet))
+            pull = float(np.clip(shortfall * 0.5, 0.16, 0.22))
             target = np.array([
-                here[0] + direction[0] * 0.16,
-                here[1] + direction[1] * 0.16,
+                here[0] + direction[0] * pull,
+                here[1] + direction[1] * pull,
                 here[2] + 0.03,
             ])
             self.robot.reach_to(target, side, passes=3)
@@ -635,31 +861,206 @@ class LaundrySkills:
         if before < 10.0:
             return SkillResult(True, "The washing machine is already closed.")
 
-        # Aim at the outer edge of the open leaf, which is the part that has to travel.
+        # Both hands have to be free.
+        #
+        # Closing means taking hold of the handle and walking it round an arc, and an arm that
+        # is holding a towel cannot do it: measured 105 degrees closing to 12 empty-handed, and
+        # sticking at 74-94 with a towel in hand. This is a real constraint of having one pair
+        # of hands, not a control problem to tune away, so say so and let the caller reorder.
+        if self._loaded_hand() is not None:
+            return SkillResult(
+                False,
+                "I need both hands to close the washing machine door -- let me put the "
+                "laundry down first.",
+                {"holding": True, "before": before},
+                # Not fatal: the rest of the errand still makes sense, and the door being left
+                # open does not stop the laundry being folded.
+                fatal=False,
+            )
+
+        # Closing is opening in reverse, and it needs the same weld for the same reason.
+        #
+        # A first version tried to sweep the door shut with an outstretched arm and got
+        # nowhere: the handle of a door standing 105 degrees open is 0.337 m from where the
+        # robot can stand, against a 0.25 m reach, so the hand never touched it and the door
+        # finished at 136 degrees -- further open than it started. Take hold of the handle and
+        # walk it round, exactly as open_washer does.
         handle = self._site_position("drum_handle_site")
         if handle is None:
             return SkillResult(False, "I cannot find the washing machine door.")
 
-        self._stand_near(handle, offset=0.30)
+        # Approach ALONG THE HANDLE'S OWN RADIUS, from outside the arc -- never across it.
+        #
+        # Standing in front of the drum mouth is where a person stands, and it is exactly wrong
+        # for this robot: the open leaf sweeps that space, so the body drives the door further
+        # open on the way in and the handle runs away from the hand. Measured, coming back from
+        # the basket with the door at 73 degrees: the approach walk alone took it to 94, and
+        # each "shuffle in and retry" added more -- 106, 120, 132 -- so the skill reported the
+        # door still open after having pushed it wide itself.
+        #
+        # The handle can only move along the TANGENT to its hinge circle. So walking in along
+        # the RADIUS -- the line from the hinge out through the handle, extended -- applies no
+        # torque to the door: the body closes on the handle without disturbing it. Same spot a
+        # person would pick after the first try, for the same reason.
+        hinge_body = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, "drum_door")
+        hinge = (
+            self.robot.data.xpos[hinge_body][:2].copy()
+            if hinge_body >= 0
+            else np.array([-1.71, 1.27])
+        )
+        radial = handle[:2] - hinge
+        norm = float(np.linalg.norm(radial))
+        radial = radial / norm if norm > 1e-6 else np.array([0.0, -1.0])
+
+        # Two legs. The first swings wide to get ONTO the radial line from wherever the errand
+        # left the robot -- crossing the arc at 0.75 m costs nothing, because the leaf is only
+        # 0.48 m long. The second comes straight down the radius to arm's length.
+        #
+        # Generous step budget: this is often called after a trip to the basket or the counter
+        # at the far end of the room, so it is a walk across the room and not a shuffle. At the
+        # default budget the robot arrived 0.87 m short and reported that it could not reach.
+        self._walk_to(handle[:2] + radial * 0.75, max_steps=1400, stop_at=0.20)
+        self._walk_to(handle[:2] + radial * 0.26, max_steps=600, stop_at=0.12)
+        self._turn_to(math.atan2(handle[1] - self.robot.position[1],
+                                 handle[0] - self.robot.position[0]))
+
         side = self._hand_for(handle)
         self.robot.grip(side, 0.0)
-        self.robot.reach_to(handle, side, passes=3)
+        miss = self.robot.reach_to(self._site_position("drum_handle_site"), side, passes=4)
+        if miss > 0.14:
+            # Try the other hand before giving up: which one can reach depends on which way
+            # the leaf swung, and neither arm crosses the chest.
+            other = "l" if side == "r" else "r"
+            self.robot.arm_home(side)
+            self.robot.stand(0.2)
+            alternative = self.robot.reach_to(
+                self._site_position("drum_handle_site"), other, passes=4
+            )
+            if alternative < miss:
+                miss, side = alternative, other
 
-        # Sweep the arm across the door's arc. Walking into it would drive the robot into the
-        # machine; the door has to be pushed sideways, which is what the arm is for.
-        best = before
-        stalled = 0
-        for _ in range(300):
-            self.robot.step(vx=0.10, wz=-0.35 if side == "r" else 0.35)
-            angle = abs(math.degrees(float(self.robot.data.qpos[address])))
-            if angle < best - 0.5:
-                best, stalled = angle, 0
-            else:
-                stalled += 1
-                if stalled > 70 or angle < 8.0:
+        # Still short? Re-seat on the radius and try again -- do NOT just walk at the handle.
+        #
+        # Stepping straight toward the handle is what the earlier version did, and it is the
+        # bug: the handle is not a fixed point, so driving at it pushes the leaf round and the
+        # gap never closes. Re-reading the radius each pass keeps the approach torque-free even
+        # though the door has moved, so a genuine few-centimetre shortfall converges instead of
+        # running away.
+        for _ in range(3):
+            if miss <= 0.14:
+                break
+            target = self._site_position("drum_handle_site")
+            radial = target[:2] - hinge
+            norm = float(np.linalg.norm(radial))
+            radial = radial / norm if norm > 1e-6 else np.array([0.0, -1.0])
+            self._walk_to(target[:2] + radial * 0.24, max_steps=400, stop_at=0.10)
+            self._turn_to(math.atan2(target[1] - self.robot.position[1],
+                                     target[0] - self.robot.position[0]))
+            # Try both hands again: re-seating moves the body, and which arm can get there
+            # depends on where the leaf ended up, not on which one was chosen first.
+            for candidate in (side, "l" if side == "r" else "r"):
+                self.robot.arm_home("r")
+                self.robot.arm_home("l")
+                self.robot.stand(0.2)
+                attempt = self.robot.reach_to(
+                    self._site_position("drum_handle_site"), candidate, passes=3
+                )
+                if attempt < miss:
+                    miss, side = attempt, candidate
+                if miss <= 0.14:
                     break
 
+        if miss > 0.14:
+            return SkillResult(
+                False,
+                f"I could not reach the washing machine door to close it ({miss:.2f} m short).",
+                {"miss": miss, "before": before},
+            )
+
+        self.robot.grip(side, 1.0)
+        self.robot.stand(0.3)
+        welded = self.robot.grasp("drum_door")
+
+        # Walk the handle around the arc it actually travels on.
+        #
+        # The direction is computed, not searched. The handle rotates about the hinge, so the
+        # only way it can move is along the TANGENT to that circle, and which of the two
+        # tangent directions closes the door is decided by the sign of the joint angle. Two
+        # earlier versions guessed a direction and corrected on feedback; both sometimes drove
+        # the door the wrong way and left it further open than they found it -- 105 degrees
+        # becoming 133, and 136. `hinge` is the door body's own origin, read above.
+
+        best = before
+        stalled = 0
+        for _ in range(900):
+            angle = float(self.robot.data.qpos[address])
+            if abs(math.degrees(angle)) < 8.0:
+                break
+
+            grip = self.robot.hand_position(side)[:2]
+            radius = grip - hinge
+            # Tangent to the hinge circle. Rotating the radius by +90 degrees gives the
+            # direction of increasing joint angle; closing means going the other way, so the
+            # sign of the current angle picks which.
+            tangent = np.array([-radius[1], radius[0]])
+            norm = float(np.linalg.norm(tangent))
+            if norm < 1e-6:
+                break
+            tangent = tangent / norm * (-1.0 if angle > 0 else 1.0)
+
+            heading = np.array([math.cos(self.robot.yaw), math.sin(self.robot.yaw)])
+            lateral = np.array([-heading[1], heading[0]])
+            self.robot.step(
+                vx=float(np.dot(tangent, heading)) * 0.24,
+                vy=float(np.dot(tangent, lateral)) * 0.24,
+            )
+
+            magnitude = abs(math.degrees(angle))
+            if magnitude < best - 0.5:
+                best, stalled = magnitude, 0
+            else:
+                stalled += 1
+                if stalled > 90:
+                    break
+
+        self.robot.release()
+        self.robot.grip(side, 0.0)
+
+        # NOTE: do not "finish the job" by letting go and shoving the leaf.
+        #
+        # That was tried and it is much worse than stopping short. Once the door is nearly
+        # shut the robot is standing inside the arc, so pressing on the panel drives it back
+        # OUT: measured a door left at 22 degrees going to 100, 110, and finally 137 over
+        # successive pushes -- wider open than before the skill ran. Holding the handle and
+        # walking the arc is the only motion here that reliably closes anything, so when that
+        # stalls the honest move is to report the angle, which the caller can act on.
+
+        # BACK OFF THE DOOR BEFORE SETTLING.
+        #
+        # Walking the handle round ends with the robot standing where the leaf now wants to
+        # be, and letting go does not move the body out of the way. Standing still there
+        # re-opens the door it just shut: measured 7.98 degrees at the moment of release
+        # becoming 22.39 during the settle that followed -- the whole difference between a
+        # door reported shut and one reported ajar, with no motion commanded at all.
+        #
+        # Retreating along the radial line clears the arc without touching the leaf, for the
+        # same reason the approach used it: motion along the radius applies no torque.
+        retreat = self._site_position("drum_handle_site")
+        if retreat is not None:
+            outward = retreat[:2] - hinge
+            norm = float(np.linalg.norm(outward))
+            outward = outward / norm if norm > 1e-6 else np.array([0.0, -1.0])
+            heading = np.array([math.cos(self.robot.yaw), math.sin(self.robot.yaw)])
+            lateral = np.array([-heading[1], heading[0]])
+            for _ in range(60):
+                self.robot.step(
+                    vx=float(np.dot(outward, heading)) * 0.26,
+                    vy=float(np.dot(outward, lateral)) * 0.26,
+                )
+
         self.robot.arm_home(side)
+        if not welded:
+            log.info("no handle weld in this scene; the door was only pushed")
         self.robot.stand(0.4)
         after = abs(math.degrees(float(self.robot.data.qpos[address])))
         if after < 20.0:
@@ -674,26 +1075,357 @@ class LaundrySkills:
             {"before": before, "after": after},
         )
 
-    def bring_basket(self) -> SkillResult:
-        """Report that the basket cannot be moved.
+    def bring_basket(self, where: str | None = None) -> SkillResult:
+        """Pick the laundry basket up and carry it to where it is wanted.
 
-        The laundry basket is fixed scenery in this room: it stands on a plinth so its contents
-        are inside the arm's reach band, and it has no free joint, so there is nothing for the
-        robot to pick up and carry.
+        The basket used to be scenery bolted to its plinth and this method could only apologise
+        for that. It is a free body now (see assets/home.xml), so "bring the basket over" is an
+        errand the robot can actually run: walk to it, take the rim in both hands, carry it,
+        and set it down.
 
-        This exists so that asking for it gets a straight answer rather than an unhelpful
-        "I do not know how to that". Reporting a limit clearly is a better outcome than a
-        silent no-op, and the robot can still do the useful half: go and stand by it.
+        `where` names the destination -- "washer" by default, because that is what the basket
+        is fetched FOR. Anything the grounder knows works: washer, counter, basket.
         """
-        basket = self._site_position("basket_site")
-        if basket is None:
-            return SkillResult(False, "I cannot find the laundry basket.")
-        return SkillResult(
-            False,
-            "I cannot carry the basket -- it is fixed to the floor in this room. "
-            "I can take the laundry to it instead.",
-            {"basket": basket.tolist()},
+        target = (where or "washer").strip().lower()
+        destination = self._place_position(target)
+        if destination is None:
+            return SkillResult(False, f"I do not know where '{target}' is.")
+
+        picked = self._pick_up_basket()
+        if not picked.ok:
+            return picked
+
+        # Carry it, and set it down BESIDE the destination rather than in front of it.
+        #
+        # This is the whole difficulty of the errand and it is not obvious until you watch it
+        # fail. Put the basket squarely in front of the washer -- which is what "bring it to
+        # the washer" literally asks for -- and it lands exactly where the robot has to STAND
+        # to reach into the drum: the approach wants y=0.94 and a basket at y=0.66 spans
+        # 0.46..0.86 with its 0.52 x 0.40 footprint. The next step then fails 0.24 m short,
+        # having been blocked by the thing it just carried there.
+        #
+        # A person puts the basket to one SIDE of the machine for the same reason, so that is
+        # what this does: offset along the wall the appliance stands against, far enough that
+        # the basket is clear of the working space and near enough to drop washing into.
+        stand = self._site_position("washer_stand_site") if target == "washer" else None
+        drop_at = stand[:2] if stand is not None else self._beside(destination[:2], 0.62)
+
+        # Walk so that THE BASKET ends over the drop point, not the robot.
+        #
+        # The basket is carried in one hand, out to one side and in front: measured it hanging
+        # 0.48 m from where the robot was standing. Aiming the robot at the target therefore
+        # parks the basket half a metre away from it, and the put-down then has nowhere to go.
+        # The offset is whatever the basket currently is relative to the body, so this works
+        # whichever hand is carrying and however the load has swung.
+        carried = self._site_position("basket_site")
+        offset = (carried[:2] - self.robot.position[:2]) if carried is not None else np.zeros(2)
+        self._travel_to(self._approach_point(drop_at - offset, standoff=0.10), target,
+                        tolerance=0.20)
+
+        placed = self._put_basket_down(
+            floor_z=0.90 if stand is not None else 0.29,
+            place=stand[:2] if stand is not None else None,
         )
+        if not placed.ok:
+            return placed
+
+        # "At the washer" means WITHIN REACH OF IT, not on top of it.
+        #
+        # The destination is the machine's own centre, which is inside the cabinet -- a basket
+        # can never be there. What the errand asks for is a basket a person could use while
+        # standing at the machine, so the bar is the arm's working distance plus the basket's
+        # own half-width, and anything inside that is where it was meant to go.
+        basket = self._site_position("basket_site")
+        gap = float(np.linalg.norm(basket[:2] - destination[:2])) if basket is not None else 9.9
+        reachable = WORKING_REACH_M + 0.60
+        if gap > reachable:
+            return SkillResult(
+                False,
+                f"I carried the basket but it ended up {gap:.1f} m from the {target}.",
+                {"gap": gap, "where": target},
+            )
+        return SkillResult(
+            True,
+            f"I brought the laundry basket to the {target}.",
+            {"gap": gap, "where": target},
+        )
+
+    def _pick_up_basket(self) -> SkillResult:
+        """Walk to the laundry basket and take its near rim in one hand.
+
+        ONE hand, not two. AN-01's hands rest 0.379 m apart and neither arm crosses the chest,
+        so holding two rims means holding two points 0.38 m (long sides) or 0.50 m (short ends)
+        apart. An exhaustive sweep of standing positions found the best simultaneous two-hand
+        grip anywhere to be 0.395 m from target, five times the grasp tolerance. That is the
+        same limit that stops this robot folding a towel two-handed; it is a property of the
+        arms. The basket is light (1.6 kg) so that one arm can carry it.
+        """
+        if self.nav is not None and not self.nav.survey("basket"):
+            self._look_around_for("basket")
+
+        grip = self._site_position("basket_grip")
+        if grip is None:
+            return SkillResult(False, "I cannot find the laundry basket.")
+
+        # WHERE TO STAND: 0.40 m from the RIM. The window is narrow and was measured, not
+        # chosen. Below about 0.38 the body walks into the basket and knocks it off its
+        # plinth -- measured it ending tipped at z=0.235. Above about 0.44 the rim is past
+        # what the arm can reach (0.35 m from a shoulder ~0.10 m forward of the base) and the
+        # grasp stalls 0.18 m short however many passes it makes. At 0.40 the basket is still
+        # sitting level and untouched at z=0.622 when the hand arrives.
+        # Approach from the side the RIM FACES, not from wherever the robot happens to be.
+        #
+        # `_approach_point` draws its line from the robot's current position, so the standoff
+        # lands on whichever side it arrived from. Coming from the north that put the body
+        # between the basket's long wall and the hand, and the grasp missed by 0.06 m -- while
+        # the identical code from the other keyframe succeeded. The grip site is on one
+        # specific wall, so the robot has to stand off THAT wall.
+        centre = self._site_position("basket_site")
+        outward = grip[:2] - centre[:2]
+        norm = float(np.linalg.norm(outward))
+        outward = outward / norm if norm > 1e-6 else np.array([0.0, -1.0])
+        self._walk_to(grip[:2] + outward * 0.40, max_steps=1200, stop_at=0.10)
+        self._turn_to(math.atan2(grip[1] - self.robot.position[1],
+                                 grip[0] - self.robot.position[0]))
+
+        side = self._hand_for(grip)
+        self.robot.grip(side, 0.0)
+
+        # Come down ONTO the rim, and get the hand ABOVE RIM HEIGHT BEFORE moving it in.
+        #
+        # Two separate mistakes were made here, in order. Reaching straight at the rim drives
+        # the palm into the near wall, because the grip target sat at exactly the wall's top
+        # edge -- that is why the site is now 0.05 m proud of it. But simply aiming at the
+        # raised target is not enough either: the arm hangs at z=0.58, below the rim, so the
+        # straight-line path to a point above the rim goes THROUGH the basket. Measured that
+        # sweeping it off its plinth onto the floor, 1.03 m away.
+        #
+        # So the hand is raised first, in place, and only then moved over the rim and down.
+        # RAISE AND TRAVERSE IN SMALL STEPS. This is the part that matters.
+        #
+        # A single reach_to for a large move solves for the destination and drives straight
+        # there; the arm swings through whatever lies between, and from a hand hanging at
+        # z=0.58 the path to a point above the rim goes clean through the basket -- measured
+        # it launched 1.0 m across the room. Asking for the same motion in eighths never
+        # touches it at all: every intermediate pose is itself reachable, so the arm goes
+        # round rather than through.
+        hand = self.robot.hand_position(side)
+        top = grip[2] + 0.12
+        for k in range(1, 9):
+            self.robot.reach_to(
+                np.array([hand[0], hand[1], hand[2] + (top - hand[2]) * k / 8.0]),
+                side, passes=1, settle_steps=40,
+            )
+        # Now traverse to over the rim, in steps for the same reason.
+        start = self.robot.hand_position(side).copy()
+        above = grip + np.array([0.0, 0.0, 0.10])
+        for k in range(1, 7):
+            self.robot.reach_to(
+                start + (above - start) * k / 6.0, side, passes=1, settle_steps=40
+            )
+
+        # Reach, keeping the best attempt and stopping the moment the basket starts to move.
+        #
+        # Later passes can be far WORSE than the first -- measured 0.047 m then 0.999 m --
+        # because the hand has brushed the rim, the basket has shifted, and the arm is now
+        # chasing a target that runs away from it. Retrying in that state bats the basket
+        # around the room, so the loop keeps the closest pose it ever reached and bails out
+        # rather than continuing.
+        miss = float("inf")
+        best = float("inf")
+        best_pose = self.robot.data.qpos.copy()
+        anchor = self._site_position("basket_site").copy()
+        for _ in range(4):
+            point = self._site_position("basket_grip")
+            if point is None:
+                break
+            miss = self.robot.reach_to(point, side, passes=2)
+            if miss < best:
+                best, best_pose = miss, self.robot.data.qpos.copy()
+            if miss <= 0.045:
+                break
+            moved = float(
+                np.linalg.norm(self._site_position("basket_site")[:2] - anchor[:2])
+            )
+            if moved > 0.02:
+                log.info("the basket has shifted; not chasing it")
+                break
+
+        if best < miss:
+            self.robot.data.qpos[:] = best_pose
+            self.robot.data.qvel[:] = 0.0
+            mujoco.mj_forward(self.robot.model, self.robot.data)
+            point = self._site_position("basket_grip")
+            if point is not None:
+                miss = float(np.linalg.norm(self.robot.hand_position(side) - point))
+
+        # A RIGID object needs a tighter grasp than cloth does. GRASP_TOLERANCE_M is 0.075 m,
+        # sized for a towel: the gripper spans 6 cm and cloth deforms, so a weld made 7 cm
+        # away looks fine. A basket does not deform -- welding it from 0.073 m froze it
+        # hanging 7 cm off the palm, and since a weld is a hard constraint the contact solver
+        # cannot push apart, the box then passed through whatever it met. 0.030 m is inside
+        # the gripper's own span, so a weld made there is a hand really closed on the rim.
+        # 0.045 m, from the gripper's geometry rather than a guess. The fingers sit 0.041 m
+        # apart and the rim they close on is 0.020 m thick, so a palm centred within about
+        # half the finger separation of the rim has the wall between its fingers. An earlier
+        # 0.030 m was arbitrary and rejected grasps that would have held: the log read
+        # "0.04 m off" for a hand that was in fact close enough.
+        if miss > 0.045:
+            self.robot.grip(side, 0.0)
+            self.robot.arm_home(side)
+            return SkillResult(
+                False,
+                f"I could not get hold of the laundry basket ({miss:.2f} m off).",
+                {"miss": miss},
+            )
+
+        self.robot.grip(side, 1.0)
+        self.robot.stand(0.3)
+        self.robot.grasp("basket", side)
+        self._holding_basket = True
+        self._basket_hands = (side,)
+
+        # Lift clear of the plinth, then CARRY IT LOW AND OUT TO THE SIDE.
+        #
+        # Where the basket rides is a perception problem, not an ergonomic one. Held up in
+        # front it sits 0.66 m from the head camera and fills the frame: measured the washing
+        # machine visible before the pickup and invisible after it, which is what produced 255
+        # consecutive "lost sight of washer" lines in one errand. The robot was not confused --
+        # it was carrying its own blindfold.
+        #
+        # So the basket goes down to hip height and out past the shoulder line, which is how a
+        # person carries a laundry basket precisely because it keeps the way ahead visible.
+        # Lift enough to clear the plinth, in steps so the arm does not swing through it.
+        hand = self.robot.hand_position(side)
+        for k in range(1, 5):
+            self.robot.reach_to(
+                np.array([hand[0], hand[1], hand[2] + 0.10 * k / 4.0]),
+                side, passes=1, settle_steps=45,
+            )
+        self.robot.stand(0.2)
+
+        # NO SIDEWAYS CARRY POSE. It was tried and it costs more than it buys.
+        #
+        # The basket does block the head camera while carried -- measured the washing machine
+        # visible before the pickup and not after -- and swinging the arm out and down does
+        # clear the lens. But it also moves the load away from where the put-down expects it,
+        # and the put-down is the harder problem: with the pose in, the basket ended on the
+        # floor 2.9 m from the washer; with it out, it lands on the stand.
+        #
+        # The blindness is handled where it actually belongs, in `_travel_to`, which turns the
+        # body to FACE the destination before looking for it. That fixes the real complaint --
+        # the robot walking a whole approach reporting "lost sight of washer" -- because the
+        # problem was never the basket in the frame, it was the machine being 173 degrees
+        # behind the robot where no camera could see it.
+        self.robot.stand(0.3)
+        return SkillResult(True, "I picked up the basket.", {"hand": side, "miss": miss})
+
+    def _put_basket_down(self, floor_z: float = 0.29,
+                         place: np.ndarray | None = None) -> SkillResult:
+        """Set the basket down and let go.
+
+        `floor_z` is the height basket_site reads once the basket is resting: 0.29 on the
+        ground, 0.90 on a stand. The robot cannot actually reach the ground (see the note on
+        washer_stand in home.xml), so in practice this is always a stand.
+        """
+        if not self._holding_basket:
+            return SkillResult(False, "I am not holding the basket.")
+        # Lower until THE BASKET is near the floor, watching the basket rather than the hand.
+        #
+        # Aiming the hand at a fixed height does not work: the hand and the basket are 0.25 m
+        # apart, and "hand at 0.74" left the basket hanging at z=0.28 -- a quarter of a metre
+        # up, from which it drops, tips, and spills whatever is inside. The measurement that
+        # matters is the underside of the basket's own floor, so that is what this drives to.
+        # Keep the basket LEVEL while lowering, and judge "down" by its floor, not by a site.
+        #
+        # Two failures made this necessary. Lowering by hand height alone let the basket swing
+        # 0.66 m sideways on the way down; pinning x and y fixed that. Then judging "is it
+        # down" from basket_site's height let a basket that had TIPPED pass the test while
+        # still in the air -- it came to rest on basket_w3, a side wall, because a tipped
+        # basket's centre is lower than an upright one's. So the test below is on the body
+        # origin, which is where the basket's own floor is, and the hands stay level with each
+        # other so it does not tip in the first place.
+        #
+        # Lower straight DOWN, holding x and y fixed at where the hands started.
+        #
+        # Commanding only the height and letting the IK pick x and y looks equivalent and is
+        # not: the arm swings as it descends, and the basket travelled 0.66 m sideways on the
+        # way to the floor -- from x=-1.09 to -0.43 -- landing it well away from the machine it
+        # had just been carried to. Pinning the horizontal target is what makes "put it down"
+        # mean "put it down HERE".
+        # First bring the basket OVER the target, then lower. Lowering from wherever the walk
+        # happened to stop puts it down next to the stand rather than on it: measured the
+        # basket arriving 0.29 m to one side, which is most of a basket's width.
+        # Iterate: each pass closes most of the remaining offset but not all of it, because
+        # the arm is carrying a 1.6 kg box at full extension and settles short of its command.
+        # Measured the offset shrinking 0.45 -> 0.18 -> 0.12 m over three passes, which is
+        # convergence -- it simply needs more of them than the shape of the loop first allowed.
+        if place is not None:
+            for _ in range(8):
+                basket = self._site_position("basket_site")
+                if basket is None:
+                    break
+                offset = np.asarray(place)[:2] - basket[:2]
+                if float(np.linalg.norm(offset)) < 0.10:
+                    break
+                for side in (self._basket_hands or ("r", "l")):
+                    hand = self.robot.hand_position(side)
+                    self.robot.reach_to(
+                        np.array([hand[0] + offset[0], hand[1] + offset[1], hand[2]]),
+                        side, passes=2,
+                    )
+                self.robot.stand(0.25)
+
+        # Only the hand that is actually holding the basket. Driving both when one is empty
+        # swings the free arm into the load.
+        carrying = [s for s in ("r", "l") if self.cloth.holding(s) is None] if False else None
+        anchors = {
+            side: self.robot.hand_position(side).copy()
+            for side in (self._basket_hands or ("r", "l"))
+        }
+        for _ in range(8):
+            basket = self._site_position("basket_site")
+            if basket is None:
+                break
+            # basket_site rides 0.275 above the body origin, which is itself 0.015 above the
+            # ground once the basket rests on the floor -- so the site reads 0.29 when down.
+            # Stop at whatever surface is under it. On the floor the site reads 0.29; on a
+            # stand it reads 0.90. `floor_z` is set by the caller to whichever applies.
+            if basket[2] <= floor_z + 0.05:
+                break
+            drop = min(0.08, basket[2] - floor_z)
+            # One shared height for both hands. Letting each descend from its own current
+            # height lets a lag on one side become a tilt, and a tilted basket lands on a
+            # wall instead of its floor.
+            level = min(self.robot.hand_position(s)[2] for s in anchors) - drop
+            moved = False
+            for side, anchor in anchors.items():
+                before = self.robot.hand_position(side)[2]
+                self.robot.reach_to(
+                    np.array([anchor[0], anchor[1], level]), side, passes=2
+                )
+                moved = moved or (before - self.robot.hand_position(side)[2]) > 0.005
+            self.robot.stand(0.3)
+            # The arm bottoms out before the basket reaches the floor -- it cannot crouch --
+            # so stop when lowering stops working rather than grinding against the limit.
+            if not moved:
+                log.info("arm cannot lower any further; releasing from here")
+                break
+        self.robot.stand(0.4)
+        self.robot.release()
+        for side in (self._basket_hands or ("r", "l")):
+            self.robot.grip(side, 0.0)
+        self._holding_basket = False
+        self.robot.stand(1.0)
+        # Arms away BEFORE stepping back, or the retreat drags the basket along with them:
+        # letting go of a weld is not the same as the hands being clear of the rim.
+        for side in (self._basket_hands or ("r", "l")):
+            self.robot.arm_home(side)
+        self.robot.stand(0.5)
+        for _ in range(45):
+            self.robot.step(vx=-0.28)
+        self.robot.stand(0.3)
+        return SkillResult(True, "I put the basket down.")
 
     def take_out(self, towel: str | None = None, side: str = "r") -> SkillResult:
         """Take a towel out of the drum and hold it.
@@ -715,7 +1447,28 @@ class LaundrySkills:
         # it -- so this takes the nearest one rather than insisting on a corner. Corners are
         # for folding; a corner is the furthest part of the sheet from a robot standing square
         # on, and reaching for one missed by 0.18 m where an edge vertex was 0.16 m away.
-        graspable = sheet.perimeter()
+        # Only the HALF OF THE PERIMETER NEAREST THE ROOM is worth offering.
+        #
+        # A towel lying in the drum spans y=1.31..1.57 with the mouth ring at y=1.29, so its
+        # far edge is a quarter of a metre deeper into the cavity than its near edge -- past
+        # the arm's whole 0.25 m budget. Offering the whole perimeter lets the search pick a
+        # far-edge vertex and score the spot on a reach it can never make: measured it
+        # returning vertex 55 at y=1.574, and the grasp missing by 0.226 m, while vertex 0 at
+        # y=1.313 sat right at the mouth. Nothing downstream can recover from that choice, so
+        # the deep half is filtered out before the search ever sees it.
+        # Ranked by DEPTH INTO THE DRUM, not by distance from the robot. The robot has not
+        # taken up its standing position yet, so "nearest to me" is measured from wherever the
+        # last skill left it and ranks the towel wrongly -- tried that, and it picked worse
+        # vertices still (0.46 m, and the sweep dragged the sheet to a 0.285 m span). How deep
+        # a vertex sits is a fact about the machine, so it is read off the drum instead.
+        perimeter = sheet.perimeter()
+        mouth = self._geom_position("drum_ring_b")
+        mouth_y = float(mouth[1]) if mouth is not None else 1.288
+        depths = sorted(
+            perimeter,
+            key=lambda v: abs(float(self.cloth.vertex_position(sheet, v)[1]) - mouth_y),
+        )
+        graspable = depths[: max(3, len(depths) // 3)]
         vertex, _ = self.cloth.nearest_vertex(sheet, self.robot.position, among=graspable)
         self._stand_near(self.cloth.vertex_position(sheet, vertex))
 
@@ -773,7 +1526,29 @@ class LaundrySkills:
         if basket is None:
             return SkillResult(False, "I cannot find the laundry basket.")
 
-        self._stand_near(basket)
+        # Stand well back from the basket and reach OVER it, rather than pressing up against
+        # it the way _stand_near does for things that have to be grasped.
+        #
+        # The basket is 0.52 x 0.40 on a plinth, and the robot is 0.52 wide. Closing to arm's
+        # length puts its feet inside the basket's own footprint -- measured ending at
+        # (-0.42, -0.07) with the body spanning y -0.33..0.19 against a basket edge at -0.35,
+        # so it was standing on the rim. It then could not walk away: 0.029 m of travel in 300
+        # steps, which stranded every skill that ran after it.
+        #
+        # Dropping a towel in does not need the base close, only the hand high -- but it does
+        # need the hand OVER THE MIDDLE, and 0.62 m back was too far for that. The arm reaches
+        # 0.25 m, so from there the release happened 0.24 m short of the target: the towel came
+        # out at x=-0.47 against a basket centre of x=-0.30, draping over the near rim and
+        # slumping down the outside to z=0.44. It counted as "in the basket" on the footprint
+        # test while actually hanging off it, and the next skill could not pick it up again.
+        #
+        # 0.40 m is the measured sweet spot: the reach lands at 0.059 m and the towel drops at
+        # x=-0.324, genuinely inside. It is still well clear of the 0.52 x 0.40 basket's own
+        # footprint, so the feet stay off the rim and the back-off below still frees the body.
+        approach = basket[:2] + np.array([0.0, -0.40])
+        self._walk_to(approach, max_steps=900, stop_at=0.14)
+        self._turn_to(math.atan2(basket[1] - self.robot.position[1],
+                                 basket[0] - self.robot.position[0]))
         # Hold the towel over the middle of the basket, then open the hand. Releasing at
         # carrying height rather than lowering into the basket keeps the arm clear of the rim.
         above = np.array([basket[0], basket[1], max(basket[2] + 0.12, 0.75)])
@@ -786,6 +1561,17 @@ class LaundrySkills:
         # reads as "did not land in the basket" for a drop that was perfectly aimed.
         self.robot.arm_home(side)
         self.robot.stand(2.0)
+
+        # Then STEP BACK OFF the basket.
+        #
+        # Reaching over the rim leaves the robot pressed against it, and a body wedged on
+        # scenery cannot walk away: measured 0.029 m of travel in 300 forward steps, with
+        # basket_w1 and basket_floor in contact. Every skill that ran afterwards was stranded
+        # -- close_washer reported the door 0.87 m out of reach when the real problem was that
+        # the robot could not leave the basket. Backing off is cheap and frees it.
+        for _ in range(70):
+            self.robot.step(vx=-0.30)
+        self.robot.stand(0.3)
 
         sheet = self.cloth.sheets.get(held[0])
         landed = self.cloth.sheet_centre(sheet) if sheet else None
@@ -830,21 +1616,53 @@ class LaundrySkills:
         if side is None:
             # Nothing in hand yet, so pick the towel up first -- from the drum if that is where
             # it is, and off whatever surface it is lying on otherwise.
-            picked = self.take_out(towel)
+            #
+            # Only try the drum if the towel is actually IN the drum. take_out approaches with
+            # _stand_near, which walks the body up against the nearest fixture; run on a towel
+            # sitting in the basket it wedges the robot on the rim, fails, and leaves the
+            # general pick-up below to search from a pose it cannot recover from -- 0.21 m
+            # where going straight to the search gets 0.059 m and succeeds.
+            in_drum = False
+            sheet_now = self._sheet(towel)
+            drum = self._geom_position("drum_ring_b")
+            if sheet_now is not None and drum is not None:
+                where = self.cloth.sheet_centre(sheet_now)
+                in_drum = (
+                    abs(float(where[0]) - float(drum[0])) < 0.30
+                    and float(where[1]) > float(drum[1]) - 0.10
+                )
+            picked = self.take_out(towel) if in_drum else SkillResult(False, "")
             side = self._loaded_hand()
             if not picked.ok or side is None:
                 sheet = self._sheet(towel)
                 if sheet is None:
                     return SkillResult(False, "I cannot find a towel to move.")
-                # Any vertex will do here, not just the perimeter. A towel that has been
-                # dropped into a basket is crumpled, so its "edge" is wherever the folds put
-                # it and the topmost reachable point is a better handle than a nominal corner
-                # buried in the pile.
-                graspable = list(range(sheet.count))
-                vertex, _ = self.cloth.nearest_vertex(
-                    sheet, self.robot.position, among=graspable
-                )
-                self._stand_near(self.cloth.vertex_position(sheet, vertex))
+                # Take hold of the TOP of the pile, not just any vertex.
+                #
+                # Not the perimeter: a towel dropped into a basket is crumpled, so its "edge"
+                # is wherever the folds put it. But offering all 63 vertices is no better --
+                # most of them are buried under the rest of the sheet or below the basket's
+                # 0.87 m rim, and the sweep spends its trials on points the hand can only get
+                # to by going through a wall. Measured 0.239 m that way, on a pick-up where an
+                # exhaustive check of the topmost vertices found 0.026 m.
+                #
+                # Height is what makes a vertex graspable here, so rank by it and offer the
+                # sweep the highest dozen. That is the part of the towel standing proudest of
+                # the pile, which is exactly what a person reaches for.
+                graspable = sorted(
+                    range(sheet.count),
+                    key=lambda v: float(self.cloth.vertex_position(sheet, v)[2]),
+                    reverse=True,
+                )[:12]
+                # Straight to the search -- NO _stand_near first.
+                #
+                # _stand_near walks the body forward until it meets the fixture, which is the
+                # right move at a drum mouth and the wrong one at a basket: it ends up pressed
+                # against the rim at 0.20 m from the cloth, and the sweep cannot undo that.
+                # Every candidate it then tries starts from a wedged pose, and the search
+                # returned 0.188 m where going straight in returns 0.045 m and the grasp
+                # actually succeeds. find_standing_spot walks itself to the spot it picks, so
+                # the approach was never needed here.
                 _, vertex, side = self.find_standing_spot(sheet, graspable)
                 grasped, miss = self._grasp_vertex(sheet, vertex, side)
                 if not grasped:
@@ -866,8 +1684,24 @@ class LaundrySkills:
         self._walk_to(approach, stop_at=0.25)
         self._turn_to(math.pi / 2)
         self._stand_near(surface)
-        self.robot.reach_to(np.array([surface[0], surface[1], surface[2] + 0.10]), side,
-                            passes=3)
+
+        # LAY the towel down, do not drop it.
+        #
+        # A carried towel hangs as a vertical curtain from the one vertex the hand holds --
+        # measured dz=0.363 against dx=0.253 -- so releasing it over the surface lets it
+        # collapse into a heap under itself: 0.367 m across in the air, 0.19 m on the counter.
+        # Everything downstream then fails on a sheet that is not flat, and `_spread` cannot
+        # open a bundle that tight once it has formed.
+        #
+        # Touching the far edge down first and drawing the hand back toward the robot trails
+        # the cloth out along the surface instead, the way a person lays out a sheet. Measured
+        # 0.249 m against 0.134 m for the same errand. It does not fully flatten the towel --
+        # one hand cannot -- but it lands it open rather than balled up.
+        far = np.array([surface[0], surface[1] + 0.13, surface[2] + 0.02])
+        near = np.array([surface[0], surface[1] - 0.13, surface[2] + 0.02])
+        self.robot.reach_to(far, side, passes=3)
+        for fraction in np.linspace(0.0, 1.0, 6)[1:]:
+            self.robot.reach_to(far + (near - far) * fraction, side, passes=2)
         self.robot.grip(side, 0.0)
         self.cloth.release(side)
         # Arm away first, THEN wait. Releasing the weld does not free the towel if it is still
@@ -875,6 +1709,11 @@ class LaundrySkills:
         # basket read as a miss.
         self.robot.arm_home(side)
         self.robot.stand(2.0)
+        # Step back off the counter, for the same reason as the basket: a robot leaning on a
+        # fixture cannot walk away from it, and whatever skill runs next inherits the problem.
+        for _ in range(70):
+            self.robot.step(vx=-0.30)
+        self.robot.stand(0.3)
 
         sheet = self.cloth.sheets.get(held[0]) if held else self._sheet(towel)
         if sheet is None:
@@ -1131,7 +1970,7 @@ class LaundrySkills:
         handlers = {
             "open_washer": lambda: self.open_washer(),
             "close_washer": lambda: self.close_washer(),
-            "bring_basket": lambda: self.bring_basket(),
+            "bring_basket": lambda: self.bring_basket(argument or where),
             "take_out": lambda: self.take_out(argument),
             "to_basket": lambda: self.put_in_basket(),
             "to_counter": lambda: self.put_on_counter(argument),

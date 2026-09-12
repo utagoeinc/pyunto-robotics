@@ -1,0 +1,300 @@
+<!--
+  The office, with Asimov 1 in place of Pyunto H1.
+
+  Identical room: same walls, doors, furniture and materials as office.xml, so a result here is
+  comparable with one there and any difference is the robot rather than the world. Three things
+  differ -- the robot include, the floor (Asimov ships its own ground plane), and the keyframes,
+  which have to match a different joint count.
+
+  Asimov stands 1.2 m to Pyunto H1's 1.5 m, and its arms end at a wrist where the other has a
+  gripper. Whether skills written around the taller robot carry across is exactly what running
+  this scene answers.
+-->
+<mujoco model="pyunto_office_asimov">
+  <include file="asimov_r1.xml"/>
+
+  <statistic center="0 0 1.0" extent="8"/>
+
+  <option timestep="0.005" iterations="50" solver="Newton" cone="elliptic"/>
+
+  <visual>
+    <headlight diffuse="0.55 0.55 0.55" ambient="0.4 0.4 0.4" specular="0 0 0"/>
+    <rgba haze="0.6 0.65 0.7 1"/>
+    <global azimuth="150" elevation="-25" offwidth="1600" offheight="1200"/>
+    <map znear="0.02" zfar="60"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.75 0.8 0.85" rgb2="0.45 0.5 0.58"
+             width="512" height="640"/>
+
+    <!-- Floor: neutral office carpet -->
+    <texture name="carpet_tex" type="2d" builtin="checker" rgb1="0.42 0.42 0.45"
+             rgb2="0.46 0.46 0.49" width="512" height="512"/>
+    <material name="carpet" texture="carpet_tex" texrepeat="24 16" texuniform="true"
+              reflectance="0.02"/>
+
+    <!-- Rooms are colour-coded so they are visually distinguishable from images alone. -->
+    <material name="wall"        rgba="0.90 0.89 0.86 1" specular="0.1"/>
+    <material name="wall_work"   rgba="0.82 0.86 0.90 1" specular="0.1"/>  <!-- cool blue -->
+    <material name="wall_meet"   rgba="0.86 0.84 0.78 1" specular="0.1"/>  <!-- warm beige -->
+    <material name="wall_pantry" rgba="0.80 0.88 0.82 1" specular="0.1"/>  <!-- soft green -->
+
+    <material name="door_panel" rgba="0.62 0.44 0.28 1" specular="0.25" shininess="0.3"/>
+    <material name="door_frame" rgba="0.95 0.55 0.15 1" specular="0.3"/>   <!-- accent -->
+    <material name="handle_mat" rgba="0.85 0.85 0.88 1" specular="0.8" shininess="0.8"/>
+
+    <material name="desk"   rgba="0.55 0.40 0.28 1" specular="0.2"/>
+    <material name="table"  rgba="0.35 0.30 0.26 1" specular="0.2"/>
+    <material name="chair"  rgba="0.20 0.24 0.32 1" specular="0.2"/>
+    <material name="metal"  rgba="0.70 0.72 0.75 1" specular="0.6" shininess="0.6"/>
+    <material name="screen" rgba="0.10 0.12 0.16 1" specular="0.5" shininess="0.7"/>
+    <material name="plant"  rgba="0.20 0.50 0.25 1"/>
+    <material name="board"  rgba="0.95 0.95 0.93 1" specular="0.3"/>
+  </asset>
+
+  <default>
+    <default class="wall">
+      <geom type="box" condim="3" friction="0.8 0.05 0.01" material="wall" group="1"/>
+    </default>
+    <default class="furniture">
+      <geom type="box" condim="3" friction="0.9 0.05 0.01" group="1"/>
+    </default>
+    <default class="door">
+      <!--
+        damping smooths the swing; a weak spring returns the door to closed.
+        frictionloss is deliberately small - too much and the robot cannot push it open at all.
+      -->
+      <!--
+        Swings both ways: positive into the room, negative into the corridor. Originally this
+        was 0..+1.9, room-only, to suit a robot that could only push. That made every room a
+        trap - the leaf swings across the way back out - so the robot learned to pull instead
+        and the door has to be able to open toward it.
+      -->
+      <joint type="hinge" axis="0 0 1" damping="2.5" frictionloss="0.2" springref="0"
+             stiffness="0.8" range="-1.9 1.9"/>
+      <!--
+        density 240 gives a ~22 kg door leaf. Inheriting the robot's 900 made it 100 kg, which
+        no arm could move. condim=3 keeps contact cheap; the panel never needs to spin in place.
+      -->
+      <geom type="box" condim="3" density="240" friction="0.5 0.05 0.01"
+            material="door_panel" group="1"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <light name="ceil_1" pos="-4 0 3.4" dir="0 0 -1" directional="false"
+           diffuse="0.45 0.45 0.44" attenuation="1 0 0.02"/>
+    <light name="ceil_2" pos="0 0 3.4" dir="0 0 -1" directional="false"
+           diffuse="0.45 0.45 0.44" attenuation="1 0 0.02"/>
+    <light name="ceil_3" pos="4 0 3.4" dir="0 0 -1" directional="false"
+           diffuse="0.45 0.45 0.44" attenuation="1 0 0.02"/>
+    <light name="sun" pos="0 -8 8" dir="0 0.6 -1" directional="true" diffuse="0.35 0.35 0.35"/>
+
+    <!-- No floor here: the Asimov model brings its own ground plane, named
+         "floor" too, and two planes at z=0 is both a name clash and a
+         redundant contact surface. -->
+
+    <!-- Overview cameras for debugging and demo video. head_cam on the robot is the real sensor. -->
+    <camera name="overview" pos="0 -13 11" xyaxes="1 0 0 0 0.65 0.76"/>
+    <camera name="corridor_cam" pos="-7 0 2.2" xyaxes="0 1 0 0.25 0 0.97"/>
+
+    <!-- =========================== OUTER SHELL =========================== -->
+    <!-- 12 x 8 m footprint, 2.6 m walls, 0.1 m thick -->
+    <geom name="wall_north" class="wall" size="6.0 0.05 1.3" pos="0 4.0 1.3"/>
+    <geom name="wall_south" class="wall" size="6.0 0.05 1.3" pos="0 -4.0 1.3"/>
+    <geom name="wall_west"  class="wall" size="0.05 4.0 1.3" pos="-6.0 0 1.3"/>
+    <geom name="wall_east"  class="wall" size="0.05 4.0 1.3" pos="6.0 0 1.3"/>
+
+    <!-- ==================== ROOM DIVIDERS (north half) ==================== -->
+    <!-- Two partitions split the north strip into workspace | meeting | pantry -->
+    <geom name="part_1" class="wall" size="0.05 1.5 1.3" pos="-2.0 2.5 1.3" material="wall_work"/>
+    <geom name="part_2" class="wall" size="0.05 1.5 1.3" pos="2.0 2.5 1.3" material="wall_meet"/>
+
+    <!--
+      The wall between the corridor and the north rooms, with three doorway gaps.
+      Gaps are centred at x = -4.0 (workspace), 0.0 (meeting), 4.0 (pantry), each 1.0 m wide.
+    -->
+    <geom name="nwall_a" class="wall" size="0.75 0.05 1.3" pos="-5.25 1.0 1.3"/>
+    <geom name="nwall_b" class="wall" size="1.25 0.05 1.3" pos="-2.25 1.0 1.3"/>
+    <geom name="nwall_c" class="wall" size="1.25 0.05 1.3" pos="2.25 1.0 1.3"/>
+    <geom name="nwall_d" class="wall" size="0.75 0.05 1.3" pos="5.25 1.0 1.3"/>
+
+    <!-- Corridor / lobby divider, with one wide opening in the middle -->
+    <geom name="swall_a" class="wall" size="2.0 0.05 1.3" pos="-4.0 -1.0 1.3"/>
+    <geom name="swall_b" class="wall" size="2.0 0.05 1.3" pos="4.0 -1.0 1.3"/>
+
+    <!-- =========================== DOOR 1: WORKSPACE =========================== -->
+    <!-- Bright frames make doors findable from a distance in camera images. -->
+    <geom name="frame_1a" type="box" size="0.06 0.07 1.05" pos="-4.55 1.0 1.05"
+          material="door_frame"/>
+    <geom name="frame_1b" type="box" size="0.06 0.07 1.05" pos="-3.45 1.0 1.05"
+          material="door_frame"/>
+    <geom name="frame_1top" type="box" size="0.62 0.07 0.09" pos="-4.0 1.0 2.19"
+          material="door_frame"/>
+    <body name="door_workspace" pos="-4.5 1.0 1.02">
+      <joint name="door_1" class="door"/>
+      <geom name="door_1_panel" class="door" size="0.46 0.022 1.0" pos="0.46 0 0"/>
+      <!-- Handle at 0.90 m: the height the arm reach was designed around. -->
+      <geom name="door_1_handle" type="capsule" fromto="0.80 -0.06 -0.12 0.80 0.06 -0.12"
+            size="0.018" material="handle_mat"/>
+      <site name="handle_1" pos="0.80 0 -0.12" size="0.03" rgba="1 0.3 0 0.35"/>
+    </body>
+
+    <!-- =========================== DOOR 2: MEETING =========================== -->
+    <geom name="frame_2a" type="box" size="0.06 0.07 1.05" pos="-0.55 1.0 1.05"
+          material="door_frame"/>
+    <geom name="frame_2b" type="box" size="0.06 0.07 1.05" pos="0.55 1.0 1.05"
+          material="door_frame"/>
+    <geom name="frame_2top" type="box" size="0.62 0.07 0.09" pos="0 1.0 2.19"
+          material="door_frame"/>
+    <body name="door_meeting" pos="-0.5 1.0 1.02">
+      <joint name="door_2" class="door"/>
+      <geom name="door_2_panel" class="door" size="0.46 0.022 1.0" pos="0.46 0 0"/>
+      <geom name="door_2_handle" type="capsule" fromto="0.80 -0.06 -0.12 0.80 0.06 -0.12"
+            size="0.018" material="handle_mat"/>
+      <site name="handle_2" pos="0.80 0 -0.12" size="0.03" rgba="1 0.3 0 0.35"/>
+    </body>
+
+    <!-- =========================== DOOR 3: PANTRY =========================== -->
+    <geom name="frame_3a" type="box" size="0.06 0.07 1.05" pos="3.45 1.0 1.05"
+          material="door_frame"/>
+    <geom name="frame_3b" type="box" size="0.06 0.07 1.05" pos="4.55 1.0 1.05"
+          material="door_frame"/>
+    <geom name="frame_3top" type="box" size="0.62 0.07 0.09" pos="4.0 1.0 2.19"
+          material="door_frame"/>
+    <body name="door_pantry" pos="3.5 1.0 1.02">
+      <joint name="door_3" class="door"/>
+      <geom name="door_3_panel" class="door" size="0.46 0.022 1.0" pos="0.46 0 0"/>
+      <geom name="door_3_handle" type="capsule" fromto="0.80 -0.06 -0.12 0.80 0.06 -0.12"
+            size="0.018" material="handle_mat"/>
+      <site name="handle_3" pos="0.80 0 -0.12" size="0.03" rgba="1 0.3 0 0.35"/>
+    </body>
+
+    <!-- ========================= WORKSPACE FURNITURE ========================= -->
+    <!-- Desks with monitors: the visual signature of "the workspace". -->
+    <geom name="ws_wall_tint" class="wall" size="1.9 0.02 1.3" pos="-4.0 3.97 1.3"
+          material="wall_work"/>
+    <body name="desk_1" pos="-4.8 2.6 0">
+      <geom name="desk_1_top" class="furniture" size="0.7 0.35 0.03" pos="0 0 0.72"
+            material="desk"/>
+      <geom name="desk_1_l1" class="furniture" size="0.03 0.03 0.36" pos="-0.65 -0.3 0.36"
+            material="metal"/>
+      <geom name="desk_1_l2" class="furniture" size="0.03 0.03 0.36" pos="0.65 -0.3 0.36"
+            material="metal"/>
+      <geom name="desk_1_l3" class="furniture" size="0.03 0.03 0.36" pos="-0.65 0.3 0.36"
+            material="metal"/>
+      <geom name="desk_1_l4" class="furniture" size="0.03 0.03 0.36" pos="0.65 0.3 0.36"
+            material="metal"/>
+      <geom name="mon_1" class="furniture" size="0.28 0.02 0.18" pos="0 0.2 0.93"
+            material="screen"/>
+    </body>
+    <body name="desk_2" pos="-3.0 2.6 0">
+      <geom name="desk_2_top" class="furniture" size="0.7 0.35 0.03" pos="0 0 0.72"
+            material="desk"/>
+      <geom name="desk_2_l1" class="furniture" size="0.03 0.03 0.36" pos="-0.65 -0.3 0.36"
+            material="metal"/>
+      <geom name="desk_2_l2" class="furniture" size="0.03 0.03 0.36" pos="0.65 -0.3 0.36"
+            material="metal"/>
+      <geom name="mon_2" class="furniture" size="0.28 0.02 0.18" pos="0 0.2 0.93"
+            material="screen"/>
+    </body>
+    <geom name="ws_chair_1" class="furniture" size="0.22 0.22 0.22" pos="-4.8 2.0 0.22"
+          material="chair"/>
+    <geom name="ws_chair_2" class="furniture" size="0.22 0.22 0.22" pos="-3.0 2.0 0.22"
+          material="chair"/>
+
+    <!-- ========================== MEETING FURNITURE ========================== -->
+    <!-- One big central table + a whiteboard: the signature of "the meeting room". -->
+    <geom name="mt_wall_tint" class="wall" size="1.9 0.02 1.3" pos="0 3.97 1.3"
+          material="wall_meet"/>
+    <body name="meeting_table" pos="0 2.6 0">
+      <geom name="mtable_top" class="furniture" size="1.1 0.6 0.04" pos="0 0 0.71"
+            material="table"/>
+      <geom name="mtable_leg1" class="furniture" size="0.05 0.05 0.355" pos="-0.95 -0.45 0.355"
+            material="metal"/>
+      <geom name="mtable_leg2" class="furniture" size="0.05 0.05 0.355" pos="0.95 -0.45 0.355"
+            material="metal"/>
+      <geom name="mtable_leg3" class="furniture" size="0.05 0.05 0.355" pos="-0.95 0.45 0.355"
+            material="metal"/>
+      <geom name="mtable_leg4" class="furniture" size="0.05 0.05 0.355" pos="0.95 0.45 0.355"
+            material="metal"/>
+    </body>
+    <geom name="whiteboard" class="furniture" size="0.9 0.03 0.55" pos="0 3.9 1.5"
+          material="board"/>
+    <geom name="mt_chair_1" class="furniture" size="0.2 0.2 0.22" pos="-0.7 1.8 0.22"
+          material="chair"/>
+    <geom name="mt_chair_2" class="furniture" size="0.2 0.2 0.22" pos="0.7 1.8 0.22"
+          material="chair"/>
+    <geom name="mt_chair_3" class="furniture" size="0.2 0.2 0.22" pos="-0.7 3.4 0.22"
+          material="chair"/>
+    <geom name="mt_chair_4" class="furniture" size="0.2 0.2 0.22" pos="0.7 3.4 0.22"
+          material="chair"/>
+
+    <!-- =========================== PANTRY FURNITURE =========================== -->
+    <!-- Counter + tall fridge: the signature of "the pantry". -->
+    <geom name="pt_wall_tint" class="wall" size="1.9 0.02 1.3" pos="4.0 3.97 1.3"
+          material="wall_pantry"/>
+    <geom name="counter" class="furniture" size="1.4 0.35 0.45" pos="4.0 3.5 0.45"
+          material="desk"/>
+    <geom name="counter_top" class="furniture" size="1.45 0.4 0.03" pos="4.0 3.5 0.93"
+          material="metal"/>
+    <geom name="fridge" class="furniture" size="0.35 0.35 0.85" pos="5.4 2.2 0.85"
+          material="metal"/>
+    <geom name="pt_plant" type="cylinder" size="0.22 0.45" pos="2.6 2.2 0.45"
+          material="plant" group="1"/>
+
+    <!-- ============================ LOBBY / CORRIDOR ============================ -->
+    <geom name="lobby_bench" class="furniture" size="0.9 0.25 0.22" pos="-3.5 -3.0 0.22"
+          material="chair"/>
+    <geom name="lobby_plant" type="cylinder" size="0.25 0.55" pos="5.0 -3.2 0.55"
+          material="plant" group="1"/>
+    <geom name="reception" class="furniture" size="1.0 0.4 0.55" pos="2.5 -3.2 0.55"
+          material="desk"/>
+  </worldbody>
+
+  <!--
+    Grasp constraints, one per door, inactive until the robot closes its gripper on a handle.
+
+    A friction-only grasp is not realistic in MuJoCo: the fingers slip off a 3.6 cm handle long
+    before the arm can swing a 20 kg leaf. Welding the palm to the door while the hand is closed
+    is the standard way to model a firm grip, and it is what makes pulling a door possible at
+    all. Skills.pull_door writes the relative pose into eq_data at the moment of contact, so the
+    door stays exactly where it was grasped instead of snapping to a compiled offset.
+  -->
+  <equality>
+    <weld name="grasp_1" body1="palm_r" body2="door_workspace" active="false" solref="0.02 1"/>
+    <weld name="grasp_2" body1="palm_r" body2="door_meeting" active="false" solref="0.02 1"/>
+    <weld name="grasp_3" body1="palm_r" body2="door_pantry" active="false" solref="0.02 1"/>
+  </equality>
+
+  <!--
+    A door leaf always touches its own hinge-side jamb - that is what a hinge is. Excluding the
+    pair stops MuJoCo from fighting a permanent 1 cm penetration there. The latch-side jamb is
+    NOT excluded, so a closed door still physically stops the robot.
+  -->
+  <contact>
+    <exclude body1="door_workspace" body2="world"/>
+    <exclude body1="door_meeting" body2="world"/>
+    <exclude body1="door_pantry" body2="world"/>
+  </contact>
+
+  <!--
+    Doors sit closed by default.
+
+    "start" puts the robot in the middle of the corridor facing north (+y) toward the three
+    doors. The robot's own forward axis is +x, so the quaternion (0.7071, 0, 0, 0.7071) is a
+    +90 deg rotation about z, which maps +x onto +y. It stands back at y=-0.6 rather than right
+    at the threshold, so the demo has some approaching to do.
+
+    qpos = robot (33) + door_1 + door_2 + door_3
+
+    The two lone zeros after the root quaternion are waist_yaw and neck_yaw, in that order --
+    MuJoCo lays qpos out by body tree, so the neck comes before the arms, not with the head
+    geometry it belongs to.
+  -->
+  <keyframe>
+    <key name="start" qpos="0.0164 -0.6197 0.6313 0.7096 0.0000 0.0000 0.7046 -0.2707 -0.0839 -0.0147 0.5116 0.0384 -0.0539 -0.7435 0.2460 0.0011 -0.0000 -0.4970 0.1736 0.0000 0.0099 -0.0012 0.0001 0.0011 0.0069 -0.0002 -0.0001 -0.0004 -0.0000 -0.0047 -0.0066 -0.0001 -0.0000 -0.0000 0.0169 -0.6545 1.0913 0.7100 -0.0092 0.0100 0.7041 0.1779 -0.6826 0.5833 0.6580 -0.2639 0.2670 0.6528 -0.0000 0.0000 -0.1482 -0.6806 0.5840 0.6568 -0.2627 0.2698 0.6533 -0.0000 0.0000 0.0000 0.0000 0.0000"/>
+    <key name="lobby" qpos="0.0164 -3.0197 0.6313 0.7096 0.0000 0.0000 0.7046 -0.2707 -0.0839 -0.0147 0.5116 0.0384 -0.0539 -0.7435 0.2460 0.0011 -0.0000 -0.4970 0.1736 0.0000 0.0099 -0.0012 0.0001 0.0011 0.0069 -0.0002 -0.0001 -0.0004 -0.0000 -0.0047 -0.0066 -0.0001 -0.0000 -0.0000 0.0169 -3.0545 1.0913 0.7100 -0.0092 0.0100 0.7041 0.1779 -3.0826 0.5833 0.6580 -0.2639 0.2670 0.6528 -0.0000 0.0000 -0.1482 -3.0806 0.5840 0.6568 -0.2627 0.2698 0.6533 -0.0000 0.0000 0.0000 0.0000 0.0000"/>
+  </keyframe>
+</mujoco>

@@ -1781,14 +1781,38 @@ class Skills:
             elbow=self.RAISED_ELBOW,
         )
         self._settle()
-        return SkillResult(True, f"I raised my {name} hand.", {"side": side})
+        # Report where the hand actually ended up, not just that the command was issued. A
+        # servo can be commanded to a pose it never reaches -- something in the way, a joint
+        # at its limit -- and only the measurement tells the difference.
+        height = self._hand_height(side)
+        data = {"side": side}
+        if height is not None:
+            data["hand_height_m"] = height
+        return SkillResult(True, f"I raised my {name} hand.", data)
 
     def lower_arm(self, argument: str | None = None) -> SkillResult:
         """Put the arm back at the robot's side."""
         side, name = self._side(argument)
         self.robot.arm_home(side)
         self._settle()
-        return SkillResult(True, f"I lowered my {name} arm.", {"side": side})
+        height = self._hand_height(side)
+        data = {"side": side}
+        if height is not None:
+            data["hand_height_m"] = height
+        return SkillResult(True, f"I lowered my {name} arm.", data)
+
+    def _hand_height(self, side: str) -> float | None:
+        """How high the hand is off the floor, in metres, or None on a robot without hands."""
+        try:
+            import mujoco
+
+            for name in (f"palm_{side}", f"{side}_palm", f"hand_{side}", f"{side}_hand"):
+                body = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, name)
+                if body >= 0:
+                    return round(float(self.robot.data.xpos[body][2]), 3)
+        except Exception:  # noqa: BLE001 - a missing measurement must not fail the gesture
+            pass
+        return None
 
     def wave(self, argument: str | None = None) -> SkillResult:
         """Raise the arm and swing it side to side a few times, then lower it.

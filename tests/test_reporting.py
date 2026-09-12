@@ -123,10 +123,53 @@ def test_reports_each_step_as_it_finishes():
     assert any(line.startswith("⚠️") and "cannot reach" in line for line in lines)
 
 
-def test_posts_a_picture_at_the_end():
+def test_pictures_frame_the_whole_errand():
+    """Before it moves, after each step, and at the end -- the sequence a person can follow."""
     client = RecordingClient()
     run(build(client), "open the door")
-    assert [p for p in client.posts if p[0] == "image"], "expected a camera frame"
+    images = [p for p in client.posts if p[0] == "image"]
+    # Two steps: before + one per step + final.
+    assert len(images) == 4, [p[1] for p in images]
+    assert client.posts[0][0] == "image", "the first thing posted must be the scene as found"
+    assert client.posts[-1][0] == "image", "the last thing posted must be the scene as left"
+
+
+def test_the_closing_report_stands_on_its_own():
+    """Someone reading the diary tomorrow gets one entry, not eight fragments."""
+    client = RecordingClient()
+    run(build(client), "open the door")
+    summary = texts(client)[-1]
+    assert summary.startswith("⚠️ Not finished"), summary
+    assert "open the door" in summary
+    # Every step accounted for, in order.
+    assert "1. goto door" in summary and "2. open door" in summary
+
+
+def test_the_closing_report_says_done_when_it_worked():
+    class AlwaysWorks(FakeSkills):
+        def run(self, action, argument, where, expect):  # noqa: ANN001
+            return FakeResult(True, f"Did {action}.")
+
+    client = RecordingClient()
+    backend = build(client)
+    backend.agent.skills = AlwaysWorks()
+    run(backend, "open the door")
+    assert texts(client)[-1].startswith("✅ Done")
+
+
+def test_sensor_readings_are_attached_to_the_step():
+    class Measuring(FakeSkills):
+        def run(self, action, argument, where, expect):  # noqa: ANN001
+            return FakeResult(True, "Walked.", {"distance_m": 0.42, "angle_deg": 17.0})
+
+    client = RecordingClient()
+    backend = build(client)
+    backend.agent.skills = Measuring()
+    run(backend, "open the door")
+    measured = [line for line in texts(client) if "📡" in line]
+    assert measured, texts(client)
+    # Rendered as readable quantities, not a dict.
+    assert "0.42 m" in measured[0] and "17°" in measured[0]
 
 
 def test_an_unknown_instruction_is_answered_not_ignored():
@@ -234,3 +277,27 @@ def test_raising_an_arm_actually_lifts_the_hand():
         assert hand_height() < raised - 0.4, "the arm did not come back down"
     finally:
         robot.close()
+
+
+def test_a_one_step_instruction_stays_short():
+    """Volume is a feature with a cost. Twelve messages for "raise your hand" is spam.
+
+    A single-step instruction gets exactly six posts: the scene before, the plan, the step,
+    the step's picture, the closing report, the scene after. If a change pushes this up,
+    that is a decision to make deliberately rather than discover in a screenshot.
+    """
+
+    class OneStep(FakeSkills):
+        def run(self, action, argument, where, expect):  # noqa: ANN001
+            return FakeResult(True, "Raised.")
+
+    class SingleStepPlanner:
+        def plan(self, text):  # noqa: ANN001
+            return FakePlan([FakeStep("raise_arm", "r")])
+
+    client = RecordingClient()
+    backend = build(client)
+    backend.agent.skills = OneStep()
+    backend.agent.planner = SingleStepPlanner()
+    run(backend, "右手を挙げて")
+    assert len(client.posts) == 6, [p[1] for p in client.posts]

@@ -42,21 +42,31 @@ DAMPING = 0.05
 TOLERANCE_M = 0.008
 
 # How far in front of the base the hand can actually be PUT, as opposed to how far the joint
-# chain extends. These are not the same number and the difference matters:
+# chain extends. These are not the same number and the difference matters.
 #
-#   forward   final hand error after 4 closed-loop passes
-#   0.20 m    0.023 m     <- works
-#   0.25 m    0.029 m     <- works
-#   0.30 m    0.194 m     <- fails
-#   0.40 m    0.230 m     <- fails
+# Measured on AN-01, right hand, at counter height (z=0.90), after 4 closed-loop passes:
 #
-# The kinematics say 0.40 m and the pure IK residual agrees, but past 0.25 m the extended arm
-# loads the torso, the body yields, and the hand settles a fifth of a metre short no matter how
-# many correction passes are run -- the error grew pass over pass rather than converging.
+#   forward   final hand error
+#   0.20 m    0.009 m     <- works
+#   0.30 m    0.027 m     <- works
+#   0.35 m    0.033 m     <- works
+#   0.40 m    0.075 m     <- marginal, at the grasp tolerance
+#   0.45 m    0.124 m     <- fails
 #
-# So this is the number callers must plan around: stand within 0.25 m of what you intend to
+# So the usable envelope is 0.35 m, with 0.40 m the point where the error reaches the grasp
+# tolerance itself. Past that the extended arm loads the torso, the body yields, and the error
+# grows pass over pass rather than converging.
+#
+# A WARNING FROM MEASURING THIS. Before the model's servo gains were matched to its mass, the
+# same sweep returned errors above 1 m for targets 0.25 m away -- numbers that look exactly
+# like a broken IK or a mis-specified arm, and are neither. The arm was oscillating (measured
+# 42-67 rad/s of joint velocity while merely standing), so the hand was never where the solver
+# had just put it. If this table ever goes strange again, check `qvel` before touching the
+# kinematics.
+#
+# It remains the number callers must plan around: stand within 0.35 m of what you intend to
 # pick up. Reaching further is not a matter of trying harder, it is walking closer.
-WORKING_REACH_M = 0.25
+WORKING_REACH_M = 0.35
 
 
 class ArmSolver:

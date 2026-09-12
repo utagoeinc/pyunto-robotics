@@ -10,7 +10,7 @@ import pytest
 
 from pyunto_robotics.agent import RobotAgent
 from pyunto_robotics.brain.planner import Plan, RulePlanner, Step
-from pyunto_robotics.comms.client import IncomingMessage
+from pyunto_agent.client import IncomingMessage
 from pyunto_robotics.perception.grounding import ColorGrounder
 from pyunto_robotics.sim.robot import Robot
 
@@ -79,7 +79,12 @@ def test_failed_skill_is_reported_not_raised(agent):
 
 
 def test_plan_length_is_capped():
-    """A model that emits a wall of steps has misunderstood; do not run them all."""
+    """A model that emits a wall of steps has misunderstood; do not run them all.
+
+    And SAY SO when the cap bites. Silent truncation is indistinguishable from the robot
+    deciding it had finished: a six-part errand cut to four used to end with a cheerful report
+    of the four it did, leaving the user no way to know the last two were never attempted.
+    """
 
     class Runaway:
         def plan(self, message: str) -> Plan:
@@ -89,7 +94,11 @@ def test_plan_length_is_capped():
     try:
         a = RobotAgent(robot, ColorGrounder(), planner=Runaway(), max_steps_per_message=3)
         execution = a.execute("anything")
-        assert len(execution.messages) == 3
+        # Three steps run, plus one message explaining what was left undone.
+        assert len(execution.messages) == 4
+        assert "not done" in execution.messages[-1]
+        # Truncating counts as not succeeding: the errand was not carried out as asked.
+        assert not execution.ok
     finally:
         robot.close()
 

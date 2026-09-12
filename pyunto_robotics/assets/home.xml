@@ -1,0 +1,598 @@
+<!--
+  A domestic laundry room for Momo.
+
+  Layout (x = forward/north, y = left/west; the room is 5 x 4 m):
+
+        y=+2 ┌──────────────────────────────────────────┐
+             │  [WASHER]        [VANITY / COUNTER]      │
+             │   drum            fold surface           │
+             │                                          │
+        y=0  │              (open floor)                │
+             │                                          │
+             │        [BASKET]                          │
+        y=-2 └──────────────────────────────────────────┘
+             x=-2.5                                  x=+2.5
+
+  Everything is placed against Momo's MEASURED reach, and the measurements are the whole story
+  of why this room looks the way it does. The hand can be put within 0.25 m of the base -- not
+  the 0.40 m the joint chain spans, because past that the extended arm loads the torso and the
+  body yields -- and it bottoms out at about z=0.70 however hard it reaches down. Momo has no
+  crouch, so that floor is absolute.
+
+  Every surface therefore sits INSIDE the band z=0.70..1.40:
+
+    * The drum opening is centred at z=0.91. A real front-loader sits lower; at the realistic
+      height the towel was simply below the arm and no amount of positioning helped.
+    * The fold counter is at z=0.85, which is both standard vanity height and comfortably mid-
+      band. Folding happens here because the floor is out of reach entirely.
+    * The basket stands on a plinth with its floor at z=0.62 and rim at z=0.87. On the ground
+      its contents were unreachable -- measured a 0.40 m miss trying to lift a towel back out.
+    * The towel starts toward the drum MOUTH rather than centred in the cavity, which is both
+      0.07 m more reachable and where laundry actually ends up after a cycle.
+
+  The task the environment exists to support, in order:
+    1. open the drum door        (a hinged disc, like the office doors but smaller)
+    2. take a towel out          (grasp a cloth vertex, lift, carry)
+    3. put it in the basket      (release above the rim)
+    4. move it to the counter    (the "washstand space" that can hold laundry)
+    5. fold it                   (see brain/laundry.py -- fold is grasp-two-corners-and-place)
+
+  On the towels: these are real MuJoCo flex cloth (flexcomp), not boxes. That was a deliberate
+  choice and it costs something -- measured 8.6k physics steps/s for a 9x7 sheet against
+  81k for the rigid office scene -- but a folding demo with rigid "towels" would be a
+  hinge animation, not folding. Grasping is by welding a cloth VERTEX to the palm, which is
+  the same trick the office robot uses on door handles: friction alone will not hold cloth.
+  Measured: welding a corner and lifting the hand to z=0.72 raises the sheet to z=0.665.
+
+  Cloth vertices are addressable as bodies named `towel_a_0` ... `towel_a_62` (9x7 = 63 for
+  each sheet). brain/laundry.py finds corners by index rather than by name lookup, because the
+  grid order is deterministic: index = row * ncol + col.
+-->
+<mujoco model="pyunto_home">
+  <include file="an01.xml"/>
+
+  <statistic center="0 0 0.9" extent="4"/>
+
+  <!--
+    CG solver, not Newton. The office scene uses Newton, which is better for rigid contact,
+    but a flex body adds a few hundred constrained DoF and Newton's exact factorisation gets
+    expensive fast. timestep 0.004 rather than 0.005 because cloth edge constraints are stiff
+    and go unstable at the larger step.
+  -->
+  <option timestep="0.004" iterations="40" solver="CG" tolerance="1e-7" cone="elliptic"/>
+
+  <visual>
+    <headlight diffuse="0.5 0.5 0.5" ambient="0.45 0.45 0.45" specular="0.05 0.05 0.05"/>
+    <rgba haze="0.85 0.88 0.92 1"/>
+    <global azimuth="140" elevation="-22" offwidth="1600" offheight="1200"/>
+    <map znear="0.02" zfar="40"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.88 0.91 0.95" rgb2="0.62 0.70 0.80"
+             width="512" height="640"/>
+
+    <!-- Floor: pale bathroom tile -->
+    <texture name="tile_tex" type="2d" builtin="checker" rgb1="0.86 0.86 0.84"
+             rgb2="0.80 0.80 0.78" width="512" height="512"/>
+    <material name="tile" texture="tile_tex" texrepeat="10 8" texuniform="true"
+              reflectance="0.05"/>
+
+    <material name="wall_home"  rgba="0.94 0.93 0.90 1" specular="0.10"/>
+    <material name="wall_tint"  rgba="0.86 0.91 0.94 1" specular="0.10"/>
+
+    <!--
+      The washer is white-grey with a DARK GLASS door and a blue trim ring. The ring is the
+      colour cue ColorGrounder keys on: white appliance against a white wall is invisible to
+      colour matching, which is exactly the failure the office whiteboard had.
+    -->
+    <material name="appliance" rgba="0.93 0.94 0.95 1" specular="0.45" shininess="0.55"/>
+    <material name="drum_ring" rgba="0.20 0.45 0.80 1" specular="0.50" shininess="0.60"/>
+    <material name="drum_glass" rgba="0.22 0.26 0.34 0.85" specular="0.85" shininess="0.90"/>
+    <material name="drum_inner" rgba="0.55 0.58 0.62 1" specular="0.55" shininess="0.50"/>
+    <material name="panel_mat" rgba="0.30 0.34 0.40 1" specular="0.40"/>
+
+    <!-- The fold counter: warm wood top, so it is distinct from both floor and appliance. -->
+    <material name="counter_top" rgba="0.72 0.55 0.38 1" specular="0.30" shininess="0.35"/>
+    <material name="cabinet"     rgba="0.88 0.86 0.82 1" specular="0.20"/>
+    <material name="basin"       rgba="0.97 0.97 0.98 1" specular="0.60" shininess="0.70"/>
+    <material name="mirror"      rgba="0.72 0.80 0.86 1" specular="0.90" shininess="0.95"/>
+    <material name="tap_mat"     rgba="0.78 0.80 0.83 1" specular="0.80" shininess="0.85"/>
+
+    <!-- The basket is a saturated warm yellow: nothing else in the room is close to it. -->
+    <material name="basket_mat" rgba="0.95 0.72 0.22 1" specular="0.25"/>
+
+    <!-- Towels. Two colours so "the blue one" is a meaningful instruction. -->
+    <material name="towel_a_mat" rgba="0.35 0.66 0.88 1" specular="0.10"/>
+    <material name="towel_b_mat" rgba="0.96 0.72 0.78 1" specular="0.10"/>
+
+    <material name="plant_home" rgba="0.28 0.55 0.32 1"/>
+    <material name="pot_mat"    rgba="0.80 0.55 0.45 1"/>
+  </asset>
+
+  <default>
+    <default class="h_wall">
+      <geom type="box" condim="3" friction="0.8 0.05 0.01" material="wall_home" group="1"/>
+    </default>
+    <!-- The carryable basket. condim 4 so it does not skate off the plinth, and a low
+           solref so setting it down does not bounce. -->
+      <default class="h_basket">
+        <geom type="box" condim="4" friction="1.1 0.02 0.001" solref="0.01 1" group="1"/>
+      </default>
+      <default class="h_fixture">
+      <geom type="box" condim="3" friction="0.9 0.05 0.01" group="1"/>
+    </default>
+    <!--
+      The drum door. Much lighter than an office door leaf (a washer door is a few hundred
+      grams of glass and plastic) and with almost no spring, so it stays where it is put --
+      a door that swings shut while the robot is reaching into the drum would make the task
+      impossible for reasons that have nothing to do with laundry.
+    -->
+    <default class="h_drumdoor">
+      <joint type="hinge" axis="0 0 1" damping="0.8" frictionloss="0.05" springref="0"
+             stiffness="0.05" range="-2.4 0"/>
+      <geom type="box" condim="3" density="180" friction="0.5 0.05 0.01" group="1"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <light name="room_1" pos="-1.2 0 2.7" dir="0 0 -1" directional="false"
+           diffuse="0.42 0.42 0.41" attenuation="1 0 0.05"/>
+    <light name="room_2" pos="1.4 0 2.7" dir="0 0 -1" directional="false"
+           diffuse="0.42 0.42 0.41" attenuation="1 0 0.05"/>
+    <light name="window" pos="0 -4 2.4" dir="0 1 -0.55" directional="true"
+           diffuse="0.30 0.30 0.32"/>
+
+    <geom name="floor" type="plane" size="0 0 0.05" material="tile"
+          condim="6" friction="1.2 0.05 0.01"/>
+
+    <!--
+      Overview looks down from ABOVE the room, not from outside the south wall: the walls are
+      solid geometry and a camera placed outside one simply renders that wall.
+    -->
+    <camera name="overview" pos="0 -3.2 4.6" xyaxes="1 0 0 0 0.82 0.57"/>
+    <!--
+      Close-ups. Both sit INSIDE the room looking north at their fixture -- a camera behind a
+      wall renders the wall, which is the whole picture and easy to mistake for a broken scene.
+    -->
+    <camera name="washer_cam" pos="-1.45 0.10 1.35" xyaxes="1 0 0 0 0.42 0.91"/>
+    <camera name="counter_cam" pos="1.20 0.35 1.45" xyaxes="1 0 0 0 0.45 0.89"/>
+
+    <!-- =========================== SHELL =========================== -->
+    <!-- 5 x 4 m room, 2.5 m walls -->
+    <geom name="wall_n" class="h_wall" size="2.5 0.05 1.25" pos="0 2.0 1.25"/>
+    <geom name="wall_s" class="h_wall" size="2.5 0.05 1.25" pos="0 -2.0 1.25"/>
+    <geom name="wall_w" class="h_wall" size="0.05 2.0 1.25" pos="-2.5 0 1.25"/>
+    <geom name="wall_e" class="h_wall" size="0.05 2.0 1.25" pos="2.5 0 1.25"/>
+    <!-- a tinted splashback behind the fixtures, so the north wall is not featureless -->
+    <geom name="splash" class="h_wall" size="2.4 0.02 0.45" pos="0 1.94 1.35"
+          material="wall_tint"/>
+
+    <!-- ====================== DRUM WASHING MACHINE ======================
+         Body 0.62 wide x 0.62 deep x 0.85 tall, standing against the north wall at x=-1.45.
+         The drum opening is centred at z=0.75, which is inside Momo's reach band (0.67-1.40).
+    -->
+    <!--
+      The cabinet is a SHELL, not a block. A single solid box here spans the whole footprint
+      including the cavity, so the drum's floor/back/sides end up buried inside solid matter:
+      the towel starts embedded in it and is ejected on the first step (measured landing at
+      z=0.37, outside the machine), and the door hits the body and swings to -97 degrees.
+
+      So the front face is built as a frame around the opening, and the sides and back are
+      separate slabs outside the cavity (cavity occupies y:[1.28,1.62], z:[0.55,0.95],
+      x:[-1.66,-1.24]).
+    -->
+    <geom name="washer_base" class="h_fixture" size="0.31 0.31 0.355" pos="-1.45 1.60 0.355"
+          material="appliance"/>
+    <geom name="washer_side_l" class="h_fixture" size="0.045 0.31 0.36" pos="-1.715 1.60 0.710"
+          material="appliance"/>
+    <geom name="washer_side_r" class="h_fixture" size="0.045 0.31 0.36" pos="-1.185 1.60 0.710"
+          material="appliance"/>
+    <geom name="washer_back" class="h_fixture" size="0.31 0.045 0.36" pos="-1.45 1.865 0.710"
+          material="appliance"/>
+    <geom name="washer_top" class="h_fixture" size="0.33 0.33 0.02" pos="-1.45 1.60 1.090"
+          material="appliance"/>
+    <!-- control panel: a dark strip along the top front, so the front face is identifiable -->
+    <geom name="washer_panel" class="h_fixture" size="0.26 0.02 0.055" pos="-1.45 1.285 1.180"
+          material="panel_mat"/>
+
+    <!--
+      The drum mouth. A ring of four boxes around a recess rather than a cylinder, because the
+      opening has to be a HOLE the hand can enter: a cylinder geom is solid, and MuJoCo has no
+      hollow primitive. The ring is the blue colour cue.
+    -->
+    <geom name="drum_ring_t" class="h_fixture" size="0.235 0.015 0.055" pos="-1.45 1.288 1.115"
+          material="drum_ring"/>
+    <geom name="drum_ring_b" class="h_fixture" size="0.235 0.015 0.055" pos="-1.45 1.288 0.705"
+          material="drum_ring"/>
+    <geom name="drum_ring_l" class="h_fixture" size="0.055 0.015 0.245" pos="-1.635 1.288 0.910"
+          material="drum_ring"/>
+    <geom name="drum_ring_r" class="h_fixture" size="0.055 0.015 0.245" pos="-1.265 1.288 0.910"
+          material="drum_ring"/>
+    <!-- The drum cavity: a back wall set 0.30 m in, so the hand has somewhere to reach INTO. -->
+    <geom name="drum_back" class="h_fixture" size="0.20 0.02 0.20" pos="-1.45 1.62 0.910"
+          material="drum_inner"/>
+    <geom name="drum_floor" class="h_fixture" size="0.20 0.17 0.015" pos="-1.45 1.45 0.725"
+          material="drum_inner"/>
+    <geom name="drum_roof" class="h_fixture" size="0.20 0.17 0.015" pos="-1.45 1.45 1.095"
+          material="drum_inner"/>
+    <geom name="drum_side_l" class="h_fixture" size="0.015 0.17 0.20" pos="-1.66 1.45 0.910"
+          material="drum_inner"/>
+    <geom name="drum_side_r" class="h_fixture" size="0.015 0.17 0.20" pos="-1.24 1.45 0.910"
+          material="drum_inner"/>
+
+    <!--
+      The door: hinged on its LEFT (-x) edge and swinging out toward the robot, which is how a
+      front-loader opens. range -2.4..0 means it only ever opens outward; 0 is shut.
+    -->
+    <body name="drum_door" pos="-1.71 1.27 0.910">
+      <joint name="washer_door" class="h_drumdoor"/>
+      <geom name="drum_door_g" class="h_drumdoor" size="0.245 0.022 0.245" pos="0.245 0 0"
+            material="drum_glass"/>
+      <geom name="drum_door_rim" class="h_drumdoor" size="0.255 0.012 0.045" pos="0.245 0 0.255"
+            material="drum_ring"/>
+      <!--
+        Handle on the far edge from the hinge, at the height of the opening centre, and set
+        FORWARD of the leaf (y=-0.075) rather than level with it.
+
+        The offset is not cosmetic. With the handle in the plane of the door, an open door
+        swings it right across the mouth of the drum: measured the hand stopping dead at
+        y=1.20 for a towel at y=1.32 no matter where the robot stood, with the only contact
+        being fing_r1 against drum_handle. The reach looked like a range failure and was
+        actually the door's own handle barring the opening.
+      -->
+      <geom name="drum_handle" type="capsule" fromto="0.475 -0.075 -0.08 0.475 -0.075 0.08"
+            size="0.017" material="tap_mat"/>
+      <site name="drum_handle_site" pos="0.475 -0.075 0" size="0.028" rgba="1 0.4 0 0.35"/>
+    </body>
+
+    <!-- ====================== VANITY / FOLD COUNTER ======================
+         The "washstand space with room to put laundry down". Top at z=0.85, which is both
+         standard vanity height and the middle of Momo's reach band. This is where folding
+         happens; the surface is 1.3 x 0.55 m, big enough to lay a 0.40 x 0.30 towel flat.
+    -->
+    <geom name="cab_body" class="h_fixture" size="0.65 0.27 0.415" pos="1.20 1.62 0.415"
+          material="cabinet"/>
+    <geom name="counter_g" class="h_fixture" size="0.68 0.30 0.020" pos="1.20 1.62 0.850"
+          material="counter_top"/>
+    <!-- a shallow basin at the far end, so the counter reads as a washstand -->
+    <geom name="basin_g" class="h_fixture" size="0.19 0.16 0.055" pos="1.72 1.62 0.905"
+          material="basin"/>
+    <geom name="tap_g" type="cylinder" size="0.018 0.10" pos="1.72 1.80 0.960"
+          material="tap_mat" group="1"/>
+    <geom name="mirror_g" class="h_fixture" size="0.42 0.015 0.32" pos="1.55 1.93 1.55"
+          material="mirror"/>
+
+    <!-- ============================ BASKET ============================
+         Four walls and a floor, open at the top: a towel is dropped IN, so it cannot be a
+         solid box. Rim at z=0.32, low enough to drop into without crouching.
+    -->
+    <!--
+      The basket stands on a low plinth, so its floor is at z=0.62 rather than on the ground.
+
+      Not decoration: the arm bottoms out around z=0.70 and cannot go below it, so a towel
+      lying in a basket on the floor is simply unreachable -- measured a 0.40 m miss trying to
+      pick one out again. Everything the robot has to manipulate must live in the band the
+      hand can actually occupy, and a raised laundry basket is an ordinary piece of furniture.
+    -->
+    <!--
+      THE PLINTH IS SCENERY; THE BASKET ON TOP OF IT IS NOT.
+
+      They used to be one fixed body, and "bring the basket over" could only ever be answered
+      with "I cannot, it is bolted down". Splitting them makes the errand the user actually
+      asks for possible: the basket is a free body the robot picks up, carries and sets down,
+      and the plinth stays where it is as the place the basket belongs.
+    -->
+    <geom name="basket_stand" class="h_fixture" size="0.24 0.18 0.305" pos="-0.30 -0.55 0.305"
+          material="cabinet"/>
+
+    <!--
+      A SECOND STAND, beside the washing machine, and it is a requirement rather than a prop.
+
+      The robot has no crouch. Measured: the hand bottoms out around z=0.87 however hard it
+      reaches down, and it holds the basket by a rim 0.245 above the basket's own floor -- so
+      the lowest it can PLACE a basket is about z=0.63. It physically cannot put one on the
+      ground, and asking it to drops the basket the last quarter of a metre, which tips it onto
+      a side wall.
+
+      0.63 is plinth height. So "bring the basket to the washer" means "put it on the stand by
+      the washer", which is also where a laundry basket lives in a real utility room. Same
+      dimensions as the one across the room, placed to the +x side of the drum so it is clear
+      of the space the robot needs in order to reach into it.
+
+      The position is DERIVED, after three guesses each failed differently: at (-0.83, 0.90)
+      the basket landed half on the drum handle, at (-0.72, 0.62) it caught the open door
+      leaf, at (-0.56, 0.48) it was too far for the arm and went on the floor.
+
+      The door hinges on its -x edge and sweeps AWAY from the machine's +x side: tracing the
+      leaf from 0 to 120 degrees puts it at x=-1.46 falling to -1.83, always around y=1.03 to
+      1.27. So the +x side of the drum is clear of the swing entirely, and the constraints
+      are just: x >= -1.15 to clear the arc with the stand's own 0.24 half-width, and within
+      0.95 m of the drum so "at the washer" is honest. (-1.00, 1.05) sits 0.51 m from the
+      machine and satisfies both.
+    -->
+    <geom name="washer_stand" class="h_fixture" size="0.24 0.18 0.305" pos="-1.00 1.05 0.305"
+          material="cabinet"/>
+    <site name="washer_stand_site" pos="-1.00 1.05 0.625" size="0.04" rgba="1 0.8 0.2 0"/>
+
+    <!--
+      The basket itself: a light open box on a free joint.
+
+      1.6 kg is a laundry basket with nothing in it, and it matters that it is light. The arm
+      holds it out in front of the body while walking, so its weight acts on the shoulder at
+      full extension; at 5 kg the servos sagged and the robot walked with the basket dragging.
+
+      It starts ON the plinth (floor at z=0.625, matching the old fixed geometry exactly) so
+      every existing measurement in brain/laundry.py -- the rim height, the drop target, the
+      "is the towel inside" test -- still means what it says.
+    -->
+    <body name="basket" pos="-0.30 -0.55 0.623">
+      <freejoint name="basket_free"/>
+      <!-- Centre of mass LOW, at the basket's floor rather than a third of the way up.
+           An empty basket's weight is almost all in its base; putting the CoM at 0.09 gave it
+           a pendulum's worth of leverage and it tipped from standing still -- measured the
+           quaternion drifting off level within one second of simulation, before anything had
+           touched it. The inertia is the box's own, which is right; only the CoM was wrong. -->
+      <inertial pos="0 0 0.02" mass="1.6" diaginertia="0.028 0.034 0.052"/>
+      <geom name="basket_floor" class="h_basket" size="0.26 0.20 0.015" pos="0 0 0"
+            material="basket_mat"/>
+      <!-- The two long walls are THINNER than the others, at 0.020 against 0.032.
+
+           This is a gripper constraint, not a style choice. AN-01's fingers close to a free
+           gap of 0.025 m (two capsules 0.041 m apart, each 0.008 m in radius). A 0.032 m wall
+           does not fit between them, so the hand could be perfectly placed and still never
+           close on the rim -- measured the grasp reported 0.04 m "off" when the real problem
+           was that there was nothing it could hold. 0.020 leaves 2.5 mm of clearance a side.
+
+           Only the long walls, because that is where the basket is picked up (see the note on
+           basket_grip); the short ends stay full thickness. -->
+      <geom name="basket_w1" class="h_basket" size="0.26 0.010 0.115" pos="0 0.19 0.130"
+            material="basket_mat"/>
+      <geom name="basket_w2" class="h_basket" size="0.26 0.010 0.115" pos="0 -0.19 0.130"
+            material="basket_mat"/>
+      <geom name="basket_w3" class="h_basket" size="0.016 0.20 0.115" pos="0.25 0 0.130"
+            material="basket_mat"/>
+      <geom name="basket_w4" class="h_basket" size="0.016 0.20 0.115" pos="-0.25 0 0.130"
+            material="basket_mat"/>
+      <!-- Where the hands take hold: ONE SITE PER SIDE, on the two short rims, which is how
+           a person actually carries a basket -- a hand on each end, not both on one edge.
+
+           A single centre-rim site was tried and is wrong in a way that shows immediately in
+           a screenshot: both hands aim at the same point, one of them wins, and the basket
+           hangs off that hand and swings. Measured the right hand welding from 0.47 m away
+           with the basket tilted to a quaternion of (0.23, -0.59, 0.72, 0.30). -->
+      <!-- ONE grip point, on the near rim, because this basket is carried in ONE HAND.
+
+           Two hands were tried at length and AN-01 cannot do it. Its hands rest 0.379 m apart
+           and neither arm crosses the chest, so holding two rims means holding two points at
+           whatever distance the basket sets: 0.50 m for the short ends, 0.38 m for the long
+           sides. An exhaustive sweep of standing positions found the best simultaneous
+           two-hand grip anywhere to be 0.395 m from the target -- five times the 0.075 m
+           grasp tolerance. This is the same limit that stops it folding a towel with two
+           hands, and it is a property of the arms, not of the approach.
+
+           So the basket is a one-handed carry, by the middle of the near rim. That is why the
+           basket is light (1.6 kg, see the inertial above): a box carried on one arm at full
+           extension loads the shoulder, and the mass was chosen for that. -->
+      <!-- The grip target sits ABOVE the rim, not on it.
+
+           At 0.245 the site was at z=0.868 and the near wall's top edge is also z=0.868 --
+           exactly the same height. A hand approaching horizontally therefore met the wall
+           before the palm was ever over it, shoved the basket, and then chased it: measured
+           the reach going 0.047 m, then 0.999 m as the basket ran away.
+
+           0.295 puts it 0.05 m clear, so the hand arrives above the rim and comes DOWN onto
+           it, which is how a hand takes hold of a rim in the first place. -->
+      <site name="basket_grip" pos="0 0.19 0.295" size="0.02" rgba="1 0.8 0.2 0"/>
+      <site name="basket_site" pos="0 0 0.275" size="0.04" rgba="1 0.8 0.2 0.35"/>
+    </body>
+
+    <!-- a little greenery, purely so the room does not look like a lab -->
+    <geom name="pot" type="cylinder" size="0.13 0.16" pos="2.15 -1.55 0.16"
+          material="pot_mat" group="1"/>
+    <geom name="plant_home_g" type="ellipsoid" size="0.20 0.20 0.24" pos="2.15 -1.55 0.48"
+          material="plant_home" group="1"/>
+
+    <!-- ============================= TOWELS =============================
+         Real cloth. 9 x 7 vertices at 0.05 m spacing = a 0.40 x 0.30 m sheet, which is a hand
+         towel and is what fits both the drum and the counter.
+
+         `towel_a` starts INSIDE the drum (that is the task: take it out). `towel_b` starts on
+         the counter, so folding can be exercised without first doing the retrieval.
+
+         radius 0.004 is the collision thickness of the cloth. Bigger is more stable but the
+         sheet stops looking like fabric; smaller and the gripper passes through it.
+
+         selfcollide="none" is a real simplification: a folded towel will pass through itself.
+         Enabling it costs roughly 3x and mattered less than having the rest of the task work.
+    -->
+    <!--
+      Sitting on the drum floor, JUST CLEAR OF THE SHUT DOOR.
+
+      y=1.40 is a compromise between two things that pull in opposite directions, and both
+      were measured rather than argued about.
+
+      TOO FAR FORWARD and the sheet spawns inside the shut door. The leaf occupies
+      y=1.248..1.292; at the old y=1.38 the towel reached back to y=1.251 and started with 50
+      contacts against it, so the solver kicked it on the first step and the door dragged it
+      round as it opened -- crumpled from dz=0.000 to dz=0.132 during open_washer alone,
+      before anything had touched it. Everything downstream inherited a balled-up towel.
+
+      TOO FAR BACK and the robot cannot reach it. The arm has 0.25 m of working reach from a
+      body that can only get so close to the machine, so at y=1.44 -- clear of the door, and
+      perfectly flat at dz=0.005 -- take_out missed the near edge by 0.13 m however the search
+      was arranged.
+
+      At 1.40 the towel still touches the leaf a little (24 contacts, dz=0.034) but comes
+      through open_washer at a 0.425 m span against the 0.430 m it starts with, and take_out
+      retrieves it. Compare 0.275 m at the old 1.38: nearly flat rather than half gathered,
+      which is what the fold at the end of the errand needs.
+    -->
+    <flexcomp name="towel_a" type="grid" count="9 7 1" spacing="0.043 0.043 0.05"
+              pos="-1.45 1.40 0.756" dim="2" mass="0.25" radius="0.004"
+              material="towel_a_mat">
+      <edge equality="true" solref="0.005 1"/>
+      <contact condim="3" solref="0.005 1" selfcollide="none"/>
+    </flexcomp>
+
+    <flexcomp name="towel_b" type="grid" count="9 7 1" spacing="0.05 0.05 0.05"
+              pos="1.05 1.60 0.90" dim="2" mass="0.25" radius="0.004"
+              material="towel_b_mat">
+      <edge equality="true" solref="0.005 1"/>
+      <contact condim="3" solref="0.005 1" selfcollide="none"/>
+    </flexcomp>
+  </worldbody>
+
+  <!--
+    Grasp welds, inactive until a hand closes on something.
+
+    Cloth needs one weld per hand per towel: folding is a two-handed action (pick up two
+    corners, carry them across to the far edge) and a single weld can only ever hold one
+    corner. The office robot needed only one because a door has one handle.
+
+    body2 is set to vertex 0 of each sheet as a placeholder -- Skills rewrites eq_obj2id at the
+    moment of contact to whichever vertex is actually nearest the palm, then writes the relative
+    pose into eq_data. Without rewriting the pose the solver enforces the compiled offset and
+    the towel snaps across the room.
+  -->
+  <!--
+    A closed drum door sits flush in its opening and therefore touches the ring, the cavity and
+    the cabinet all at once. Left to collide it is 63 interpenetrating contacts at reset and the
+    solver simply shoves the door open -- measured swinging to -97 degrees on step 200 with no
+    one touching it. The office scene has the same problem and the same fix: exclude the leaf
+    from the frame it lives in.
+
+    Momo is NOT excluded, so a hand still meets the door and can push or pull it.
+  -->
+  <contact>
+    <exclude body1="drum_door" body2="world"/>
+  </contact>
+
+  <equality>
+    <!--
+      The drum door handle. A friction grip does not hold it, exactly as a friction grip does
+      not hold an office door handle: measured the hand arriving 0.068 m from the handle,
+      closing, walking backwards, and the door not moving at all. So a closed hand on the
+      handle is a weld, and Skills.open_washer writes the relative pose at the moment of
+      contact -- without that the solver enforces the compiled offset and the door snaps to
+      the hand.
+    -->
+    <weld name="grasp_door_r" body1="palm_r" body2="drum_door" active="false" solref="0.02 1"/>
+
+    <!-- The basket. Held by a weld for the same reason the door is: a friction grip on a
+         rim cannot carry a box across a room. -->
+    <weld name="grasp_basket_r" body1="palm_r" body2="basket" active="false" solref="0.02 1"/>
+    <weld name="grasp_basket_l" body1="palm_l" body2="basket" active="false" solref="0.02 1"/>
+
+    <weld name="grasp_a_r" body1="palm_r" body2="towel_a_0" active="false" solref="0.01 1"/>
+    <weld name="grasp_a_l" body1="palm_l" body2="towel_a_0" active="false" solref="0.01 1"/>
+    <weld name="grasp_b_r" body1="palm_r" body2="towel_b_0" active="false" solref="0.01 1"/>
+    <weld name="grasp_b_l" body1="palm_l" body2="towel_b_0" active="false" solref="0.01 1"/>
+  </equality>
+
+  <keyframe>
+    <!--
+      qpos = an01 (34) + washer_door (1) + towel_a (63 verts x 3) + towel_b (63 x 3).
+
+      After the an01 block come washer_door (1), then the BASKET's free joint (7: xyz then
+      quaternion), then the two towels' flex vertices. The basket is a free body now -- it is
+      carried in this errand -- so a keyframe that omits its pose leaves it at the origin,
+      lying through the floor in the middle of the room.
+
+      The an01 block is, in order:
+        root free joint      7   x y z, then quaternion w x y z
+        waist_yaw            1
+        neck_yaw, neck_pitch 2
+        right arm            6   sh_pitch, sh_roll, sh_yaw, elbow, grip1, grip2
+        left arm             6   same
+        right leg            6   hip_yaw, hip_roll, hip_pitch, knee, ank_pitch, ank_roll
+        left leg             6   same
+
+      Flex vertices are NOT listed here: MuJoCo fills them from the flexcomp's own `pos`, and
+      writing 378 coordinates into a keyframe by hand would be both unreadable and wrong the
+      moment the grid size changed. A keyframe that omits them leaves them at their compiled
+      positions, which is exactly what is wanted.
+
+      PELVIS HEIGHT IS 0.6694, and it is MEASURED FROM MESH VERTICES, not from bounding
+      volumes. That distinction is the whole reason this number was wrong once already.
+
+      geom_rbound is a bounding SPHERE radius. For a foot -- long, wide and flat -- the sphere
+      is far larger than the sole is low, so `geom_xpos.z - rbound` under-reports the sole by
+      several centimetres. Sizing the keyframe that way gave 0.738 and left the robot hovering
+      0.069 m off the floor, visibly airborne in the viewer while every "is it standing" check
+      still passed, because it was standing -- on nothing, held up by the servos.
+
+      The honest measurement is the lowest VERTEX of the foot's collision mesh, in world
+      coordinates: c_foot_r spans z -0.0753..0.0983 locally, the foot body rides at 0.1439, so
+      the sole is at 0.0686 and the pelvis has to come down by that much -- to 0.6694.
+
+      The last 0.019 m is the standing pose itself: the keyframe bends hip, knee and ankle, and
+      a bent leg is shorter than a straight one. That part is easier to measure than to derive,
+      so it was: dropping to 0.6509 puts the sole on the floor at t=0 with the legs in the pose
+      they are actually in.
+
+      The robot faces +x. The quaternion (0.7071,0,0,0.7071) is +90 degrees about z, which
+      maps +x onto +y -- so these keyframes all have it facing north, toward the washer wall.
+    -->
+    <!--
+      "start" stands AN-01 directly in front of the drum door, close enough to work on it.
+
+      The drum mouth is centred at (-1.45, 1.288) and the handle sits at (-1.235, 1.195). The
+      arm reaches 0.25 m (sim/reach.WORKING_REACH_M), so the robot has to be within that of
+      the handle before it can touch anything -- y=0.98 leaves a 0.22 m gap to the mouth
+      plane, which is inside the envelope and still clear of the door's own swing.
+
+      MOVED to (-1.62, 0.86) when the basket stand went in at (-1.00, 1.05): the old start
+      at (-1.24, 0.93) was inside that stand's footprint (x -1.24..-0.76, y 0.87..1.23), so
+      the robot spawned standing in the furniture and juddered against it. This is the second
+      time a keyframe has been placed inside something -- check the footprints when adding
+      any fixture near a start pose.
+
+      The spot is CHOSEN FOR WHERE THE ROBOT SETTLES, not for where it starts. Dropped in at
+      a keyframe the feet are not yet loaded, and the first second of physics slides it about
+      0.25 m before the gait takes hold -- measured it starting at (-1.36, 0.98) and coming to
+      rest at (-1.62, 1.05). So the start is offset up-range of that, and what matters is the
+      settled position, which is what every reach measurement is taken from.
+    -->
+    <key name="start"
+         qpos="-1.62 0.86 0.6509   0.7071 0 0 0.7071
+               0
+               0 0.15
+               -0.05 -0.20 0 -0.22   0 0
+               -0.05  0.20 0 -0.22   0 0
+               0 0 -0.25 0.5 -0.25 0
+               0 0 -0.25 0.5 -0.25 0
+               0
+               -0.30 -0.55 0.623   1 0 0 0"/>
+    <!-- "middle" starts it in the centre of the room, for navigation runs.
+
+         MOVED to (0.55, -0.10) from (0, -0.60), which was 0.30 m from the basket's centre --
+         i.e. standing inside it. The robot spawned in contact with basket_w3 through its
+         chest, upper arm and fingers, shoving the basket a little further every step. Every
+         basket test run from this keyframe was therefore diagnosing a collision the keyframe
+         itself had created, which cost a long time to see. A start pose has to be clear of
+         everything the errand touches. -->
+    <key name="middle"
+         qpos="0.55 -0.10 0.6509   0.7071 0 0 0.7071
+               0
+               0 0
+               -0.05 -0.20 0 -0.22   0 0
+               -0.05  0.20 0 -0.22   0 0
+               0 0 -0.25 0.5 -0.25 0
+               0 0 -0.25 0.5 -0.25 0
+               0
+               -0.30 -0.55 0.623   1 0 0 0"/>
+    <!-- "counter" starts it at the fold surface, for folding runs. -->
+    <key name="counter"
+         qpos="1.05 1.05 0.6509   0.7071 0 0 0.7071
+               0
+               0 0.15
+               -0.05 -0.20 0 -0.22   0 0
+               -0.05  0.20 0 -0.22   0 0
+               0 0 -0.25 0.5 -0.25 0
+               0 0 -0.25 0.5 -0.25 0
+               0
+               -0.30 -0.55 0.623   1 0 0 0"/>
+  </keyframe>
+</mujoco>

@@ -45,6 +45,9 @@ class Reporter(Protocol):
     def show(self, caption: str = "") -> None:
         """Post what the robot can currently see."""
 
+    def finished(self, instruction: str, ok: bool, measurements: list[dict]) -> None:
+        """The closing report: whether it worked, what each step did, and a last picture."""
+
 
 class NullReporter:
     """Reports nowhere. The default, so `execute()` works with no Pyunto connection."""
@@ -53,6 +56,7 @@ class NullReporter:
     def step_started(self, step) -> None: ...  # noqa: ANN001
     def step_finished(self, step, result) -> None: ...  # noqa: ANN001
     def show(self, caption: str = "") -> None: ...
+    def finished(self, instruction: str, ok: bool, measurements: list[dict]) -> None: ...
 
 
 class ThreadReporter:
@@ -81,6 +85,7 @@ class ThreadReporter:
         # are the one part of this a person may not want, so it is switchable.
         self.send_images = send_images and thread_id is not None and robot is not None
         self._started_at: float | None = None
+        self._step_number = 0
 
     # -- narration ----------------------------------------------------------------
 
@@ -96,19 +101,30 @@ class ThreadReporter:
         self._started_at = time.monotonic()
 
     def step_finished(self, step, result) -> None:  # noqa: ANN001
-        """One line per step: what it was, and what came of it.
+        """One message per step: what it was, what came of it, and what the sensors read.
 
         Sent after the fact rather than before. "I am about to walk to the door" followed by
         "I walked to the door" is two messages for one event; the person already knows the
         plan, because it was posted before anything moved.
         """
+        self._step_number += 1
         elapsed = time.monotonic() - (self._started_at or time.monotonic())
         mark = "✅" if result.ok else "⚠️"
         message = (result.message or "").strip()
-        line = f"{mark} {_describe(step)} — {message}" if message else f"{mark} {_describe(step)}"
+        line = f"{mark} {self._step_number}. {_describe(step)}"
+        if message:
+            line += f" — {message}"
         if elapsed >= SLOW_STEP_SECONDS:
             line += f" ({elapsed:.0f}s)"
+        readings = _readings(getattr(result, "data", None))
+        if readings:
+            # What the robot measured, not just what it claims. "the door is 0.42 m away" is
+            # checkable; "I walked to the door" is a story.
+            line += "\n📡 " + readings
         self.say(line)
+        # A frame per step is the point of a step-by-step report: it is how someone sees the
+        # arm actually go up rather than reading that it did.
+        self.show(f"📷 {self._step_number}. {_describe(step)}")
 
     # -- pictures -----------------------------------------------------------------
 
@@ -134,6 +150,25 @@ class ThreadReporter:
             # retrying it once per step would flood the log for the rest of the session.
             self.send_images = False
 
+    def finished(self, instruction: str, ok: bool, measurements: list[dict]) -> None:
+        """One self-contained closing message, plus a final picture.
+
+        The running commentary is for whoever is watching live. This is for everyone else:
+        the person who looks at the diary tonight wants one entry that says whether the
+        thing they asked for happened, not eight fragments to reassemble.
+        """
+        headline = "✅ Done" if ok else "⚠️ Not finished"
+        lines = [f"{headline}: “{instruction.strip()}”"]
+        for i, measured in enumerate(measurements, start=1):
+            mark = "✅" if measured.get("ok") else "⚠️"
+            readings = _readings({k: v for k, v in measured.items() if k not in ("step", "ok")})
+            line = f"  {mark} {i}. {measured.get('step', '')}"
+            if readings:
+                line += f" — {readings}"
+            lines.append(line)
+        self.say("\n".join(lines))
+        self.show("📷 " + ("Done" if ok else "Stopped here") + f": {instruction.strip()}")
+
     def _frame(self) -> bytes | None:
         """The current camera image as PNG bytes, or None if it cannot be produced."""
         try:
@@ -146,6 +181,31 @@ class ThreadReporter:
         except Exception:  # noqa: BLE001
             log.warning("could not render a camera frame", exc_info=True)
             return None
+
+
+def _readings(data) -> str:  # noqa: ANN001
+    """Sensor values as a short phrase. Empty when there is nothing worth saying.
+
+    A raw dict pasted into a diary is unreadable, and most of what skills record is for the
+    logs. Distances, angles and counts are the parts a person can actually check.
+    """
+    if not data:
+        return ""
+    parts = []
+    for key, value in data.items():
+        if value is None or isinstance(value, (list, dict, bytes)):
+            continue
+        label = str(key).replace("_", " ")
+        if isinstance(value, float):
+            if key.endswith("_m"):
+                parts.append(f"{label[:-2].strip()} {value:.2f} m")
+            elif key.endswith("_deg"):
+                parts.append(f"{label[:-4].strip()} {value:.0f}°")
+            else:
+                parts.append(f"{label} {value:.2f}")
+        else:
+            parts.append(f"{label} {value}")
+    return ", ".join(parts[:4])
 
 
 def _describe(step) -> str:  # noqa: ANN001
