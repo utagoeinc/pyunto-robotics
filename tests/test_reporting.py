@@ -61,9 +61,17 @@ class FakeSkills:
 
 
 class FakeRobot:
+    """A camera whose view changes every frame, as a real one does."""
+
+    def __init__(self) -> None:
+        self._frame = 0
+
     def look(self, camera: str = "head_cam"):  # noqa: ANN001
+        self._frame += 1
+        pixels = np.full((8, 8, 3), self._frame % 251, dtype=np.uint8)
+
         class Observation:
-            rgb = np.zeros((8, 8, 3), dtype=np.uint8)
+            rgb = pixels
 
         return Observation()
 
@@ -282,9 +290,11 @@ def test_raising_an_arm_actually_lifts_the_hand():
 def test_a_one_step_instruction_stays_short():
     """Volume is a feature with a cost. Twelve messages for "raise your hand" is spam.
 
-    A single-step instruction gets exactly six posts: the scene before, the plan, the step,
-    the step's picture, the closing report, the scene after. If a change pushes this up,
-    that is a decision to make deliberately rather than discover in a screenshot.
+    A single-step instruction gets at most six posts: the scene before, the plan, the step,
+    the step's picture, the closing report, the scene after. In practice a gesture leaves the
+    robot where it stood, so the last two frames are identical and one is dropped -- five.
+    If a change pushes this up, that is a decision to make deliberately rather than discover
+    in a screenshot.
     """
 
     class OneStep(FakeSkills):
@@ -368,3 +378,37 @@ def test_a_thread_with_only_robot_posts_is_left_alone():
     )
     assert backend.reply(ctx) is None
     assert client.posts == []
+
+
+def test_the_same_picture_is_never_posted_twice_in_a_row():
+    """On a one-step errand the step frame and the closing frame are the same pose.
+
+    Two identical photographs in a row read as the robot malfunctioning -- exactly the
+    impression these pictures exist to dispel.
+    """
+
+    class StillCamera:
+        """A robot that never moves, so every frame is byte-identical."""
+
+        def look(self, camera: str = "head_cam"):  # noqa: ANN001
+            class Observation:
+                rgb = np.zeros((8, 8, 3), dtype=np.uint8)
+
+            return Observation()
+
+    class OneStep(FakeSkills):
+        def run(self, action, argument, where, expect):  # noqa: ANN001
+            return FakeResult(True, "Raised.")
+
+    class SingleStepPlanner:
+        def plan(self, text):  # noqa: ANN001
+            return FakePlan([FakeStep("raise_arm", "r")])
+
+    client = RecordingClient()
+    backend = build(client)
+    backend.robot = StillCamera()
+    backend.agent.skills = OneStep()
+    backend.agent.planner = SingleStepPlanner()
+    run(backend, "右手を挙げて")
+    images = [p for p in client.posts if p[0] == "image"]
+    assert len(images) == 1, [p[1] for p in images]

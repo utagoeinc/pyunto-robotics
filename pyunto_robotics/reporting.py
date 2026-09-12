@@ -17,6 +17,7 @@ Pyunto; `NullReporter` throws it away, which is what `--say` on the command line
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import time
@@ -86,6 +87,7 @@ class ThreadReporter:
         self.send_images = send_images and thread_id is not None and robot is not None
         self._started_at: float | None = None
         self._step_number = 0
+        self._last_frame: bytes | None = None
 
     # -- narration ----------------------------------------------------------------
 
@@ -140,6 +142,15 @@ class ThreadReporter:
         png = self._frame()
         if png is None:
             return
+        # Do not post the same picture twice. On a one-step errand the frame after the step
+        # and the frame at the end are taken from the same pose, so they are byte-identical --
+        # and two identical photographs in a row read as the robot malfunctioning, which is
+        # precisely the impression these pictures exist to dispel.
+        digest = hashlib.sha256(png).digest()
+        if digest == self._last_frame:
+            log.debug("skipping an identical camera frame")
+            return
+        self._last_frame = digest
         try:
             self.client.send_image(
                 self.chat_space_id, png, thread_id=self.thread_id, caption=caption or None
