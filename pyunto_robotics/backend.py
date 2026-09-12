@@ -38,14 +38,22 @@ class RobotBackend:
         self.send_images = send_images
 
     def reply(self, ctx: Context) -> str | None:
-        """Act on the newest entry and return what happened, as a sentence.
+        """Act on the newest entry from a PERSON, and return what happened.
 
-        Only the latest turn is acted on. Diary entries are instructions, not a conversation to
-        be summarised: replying to a three-day-old "open the door" would be surprising.
+        The last turn overall is not good enough. This robot narrates as it works, so its own
+        progress notes land in the thread and come back as history -- and taking the last turn
+        then hands the robot its own "Understood: ..." to carry out as a fresh instruction,
+        which it dutifully re-plans and re-runs. That is what filled a thread with repeated
+        plans and repeated "I raised my right hand".
+
+        Diary entries are instructions, not a conversation to be summarised, so it is still
+        only the newest one that is acted on -- just the newest one somebody else wrote.
         """
-        if not ctx.turns:
-            return None
-        instruction = ctx.turns[-1].text.strip()
+        instruction = ""
+        for turn in reversed(ctx.turns):
+            if turn.role == "user":
+                instruction = turn.text.strip()
+                break
         if not instruction:
             return None
         log.info("instruction: %s", instruction)

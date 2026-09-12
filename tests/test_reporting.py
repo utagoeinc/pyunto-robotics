@@ -301,3 +301,70 @@ def test_a_one_step_instruction_stays_short():
     backend.agent.planner = SingleStepPlanner()
     run(backend, "右手を挙げて")
     assert len(client.posts) == 6, [p[1] for p in client.posts]
+
+
+def test_the_robot_does_not_take_its_own_narration_as_an_instruction():
+    """The bug that filled a thread: narrate, then obey your own narration, forever.
+
+    Progress notes are posted into the same thread, so they come back as history. Acting on
+    the last turn overall hands the robot its own "Understood: ..." to carry out, which it
+    re-plans and re-runs -- and each run posts more notes to trip over next time.
+    """
+    from pyunto_agent.backends import Context, Turn
+
+    client = RecordingClient()
+    backend = build(client)
+    ctx = Context(
+        space_name="diary",
+        thread_id="thread-1",
+        turns=[
+            Turn("user", "someone", "open the door"),
+            # Everything below is the robot's own commentary from the previous run.
+            Turn("assistant", "H1", "🤖 Understood: “open the door”\nI will: goto door"),
+            Turn("assistant", "H1", "✅ 1. goto door — Walked to the door."),
+        ],
+        persona="",
+        chat_space_id="space-1",
+    )
+    backend.reply(ctx)
+    plan = texts(client)[0]
+    # It must act on what the person wrote, not on its own last sentence.
+    assert "open the door" in plan
+    assert "Understood: “🤖" not in plan and "✅" not in plan.splitlines()[0]
+
+
+def test_an_instruction_is_found_even_behind_its_own_chatter():
+    """History can end with many robot posts; the person's words are still the instruction."""
+    from pyunto_agent.backends import Context, Turn
+
+    client = RecordingClient()
+    backend = build(client)
+    ctx = Context(
+        space_name="diary",
+        thread_id="thread-1",
+        turns=[
+            Turn("user", "someone", "open the door"),
+            *[Turn("assistant", "H1", f"✅ {i}. step") for i in range(6)],
+        ],
+        persona="",
+        chat_space_id="space-1",
+    )
+    backend.reply(ctx)
+    assert "open the door" in texts(client)[0]
+
+
+def test_a_thread_with_only_robot_posts_is_left_alone():
+    """Nothing was asked, so nothing should happen."""
+    from pyunto_agent.backends import Context, Turn
+
+    client = RecordingClient()
+    backend = build(client)
+    ctx = Context(
+        space_name="diary",
+        thread_id="thread-1",
+        turns=[Turn("assistant", "H1", "✅ 1. goto door")],
+        persona="",
+        chat_space_id="space-1",
+    )
+    assert backend.reply(ctx) is None
+    assert client.posts == []

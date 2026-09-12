@@ -159,6 +159,13 @@ class ThreadReporter:
         """
         headline = "✅ Done" if ok else "⚠️ Not finished"
         lines = [f"{headline}: “{instruction.strip()}”"]
+        # For a single step the per-step message said all of this a moment ago, and repeating
+        # it under a "Done" heading is the same sentence twice. The headline alone is the
+        # closing report; the recap earns its place only when there is a sequence to recap.
+        if len(measurements) < 2:
+            self.say(lines[0])
+            self.show("📷 " + ("Done" if ok else "Stopped here") + f": {instruction.strip()}")
+            return
         for i, measured in enumerate(measurements, start=1):
             mark = "✅" if measured.get("ok") else "⚠️"
             readings = _readings({k: v for k, v in measured.items() if k not in ("step", "ok")})
