@@ -62,8 +62,15 @@
     <!-- ================== ground floor ================== -->
     <geom name="floor_1" type="plane" size="30 30 0.05" material="carpet"
           friction="1.0 0.02 0.001" condim="3"/>
-    <geom name="wall_1_north" type="box" pos="2 2.6 1.4" size="10 0.15 1.4" material="wall"/>
-    <geom name="wall_1_south" type="box" pos="2 -2.6 1.4" size="10 0.15 1.4" material="wall"/>
+    <!--
+      The corridor walls stop at the shaft mouth (x=-7.05), not 1 m past it.
+
+      Running to x=-8.00 they enclosed the lift doorway from both sides, and the robot walked
+      into the pocket and stopped -- there was no opening to walk through. The lift is at the
+      end of the corridor, so the corridor has to end there.
+    -->
+    <geom name="wall_1_north" type="box" pos="2.5 2.6 1.4" size="9.5 0.15 1.4" material="wall"/>
+    <geom name="wall_1_south" type="box" pos="2.5 -2.6 1.4" size="9.5 0.15 1.4" material="wall"/>
     <!--
       The ceilings and the upper floor stop at x=-7, east of the lift shaft. A shaft with a
       ceiling over it is a shaft the car cannot rise through: the robot's head met the
@@ -90,8 +97,8 @@
     -->
     <geom name="floor_2" type="box" pos="3.5 0 3.95" size="8.5 2.6 0.1" material="carpet"
           friction="1.0 0.02 0.001" condim="3"/>
-    <geom name="wall_2_north" type="box" pos="2 2.6 5.45" size="10 0.15 1.4" material="wall"/>
-    <geom name="wall_2_south" type="box" pos="2 -2.6 5.45" size="10 0.15 1.4" material="wall"/>
+    <geom name="wall_2_north" type="box" pos="2.5 2.6 5.45" size="9.5 0.15 1.4" material="wall"/>
+    <geom name="wall_2_south" type="box" pos="2.5 -2.6 5.45" size="9.5 0.15 1.4" material="wall"/>
     <geom name="ceiling_2" type="box" pos="3.5 0 7.05" size="8.5 2.6 0.1" material="ceiling"/>
 
     <geom name="door_201" type="box" pos="-4 2.42 5.10" size="0.5 0.06 1.05" material="door_101"/>
@@ -104,11 +111,11 @@
       The shaft walls, so the car is visibly a lift rather than a floating slab. Open on the
       east side, which is where the robot walks in from.
     -->
-    <geom name="shaft_west" type="box" pos="-10.0 0 3.6" size="0.15 1.6 3.6" material="wall"/>
-    <geom name="shaft_north" type="box" pos="-8.6 1.45 3.6" size="1.55 0.15 3.6" material="wall"/>
-    <geom name="shaft_south" type="box" pos="-8.6 -1.45 3.6" size="1.55 0.15 3.6" material="wall"/>
+    <geom name="shaft_west" type="box" pos="-10.8 0 3.6" size="0.15 1.6 3.6" material="wall"/>
+    <geom name="shaft_north" type="box" pos="-9.2 1.45 3.6" size="1.45 0.15 3.6" material="wall"/>
+    <geom name="shaft_south" type="box" pos="-9.2 -1.45 3.6" size="1.45 0.15 3.6" material="wall"/>
 
-    <body name="lift" pos="-8.2 0 0.25">
+    <body name="lift" pos="-9.2 0 -0.25">
       <!--
         A slide joint, not a mocap or a teleport. The robot rides up because it is standing on
         a surface that moves and friction carries it -- which means being half out of the car
@@ -120,7 +127,7 @@
         damping to stop it oscillating under a stiff position gain and no more; the motor is
         what holds the floor, not the friction.
       -->
-      <joint name="lift_z" type="slide" axis="0 0 1" range="0 3.55" damping="60"/>
+      <joint name="lift_z" type="slide" axis="0 0 1" range="0 4.05" damping="60"/>
       <!--
         The car is sized to FIT ITS SHAFT, with 5 cm of clearance all round.
 
@@ -130,6 +137,11 @@
         actuator commanding 4 m. It looked like a control problem and was a tape-measure one.
 
         Shaft inner faces: x from -9.85 east, y from -1.30 to +1.30.
+
+        The car floor is LEVEL WITH THE CORRIDOR, which means it hangs in a pit rather than
+        standing on the ground. Sitting on the ground its 0.5 m slab made a 0.5 m step at the
+        threshold, and the robot walked into it and stopped -- a lift you have to climb into
+        is not a lift.
 
         Widened once already. A 1.5 m car is a dumbwaiter: the humanoid's gait marks time even
         at a zero command, and it walked itself off the east edge every ride, ending up 0.34 m
@@ -151,6 +163,17 @@
         and costs nothing visually -- the car's floor is simply thick, as a real one is once
         you count the structure under it.
       -->
+      <!--
+        The floor is 4 cm proud of the slab beneath it and inset from the threshold, so the
+        only thing at the doorway is a flat surface at corridor height.
+
+        Level to the millimetre was not enough: the walking gait swings a thigh forward and
+        low, and it caught the slab's square edge at the threshold every time -- the robot
+        stopped dead at x=-7.08 with one contact, thigh against floor edge, and stayed there
+        for 9000 steps. Lifts have a sill for this reason.
+      -->
+      <geom name="lift_sill" type="box" pos="1.15 0 0.255" size="0.18 1.15 0.01"
+            material="lift_car" density="120" friction="1.2 0.02 0.001" condim="3"/>
       <geom name="lift_floor" type="box" size="1.30 1.20 0.25" material="lift_car"
             density="120" friction="1.2 0.02 0.001" condim="3"/>
       <!-- A marker panel on the car's back wall: the landmark the robot navigates to. -->
@@ -188,7 +211,7 @@
       its load rather than merely hold it, which is why real ones are sized several times the
       static weight.
     -->
-    <position name="lift_z" joint="lift_z" kp="120000" ctrlrange="0 3.55"
+    <position name="lift_z" joint="lift_z" kp="120000" ctrlrange="0 4.05"
               forcerange="-20000 20000"/>
   </actuator>
 
@@ -219,7 +242,7 @@
       Three centimetres of air lets it settle onto the floor instead of into it.
     -->
     <key name="in_lift"
-         qpos="-8.2 0 1.3436  0 0 0 1
+         qpos="-9.2 0 0.8436  0 0 0 1
                0
                -0.25 -0.12 0 -0.35   0 0
                -0.25  0.12 0 -0.35   0 0
