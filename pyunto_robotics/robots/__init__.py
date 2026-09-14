@@ -30,6 +30,8 @@ def _solar() -> RobotSetup:
             "日光が当たる場所まで移動して、電力を取得してきて",
             "go and fetch some power",
         ),
+        # The park is 20 m from the carport, so this robot needs the far field too.
+        max_depth=45.0,
         camera=Camera(distance=7.0, elevation=-20, azimuth=125),
     )
 
@@ -55,6 +57,9 @@ def _mars() -> RobotSetup:
         keyframe_help="lander (beside the lander), channel (out on the channel floor)",
         examples=("サンプルまで行って", "drive to the beacon"),
         camera=Camera(distance=9.0, elevation=-22, azimuth=135),
+        # 60 m, not the indoor 12. The beacon is 19 m off and the lander 21 m, and at 12 both
+        # read as exactly 12 -- so the rover drove to a phantom and circled it.
+        max_depth=60.0,
     )
 
 

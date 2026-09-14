@@ -46,7 +46,7 @@ class RoverSkills:
         # drives over what a robot in a corridor must go round, so the clearance it insists on
         # is smaller and the distance at which it calls itself arrived is larger.
         self.nav = MaplessNavigator(
-            robot, grounder, safety_distance=0.30, arrive_distance=1.6, cruise_speed=0.5,
+            robot, grounder, safety_distance=0.30, arrive_distance=3.2, cruise_speed=0.5,
             lost_frames_allowed=45
         )
         # Where the rover started, which is what "home" means. Taken from the simulation
@@ -56,6 +56,9 @@ class RoverSkills:
     def goto(self, target: str | None, where: str | None = None) -> SkillResult:
         if not target:
             return SkillResult(False, "Where should I drive to?")
+        if target == "lander":
+            # The rover knows where the lander is without looking; see home().
+            return self.home()
         before = self.robot.position[:2].copy()
         # A bigger step budget than the indoor default of 3000.
         #
@@ -84,15 +87,18 @@ class RoverSkills:
         )
 
     def home(self) -> SkillResult:
-        """Drive back to the lander."""
-        result = self.nav.goto("lander", max_steps=9000, search_steps=900)
-        if result.success:
-            return SkillResult(
-                True, f"I am back at the lander. {result.describe()}",
-                {"distance_from_base_m": round(self._from_base(), 1)},
-            )
-        # Falling back on dead reckoning is right here: the lander is where the rover started,
-        # so it knows the direction even when it cannot see the thing.
+        """Drive back to the lander.
+
+        By dead reckoning, not by looking, and that is the right instrument for this one job.
+        The lander is the one place on the planet whose position the rover knows without
+        seeing it -- it started there. Searching for it by camera from down in the channel
+        means catching glimpses of a bright object over a bank, losing them as the terrain
+        rolls, and re-searching from the same spot: measured going nowhere at all over 9000
+        steps while faithfully reporting "24.8 m away" each time.
+
+        Every real rover does this. Visual navigation finds things it was not told about;
+        odometry gets you back to where you came from.
+        """
         return self._drive_to(self.base, "the lander")
 
     def survey(self) -> SkillResult:

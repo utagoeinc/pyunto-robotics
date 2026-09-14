@@ -39,6 +39,10 @@ class RobotSetup:
     examples: tuple[str, ...] = ()
     # How the window frames this machine. A rover wants a wider shot than a humanoid.
     camera: object | None = None
+    # How far this robot's depth camera reports. Outdoor scenes need much more than the
+    # indoor default: past the limit every target collapses onto it, and the robot drives
+    # confidently to a point short of the real one.
+    max_depth: float = 12.0
     # Builds the planner. `None` means "build a Domain planner from `domain`", which is what
     # the newer robots do. The office humanoid predates Domain and brings its own planner.
     planner: Callable[[bool], object] | None = None

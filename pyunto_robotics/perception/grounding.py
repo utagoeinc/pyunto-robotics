@@ -98,7 +98,7 @@ _PALETTE: dict[str, tuple[tuple[int, int, int], int]] = {
     # red-brown that a loose red match swallows whole: a first attempt at the beacon caught
     # 14,000 pixels of regolith. The emissive materials keep the hardware separable from it.
     "cache": ((74, 251, 248), 40),
-    "beacon": ((245, 78, 42), 30),
+    "beacon": ((36, 235, 100), 45),
     "lander": ((237, 66, 158), 45),
 
     # --- home / laundry scene (assets/home.xml) ---

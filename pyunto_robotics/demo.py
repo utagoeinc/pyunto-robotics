@@ -127,7 +127,8 @@ def run_demo(
             print("          then run:  pyunto-robotics demo --pair <code>")
 
     print("window  : opening the simulator…")
-    robot = Robot(setup.scene, gait=setup.gait() if setup.gait else None, keyframe=setup.default_keyframe)
+    robot = Robot(setup.scene, gait=setup.gait() if setup.gait else None,
+                  keyframe=setup.default_keyframe, max_depth=setup.max_depth)
     viewer = open_viewer(robot, speed, setup.camera) if view else None
     if view and viewer is None:
         robot.close()

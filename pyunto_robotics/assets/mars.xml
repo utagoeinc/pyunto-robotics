@@ -55,7 +55,14 @@
     <material name="lander_body" rgba="0.93 0.20 0.62 1" emission="0.30" specular="0.5"/>
     <material name="lander_leg" rgba="0.70 0.70 0.74 1" specular="0.55"/>
     <material name="solar_array" rgba="0.12 0.20 0.48 1" specular="0.85" shininess="0.90"/>
-    <material name="beacon_mat" rgba="0.95 0.28 0.14 1" emission="0.35" specular="0.4"/>
+    <!--
+      The beacon is green, not red. Red is the one colour a Mars beacon must not be: the
+      ground here renders around (218,106,60) and the beacon's red at (245,78,42) is close
+      enough that the grounder reported three "beacons" scattered across open regolith, and
+      the rover spent its whole drive circling a patch of dirt. Green is as far from this
+      landscape as magenta is, and the two together stay far apart from each other.
+    -->
+    <material name="beacon_mat" rgba="0.10 0.90 0.35 1" emission="0.40" specular="0.4"/>
     <material name="cache_mat" rgba="0.20 0.80 0.85 1" emission="0.30" specular="0.5"/>
   </asset>
 

@@ -25,7 +25,12 @@ from .gait import Gait, KinematicGait
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
 # Depth beyond this is treated as "no return". mac OpenGL lacks ARB_clip_control, so far-field
-# depth precision is poor; the navigation logic only ever needs the near field anyway.
+# depth precision is poor, and indoors the navigation logic only ever needs the near field.
+#
+# ⚠️ Outdoors it needs much more, and this default silently breaks a rover. Everything past
+# 12 m reads as exactly 12 m, so a target 19 m away is chased to a point 7 m short of it --
+# which is what had the Mars rover circling open ground while reporting, quite truthfully,
+# that it had seen the beacon. Scenes with distances beyond this pass `max_depth` to Robot.
 MAX_DEPTH_M = 12.0
 
 
@@ -55,6 +60,10 @@ class Robot:
         cam_width: int = 424,
         cam_height: int = 320,
         control_hz: float = 50.0,
+        # How far the depth camera reports before calling it "nothing there". The indoor
+        # default suits a robot in rooms; outdoor scenes must raise it, or every target past
+        # it collapses onto the limit and the robot drives to a point short of the real one.
+        max_depth: float = MAX_DEPTH_M,
     ):
         path = Path(scene)
         if not path.is_absolute():
@@ -76,6 +85,7 @@ class Robot:
         #: site and quietly breaks anyone who wraps the robot themselves.
         self.on_step: Callable[[], None] | None = None
         self.control_dt = 1.0 / control_hz
+        self.max_depth = float(max_depth)
         self._steps_per_control = max(1, round(self.control_dt / self.model.opt.timestep))
 
         self._renderer = mujoco.Renderer(self.model, height=cam_height, width=cam_width)
@@ -181,8 +191,8 @@ class Robot:
         depth = self._depth_renderer.render().copy()
         # MuJoCo returns the far-plane value for rays that hit nothing; normalise that to a
         # single sentinel so downstream code has one thing to test for.
-        depth[~np.isfinite(depth)] = MAX_DEPTH_M
-        depth = np.clip(depth, 0.0, MAX_DEPTH_M)
+        depth[~np.isfinite(depth)] = self.max_depth
+        depth = np.clip(depth, 0.0, self.max_depth)
 
         return Observation(rgb=rgb, depth=depth, position=self.position, yaw=self.yaw)
 
