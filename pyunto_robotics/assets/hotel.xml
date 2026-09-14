@@ -1,0 +1,230 @@
+<!--
+  Two floors of a hotel corridor, with a lift between them, for a cleaning robot.
+
+  What makes this different from every other scene here: the robot cannot reach half the
+  building by driving. It has to get into a lift, ride it, and step out on another floor.
+  That is the thing hotel operators actually ask about -- a cleaner that works one floor is a
+  novelty, and one that moves between them is a machine you can staff a building with.
+
+  The lift is a platform on a vertical slide joint, driven by a position actuator. Modelling it
+  as a moving floor rather than as teleportation is the whole point: the robot has to be
+  standing on it when it moves, it rides up with it because friction carries it, and if it is
+  half in the doorway the doors are in the way. All of that is behaviour a scripted lift would
+  hide.
+
+  Layout, same on both floors:
+    * A corridor running east-west.
+    * Four room doors along the north side, each a different colour -- the rooms to clean.
+    * The lift at the west end.
+
+  Floors are stacked 4 m apart, and the upper corridor has its own floor slab, so a robot that
+  steps out of the lift on the wrong level falls rather than walking on air.
+-->
+<mujoco model="hotel">
+  <include file="pyunto_h1.xml"/>
+
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.004" integrator="implicitfast"/>
+
+  <visual>
+    <headlight ambient="0.45 0.45 0.46" diffuse="0.40 0.40 0.40" specular="0.06 0.06 0.06"/>
+    <map znear="0.02" zfar="60"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <texture name="carpet_tex" type="2d" builtin="checker" rgb1="0.32 0.28 0.34"
+             rgb2="0.29 0.25 0.31" width="256" height="256"/>
+    <material name="carpet" texture="carpet_tex" texrepeat="16 4" specular="0.04"/>
+    <material name="wall" rgba="0.88 0.86 0.82 1" specular="0.06"/>
+    <material name="ceiling" rgba="0.94 0.93 0.91 1" specular="0.05"/>
+    <material name="trim" rgba="0.55 0.45 0.36 1" specular="0.15"/>
+    <material name="lift_car" rgba="0.72 0.74 0.78 1" specular="0.55" shininess="0.6"/>
+
+    <!--
+      Room doors and the lift, in colours the building does not otherwise contain. Emissive
+      for the reason every scene here has had to learn: under indoor lighting a plain material
+      renders far darker than its rgba, and a palette written from the XML matches nothing.
+    -->
+    <material name="door_101" rgba="0.90 0.16 0.16 1" emission="0.45" specular="0.2"/>
+    <material name="door_102" rgba="0.12 0.45 0.92 1" emission="0.45" specular="0.2"/>
+    <material name="door_103" rgba="0.10 0.78 0.30 1" emission="0.45" specular="0.2"/>
+    <material name="door_104" rgba="0.95 0.75 0.10 1" emission="0.45" specular="0.2"/>
+    <material name="lift_mat" rgba="0.85 0.20 0.75 1" emission="0.45" specular="0.3"/>
+  </asset>
+
+  <worldbody>
+    <light name="corridor_light" pos="0 0 7.5" dir="0 0 -1" directional="true"
+           diffuse="0.70 0.69 0.66" specular="0.10 0.10 0.10" castshadow="true"/>
+    <light name="fill" pos="6 -6 5" dir="-0.4 0.6 -0.6" directional="true"
+           diffuse="0.22 0.22 0.24"/>
+
+    <!-- ================== ground floor ================== -->
+    <geom name="floor_1" type="plane" size="30 30 0.05" material="carpet"
+          friction="1.0 0.02 0.001" condim="3"/>
+    <geom name="wall_1_north" type="box" pos="2 2.6 1.4" size="10 0.15 1.4" material="wall"/>
+    <geom name="wall_1_south" type="box" pos="2 -2.6 1.4" size="10 0.15 1.4" material="wall"/>
+    <!--
+      The ceilings and the upper floor stop at x=-7, east of the lift shaft. A shaft with a
+      ceiling over it is a shaft the car cannot rise through: the robot's head met the
+      ground-floor ceiling at a car height of 1.10 m and the lift stalled there against 20 kN
+      of motor, every time, whatever the ramp. A lift needs a hole in every floor it passes.
+    -->
+    <geom name="ceiling_1" type="box" pos="3.5 0 3.0" size="8.5 2.6 0.1" material="ceiling"/>
+
+    <!--
+      Room doors on the ground floor. 3 m apart along the north wall, which is close enough
+      that several are in frame at once -- so "the blue door" is a choice the robot has to
+      make rather than the only thing it can see.
+    -->
+    <geom name="door_101" type="box" pos="-4 2.42 1.05" size="0.5 0.06 1.05" material="door_101"/>
+    <geom name="door_102" type="box" pos="-1 2.42 1.05" size="0.5 0.06 1.05" material="door_102"/>
+    <geom name="door_103" type="box" pos="2 2.42 1.05" size="0.5 0.06 1.05" material="door_103"/>
+    <geom name="door_104" type="box" pos="5 2.42 1.05" size="0.5 0.06 1.05" material="door_104"/>
+
+    <!-- ================== first floor ================== -->
+    <!--
+      A real slab, not a decoration. A robot that steps out of the lift at the wrong height
+      should fall, because that is what would happen, and a scene where it walks on air would
+      hide a bug rather than expose one.
+    -->
+    <geom name="floor_2" type="box" pos="3.5 0 3.95" size="8.5 2.6 0.1" material="carpet"
+          friction="1.0 0.02 0.001" condim="3"/>
+    <geom name="wall_2_north" type="box" pos="2 2.6 5.45" size="10 0.15 1.4" material="wall"/>
+    <geom name="wall_2_south" type="box" pos="2 -2.6 5.45" size="10 0.15 1.4" material="wall"/>
+    <geom name="ceiling_2" type="box" pos="3.5 0 7.05" size="8.5 2.6 0.1" material="ceiling"/>
+
+    <geom name="door_201" type="box" pos="-4 2.42 5.10" size="0.5 0.06 1.05" material="door_101"/>
+    <geom name="door_202" type="box" pos="-1 2.42 5.10" size="0.5 0.06 1.05" material="door_102"/>
+    <geom name="door_203" type="box" pos="2 2.42 5.10" size="0.5 0.06 1.05" material="door_103"/>
+    <geom name="door_204" type="box" pos="5 2.42 5.10" size="0.5 0.06 1.05" material="door_104"/>
+
+    <!-- ================== the lift ================== -->
+    <!--
+      The shaft walls, so the car is visibly a lift rather than a floating slab. Open on the
+      east side, which is where the robot walks in from.
+    -->
+    <geom name="shaft_west" type="box" pos="-10.0 0 3.6" size="0.15 1.6 3.6" material="wall"/>
+    <geom name="shaft_north" type="box" pos="-8.6 1.45 3.6" size="1.55 0.15 3.6" material="wall"/>
+    <geom name="shaft_south" type="box" pos="-8.6 -1.45 3.6" size="1.55 0.15 3.6" material="wall"/>
+
+    <body name="lift" pos="-8.2 0 0.25">
+      <!--
+        A slide joint, not a mocap or a teleport. The robot rides up because it is standing on
+        a surface that moves and friction carries it -- which means being half out of the car
+        fails the way it should, instead of the robot arriving on the next floor regardless.
+      -->
+      <!--
+        Damping 60, not 900. At 900 the joint resisted its own actuator: commanded to 4 m the
+        car sat at -0.09 for 3000 steps while the robot stood on it. A lift needs enough
+        damping to stop it oscillating under a stiff position gain and no more; the motor is
+        what holds the floor, not the friction.
+      -->
+      <joint name="lift_z" type="slide" axis="0 0 1" range="0 3.55" damping="60"/>
+      <!--
+        The car is sized to FIT ITS SHAFT, with 5 cm of clearance all round.
+
+        The first version was wider than the opening -- 2.70 m of floor in a 2.60 m shaft, and
+        overlapping the west wall by 0.30 m. The car then rested on the walls it was jammed
+        against instead of hanging from its joint, and sat at z=-0.09 ignoring a position
+        actuator commanding 4 m. It looked like a control problem and was a tape-measure one.
+
+        Shaft inner faces: x from -9.85 east, y from -1.30 to +1.30.
+
+        Widened once already. A 1.5 m car is a dumbwaiter: the humanoid's gait marks time even
+        at a zero command, and it walked itself off the east edge every ride, ending up 0.34 m
+        past the floor and falling. A lift a person rides in is 2 m across, and so is this.
+      -->
+      <!--
+        density 120, not MuJoCo's default 1000. As solid slabs of water the car massed 1776 kg
+        and needed 17 kN to lift; its actuator has 4 kN, so it sat still at full command and
+        looked like a control fault. A real lift car is a steel shell around air, which is
+        what this density stands for.
+      -->
+      <!--
+        A deep slab, 0.5 m thick rather than 0.2.
+
+        A thin floor moving upward tunnels: the robot ended up 0.71 m below a car it had been
+        standing on, hanging from it, and the actuator saturated trying to lift its own
+        passenger. Contact is resolved per step against the geometry as it is now, and a thin
+        fast slab can pass a foot between one step and the next. Depth is the cheapest fix
+        and costs nothing visually -- the car's floor is simply thick, as a real one is once
+        you count the structure under it.
+      -->
+      <geom name="lift_floor" type="box" size="1.30 1.20 0.25" material="lift_car"
+            density="120" friction="1.2 0.02 0.001" condim="3"/>
+      <!-- A marker panel on the car's back wall: the landmark the robot navigates to. -->
+      <geom name="lift_panel" density="120" type="box" pos="-1.23 0 1.25" size="0.06 0.9 0.9" material="lift_mat"/>
+      <!--
+        Waist-high rails, 0.45 m rather than 0.9 m tall. At 0.9 they reached the robot's chest,
+        and as it shifted its weight during the ride its torso and both arms pressed into them
+        -- the car then hauled on the robot instead of carrying it, and stalled at 1.75 m with
+        contacts on pelvis, torso and all four arm links. A lift car's walls should be beside
+        what it carries, not gripping it.
+      -->
+      <geom name="lift_rail_n" density="120" type="box" pos="0 1.13 0.70" size="1.30 0.06 0.45" material="lift_car"/>
+      <geom name="lift_rail_s" density="120" type="box" pos="0 -1.13 0.70" size="1.30 0.06 0.45" material="lift_car"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!--
+      Position control with a stiff gain: a lift holds its floor against whatever stands on it.
+      forcerange is generous because the car has to lift a 40 kg robot as well as itself.
+    -->
+    <!--
+      forcerange 20 kN. The car and the robot together weigh about 2.5 kN, and a first attempt
+      at 4 kN left so little margin that the car crept to 0.09 m and stalled: a lift has to
+      accelerate its load, not merely hold it, and a robot shifting its weight on the floor
+      adds more. Real lift motors are sized several times the static load for the same reason.
+    -->
+    <!--
+      kp 120000. A position servo's steady-state error is load/kp, so at kp=9000 a 213 kg car
+      drooped 0.23 m empty -- and with the robot aboard it settled 2 m below its command and
+      looked like an obstruction. Nothing was in the way; the motor simply was not stiff
+      enough to hold what it was carrying where it was told.
+
+      forcerange 20 kN. Car and robot together weigh about 2.5 kN, and a lift has to accelerate
+      its load rather than merely hold it, which is why real ones are sized several times the
+      static weight.
+    -->
+    <position name="lift_z" joint="lift_z" kp="120000" ctrlrange="0 3.55"
+              forcerange="-20000 20000"/>
+  </actuator>
+
+  <keyframe>
+    <!--
+      qpos = robot (37) + lift (1) = 38.
+
+      "corridor" starts the robot on the ground floor, east of the lift, facing west toward
+      it -- the way a cleaning round starts, with the lift behind you at the end of the hall.
+      The robot's forward axis is +x, so 180 degrees about z points it west.
+    -->
+    <key name="corridor"
+         qpos="0 0 0.8136  0 0 0 1
+               0
+               -0.25 -0.12 0 -0.35   0 0
+               -0.25  0.12 0 -0.35   0 0
+               0 0 -0.25 0.5 -0.25 0
+               0 0 -0.25 0.5 -0.25 0
+               0"/>
+    <!-- "in_lift" starts the robot already standing in the car, for testing the ride alone. -->
+    <!--
+      The robot starts 3 cm above the car floor, not exactly on it.
+
+      Placed exactly level, one foot ended up on the wrong side of the floor slab: MuJoCo
+      resolved the initial overlap by pushing that leg through, and the robot then rode with a
+      foot hooked underneath, holding the car down. The lift stalled at 1.47 m with the
+      actuator saturated, which looked like a motor problem and was a spawn-position one.
+      Three centimetres of air lets it settle onto the floor instead of into it.
+    -->
+    <key name="in_lift"
+         qpos="-8.2 0 1.3436  0 0 0 1
+               0
+               -0.25 -0.12 0 -0.35   0 0
+               -0.25  0.12 0 -0.35   0 0
+               0 0 -0.25 0.5 -0.25 0
+               0 0 -0.25 0.5 -0.25 0
+               0"/>
+  </keyframe>
+</mujoco>

@@ -147,7 +147,8 @@ class KinematicGait:
             self._flip[joint] = (low + high < 0.0) != (base < 0.0)
 
         # Remember the height the robot was placed at; the base is held there.
-        self._base_z = float(data.qpos[2])
+        # Height of the pelvis above the surface under the feet, not above the world.
+        self._base_z = float(data.qpos[2]) - self._ground_height(model, data)
         self._write_stance(model, data, 0.0, 0.0)
 
     def _stance(self, joint: str) -> float:
@@ -246,6 +247,23 @@ class KinematicGait:
         self._set(model, data, "ank_pitch_l",
                   self._room(model, "ank_pitch_l", self._stance("ank_pitch_l")) + ankle * 0.4 * swing * s)
 
+    def _ground_height(self, model: mujoco.MjModel, data: mujoco.MjData) -> float:
+        """Top of whatever the feet are resting on, in world z.
+
+        Read from the feet themselves rather than assumed to be zero. A robot standing in a
+        lift is on a surface several metres up, and one walking up a ramp is on a surface that
+        changes continuously; both are the same question.
+        """
+        lowest = None
+        for name in ("foot_r_g", "foot_l_g", "foot_r", "foot_l"):
+            geom = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            if geom < 0:
+                continue
+            # The sole, not the foot's centre.
+            sole = float(data.geom_xpos[geom][2] - model.geom_size[geom][2])
+            lowest = sole if lowest is None else min(lowest, sole)
+        return lowest if lowest is not None else 0.0
+
     def apply(
         self, model: mujoco.MjModel, data: mujoco.MjData, vx: float, vy: float, wz: float, dt: float
     ) -> None:
@@ -283,10 +301,18 @@ class KinematicGait:
         data.qvel[0] = world_vx
         data.qvel[1] = world_vy
 
-        # Hold the torso upright and at a constant height. This is what "cannot fall over"
-        # buys: vertical drift and lean are corrected every step, while horizontal motion stays
-        # under the solver's control so obstacles still matter.
-        data.qvel[2] += (self._base_z - data.qpos[2]) * self.height_gain
+        # Hold the torso upright and at a constant height ABOVE WHATEVER IT IS STANDING ON.
+        # This is what "cannot fall over" buys: vertical drift and lean are corrected every
+        # step, while horizontal motion stays under the solver's control so obstacles matter.
+        #
+        # "Above whatever it is standing on", not "at a fixed world height", because a robot
+        # in a lift is standing on a floor that moves. Pinned to a world height the gait
+        # teleported the robot back down every step while the car rose out from under it: the
+        # lift reached the first floor and the robot was still on the ground, having walked
+        # off the platform it was fighting. Ground height is taken from the feet, which is
+        # where the question is actually answered.
+        ground = self._ground_height(model, data)
+        data.qvel[2] += (ground + self._base_z - data.qpos[2]) * self.height_gain
         data.qvel[3] = 0.0
         data.qvel[4] = 0.0
 
