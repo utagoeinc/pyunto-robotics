@@ -1,0 +1,157 @@
+<!--
+  A Martian outflow channel, for a rover that is told where to go in a diary entry.
+
+  Deliberately not the Moon with red paint. The lunar scene is shaped by impact -- bowls with
+  raised rims at every scale -- and lit by a sun three degrees above the horizon, so half the
+  world is black. Mars has had wind and water and has an atmosphere, which changes both what
+  the ground looks like and what driving on it is like:
+
+    * The dominant landform is a channel, not a crater field. A channel is a corridor to
+      follow rather than an obstacle to go round, so route choice is a different problem.
+    * Dunes march across the channel floor. Crossable, but a washboard.
+    * The craters that are here are old and softened, their rims mostly gone.
+    * The sun is high and the sky is bright dust, so there is diffuse light everywhere. A
+      camera-driven rover can see into shadows here, which on the Moon it cannot.
+
+  The targets are the things a mission actually puts on a planet: a lander to return to, a
+  sample cache, a mast-mounted beacon. They are brightly coloured because everything natural
+  here is one shade of rust, and a rover that navigates by camera needs something to fix on.
+-->
+<mujoco model="mars">
+  <include file="pyunto_r1.xml"/>
+
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.004" integrator="implicitfast"/>
+
+  <visual>
+    <!--
+      Bright ambient, unlike the lunar scene. Mars has an atmosphere thick with dust, so light
+      scatters and shadows are filled rather than black. This is a real difference and it
+      matters to a camera: the rover can see detail in shadow here.
+    -->
+    <headlight ambient="0.42 0.36 0.32" diffuse="0.45 0.40 0.36" specular="0.08 0.07 0.07"/>
+    <map znear="0.05" zfar="200"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <!-- The butterscotch sky Mars actually has, from dust suspended in the atmosphere. -->
+    <texture name="sky" type="skybox" builtin="gradient"
+             rgb1="0.62 0.45 0.32" rgb2="0.82 0.68 0.52" width="512" height="512"/>
+    <texture name="regolith_tex" type="2d" builtin="checker"
+             rgb1="0.55 0.32 0.21" rgb2="0.50 0.29 0.19" width="512" height="512"/>
+    <material name="regolith" texture="regolith_tex" texrepeat="24 24"
+              specular="0.04" shininess="0.05"/>
+    <material name="rock" rgba="0.38 0.24 0.18 1" specular="0.06"/>
+    <material name="dust" rgba="0.62 0.42 0.28 1" specular="0.03"/>
+
+    <!-- Hardware. The only saturated colours in the scene, and therefore the landmarks. -->
+    <!--
+      The lander is white-and-magenta, not the gold of a real spacecraft's thermal blanket.
+      Gold is the wrong colour to navigate by here: the ground, the dust and the sky are all
+      warm ochre, and a yellow lander measured 58,000 matching pixels of pure terrain from
+      21 m away. Magenta is the one hue this landscape does not contain anywhere.
+    -->
+    <material name="lander_body" rgba="0.93 0.20 0.62 1" emission="0.30" specular="0.5"/>
+    <material name="lander_leg" rgba="0.70 0.70 0.74 1" specular="0.55"/>
+    <material name="solar_array" rgba="0.12 0.20 0.48 1" specular="0.85" shininess="0.90"/>
+    <material name="beacon_mat" rgba="0.95 0.28 0.14 1" emission="0.35" specular="0.4"/>
+    <material name="cache_mat" rgba="0.20 0.80 0.85 1" emission="0.30" specular="0.5"/>
+  </asset>
+
+  <asset>
+    <!--
+      The terrain. 128 x 128 over 70 x 56 m is a 0.55 m cell -- finer than the rover's wheel,
+      so the suspension has something to work against rather than sliding over a smooth sheet.
+      Filled procedurally by sim/terrain.py:mars_plain before the first step.
+    -->
+    <hfield name="mars_hf" nrow="128" ncol="128" size="35 28 1.6 0.06"/>
+  </asset>
+
+  <worldbody>
+    <!--
+      The sun, 48 degrees up. High, unlike the lunar scene's grazing light: this is a
+      mid-latitude afternoon, and the difference is deliberate. Long black shadows are the
+      Moon's signature; Mars reads as dusty and evenly lit.
+    -->
+    <light name="sun" pos="-18 -22 34" dir="0.36 0.44 -0.82" directional="true"
+           diffuse="0.95 0.82 0.68" specular="0.22 0.20 0.18" castshadow="true"/>
+    <!-- Dust-scattered skylight, which is why Martian shadows are not black. -->
+    <light name="skyglow" pos="0 0 40" dir="0 0 -1" directional="true"
+           diffuse="0.30 0.24 0.20"/>
+
+    <geom name="terrain" type="hfield" hfield="mars_hf" pos="0 0 0" material="regolith"
+          friction="0.95 0.05 0.01" condim="3"/>
+
+    <!--
+      The lander: where the rover starts and what "go home" means. Sited on the channel bank
+      rather than the floor, which is where you would actually put one -- out of the way of
+      whatever cut the channel.
+    -->
+    <body name="lander" pos="-18 -12 0">
+      <geom name="lander_deck" type="box" pos="0 0 1.35" size="1.5 1.5 0.22" material="lander_body"/>
+      <geom name="lander_l1" type="cylinder" pos="-1.2 -1.2 0.65" size="0.09 0.65" material="lander_leg"/>
+      <geom name="lander_l2" type="cylinder" pos="1.2 -1.2 0.65" size="0.09 0.65" material="lander_leg"/>
+      <geom name="lander_l3" type="cylinder" pos="-1.2 1.2 0.65" size="0.09 0.65" material="lander_leg"/>
+      <geom name="lander_l4" type="cylinder" pos="1.2 1.2 0.65" size="0.09 0.65" material="lander_leg"/>
+      <geom name="lander_array_l" type="box" pos="-2.5 0 1.5" size="1.1 1.4 0.03" material="solar_array"/>
+      <geom name="lander_array_r" type="box" pos="2.5 0 1.5" size="1.1 1.4 0.03" material="solar_array"/>
+      <geom name="lander_mast" type="cylinder" pos="0 0 2.1" size="0.07 0.55" material="lander_leg"/>
+      <!-- A tall marker panel. The deck is bright but nearly edge-on when seen from down in
+           the channel, which is where the rover is whenever it needs to find its way back. -->
+      <geom name="lander_flag" type="box" pos="0 0 3.1" size="0.9 0.06 0.7" material="lander_body"/>
+    </body>
+
+    <!-- The sample cache: a target out on the channel floor, deliberately across the dunes. -->
+    <body name="cache" pos="10 4 0">
+      <geom name="cache_post" type="cylinder" pos="0 0 0.5" size="0.07 0.5" material="lander_leg"/>
+      <geom name="cache_box" type="box" pos="0 0 1.2" size="0.45 0.45 0.40" material="cache_mat"/>
+    </body>
+
+    <!--
+      The beacon, on the far bank: reaching it means climbing out of the channel.
+
+      Moved in from (20,-16) to (16,-11) and made much bigger. At 0.26 m across and 25 m away
+      it was a handful of pixels: the rover saw it, started driving, and lost it as the dunes
+      pitched the camera -- "I saw the beacon but lost sight of it before I got there", which
+      is a true report of a target too small to track. A real field beacon is a metre-wide
+      panel on a mast for exactly this reason.
+    -->
+    <body name="beacon" pos="16 -11 0">
+      <geom name="beacon_mast" type="cylinder" pos="0 0 1.3" size="0.08 1.3" material="lander_leg"/>
+      <geom name="beacon_head" type="box" pos="0 0 3.0" size="0.70 0.70 0.70" material="beacon_mat"/>
+    </body>
+
+    <!-- Scattered boulders. Scenery, and something for the rover's depth camera to resolve. -->
+    <body name="rocks" pos="0 0 0">
+      <geom name="rock_a" type="ellipsoid" pos="-6 3 0.35" size="0.8 0.6 0.4" material="rock"/>
+      <geom name="rock_b" type="ellipsoid" pos="4 -8 0.30" size="0.6 0.5 0.35" material="rock"/>
+      <geom name="rock_c" type="ellipsoid" pos="-12 8 0.28" size="0.5 0.7 0.3" material="rock"/>
+      <geom name="rock_d" type="ellipsoid" pos="14 10 0.40" size="0.9 0.7 0.45" material="rock"/>
+      <geom name="rock_e" type="ellipsoid" pos="-2 -14 0.25" size="0.45 0.45 0.28" material="rock"/>
+    </body>
+  </worldbody>
+
+  <keyframe>
+    <!--
+      qpos = rover only (21): this scene adds no joints.
+
+      z is well above the rover's own 0.46 because the ground is a heightfield and the terrain
+      near the lander stands above the field's zero. Dropping it in slightly high and letting
+      it settle is far more robust than computing the surface height in a keyframe.
+
+      "lander" starts 4.5 m east of the lander's centre, not 2. At 2 the rover was inside the
+      lander's own footprint -- the deck is 3 m across at 1.35 m up -- and settled on top of
+      the structure at z=2.0 over ground at 0.96. It looked parked; it was perched.
+    -->
+    <key name="lander"
+         qpos="-13.5 -12.0 1.9  1 0 0 0
+               0 0 0 0 0 0 0
+               0 0 0 0 0 0 0"/>
+    <!-- "channel" starts down on the channel floor, among the dunes. -->
+    <key name="channel"
+         qpos="0 0 2.0  1 0 0 0
+               0 0 0 0 0 0 0
+               0 0 0 0 0 0 0"/>
+  </keyframe>
+</mujoco>

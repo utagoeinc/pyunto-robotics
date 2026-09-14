@@ -138,6 +138,76 @@ def lunar_south_pole(model: mujoco.MjModel, name: str = "regolith_hf") -> bool:
     return _write(model, name, height)
 
 
+def mars_plain(model: mujoco.MjModel, name: str = "mars_hf") -> bool:
+    """Martian terrain: an old outflow channel with dunes, not a cratered plain.
+
+    Deliberately a different landscape from the Moon's, because a Mars demonstration that is
+    the lunar one with red paint teaches nobody anything. The Moon is shaped by impact --
+    bowls with raised rims, everywhere, at every scale. Mars has had wind and water, so what
+    dominates is flowing shapes: a broad channel cut into the plain, transverse dunes marching
+    across it, and scattered impact craters that are the older, softened remnants they are on
+    a planet with weather.
+
+    For a rover this makes route choice a different problem. Lunar craters are obstacles to go
+    around; a channel is a corridor to follow, and dunes are a washboard that is crossable but
+    slow. Both are navigable -- the point is that the terrain rewards choosing a line.
+
+    Fixed rather than random, for the same reason the lunar one is: a route that works has to
+    work again tomorrow.
+    """
+    grid = _grid(model, name)
+    if grid is None:
+        return False
+    _, rows, cols = grid
+
+    v, u = np.meshgrid(
+        np.linspace(0.0, 1.0, cols), np.linspace(0.0, 1.0, rows), indexing="xy"
+    )
+    height = np.zeros((rows, cols), dtype=np.float64)
+
+    # A gentle regional tilt. Nothing on Mars is level for long.
+    height += 0.30 * u + 0.12 * v
+
+    # The outflow channel: a broad, shallow trough running roughly west to east, with banks
+    # either side. `sech`-like profile rather than a V, because water-cut channels are
+    # flat-floored with rounded shoulders.
+    channel_centre = 0.46 + 0.06 * np.sin(2.4 * np.pi * u)
+    across = (v - channel_centre) / 0.17
+    height -= 0.34 / np.cosh(across) ** 2
+    # Banks: the material the channel cut through, standing proud either side.
+    bank = (np.abs(across) > 1.0) & (np.abs(across) < 2.2)
+    height += np.where(bank, 0.11 * np.cos(np.pi * (np.abs(across) - 1.6) / 1.2) ** 2, 0.0)
+
+    # Transverse dunes across the channel floor. Asymmetric -- a long windward slope and a
+    # short slip face -- which is what a dune actually is and what makes crossing one
+    # directional.
+    dune_phase = 13.0 * np.pi * u
+    dunes = 0.055 * (np.sin(dune_phase) + 0.35 * np.sin(2 * dune_phase))
+    height += np.where(np.abs(across) < 1.4, dunes, 0.0)
+
+    # Old impact craters, softened. Shallower than the Moon's for their width, with rims
+    # mostly eroded away: that is what a few billion years of wind does to one.
+    craters = [
+        (0.22, 0.18, 0.105, 0.26),
+        (0.78, 0.82, 0.090, 0.21),
+        (0.62, 0.12, 0.060, 0.13),
+        (0.36, 0.88, 0.050, 0.10),
+    ]
+    for centre_u, centre_v, radius, depth in craters:
+        distance = np.sqrt((u - centre_u) ** 2 + (v - centre_v) ** 2)
+        inside = distance < radius
+        bowl = -depth * np.cos(np.pi * distance / (2.0 * radius)) ** 2
+        rim_band = (distance >= radius) & (distance < radius * 1.5)
+        rim = depth * 0.10 * np.cos(np.pi * (distance - radius) / (1.0 * radius)) ** 2
+        height += np.where(inside, bowl, 0.0) + np.where(rim_band, rim, 0.0)
+
+    # Rock-strewn roughness. Mars rovers lose more time to this than to anything dramatic.
+    height += 0.022 * np.sin(15.0 * np.pi * u + 0.7) * np.sin(12.0 * np.pi * v + 0.3)
+    height += 0.013 * np.cos(23.0 * np.pi * v) * np.sin(21.0 * np.pi * u + 1.9)
+
+    return _write(model, name, height)
+
+
 def apply(model: mujoco.MjModel) -> list[str]:
     """Fill every heightfield this module knows how to generate. Returns the names it wrote.
 
@@ -146,7 +216,11 @@ def apply(model: mujoco.MjModel) -> list[str]:
     call it unconditionally rather than each scene having to remember.
     """
     written = []
-    for name, generator in (("lawn_hf", lawn), ("regolith_hf", lunar_south_pole)):
+    for name, generator in (
+        ("lawn_hf", lawn),
+        ("regolith_hf", lunar_south_pole),
+        ("mars_hf", mars_plain),
+    ):
         if generator(model, name):
             written.append(name)
     return written

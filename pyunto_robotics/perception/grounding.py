@@ -93,6 +93,14 @@ _PALETTE: dict[str, tuple[tuple[int, int, int], int]] = {
     "yellow door": ((249, 250, 26), 45),
     "postbox": ((191, 64, 51), 26),
 
+    # --- Mars (assets/mars.xml) ---
+    # Measured from rendered frames. Tolerances are tight because the ground here is itself a
+    # red-brown that a loose red match swallows whole: a first attempt at the beacon caught
+    # 14,000 pixels of regolith. The emissive materials keep the hardware separable from it.
+    "cache": ((74, 251, 248), 40),
+    "beacon": ((245, 78, 42), 30),
+    "lander": ((237, 66, 158), 45),
+
     # --- home / laundry scene (assets/home.xml) ---
     # The washer is white against a white wall, which colour matching cannot see at all -- so
     # the cue is its blue trim ring, exactly as the office doors are found by their orange
@@ -114,12 +122,6 @@ _PALETTE: dict[str, tuple[tuple[int, int, int], int]] = {
     "building": ((204, 199, 189), 22),
     "window": ((89, 140, 178), 35),
 
-    # --- lunar scene (assets/lunar.xml) ---
-    # Everything on the Moon is grey, so the only reliable colour cues are the things people
-    # put there. The lander and the flag are bright by design, for exactly this reason.
-    "lander": ((214, 176, 61), 45),
-    "beacon": ((235, 87, 46), 45),
-    "panel": ((46, 74, 138), 45),
 }
 
 # What a user might say, mapped to what the scene calls it.
@@ -146,6 +148,13 @@ _SYNONYMS: dict[str, str] = {
     "yellow house": "yellow door", "黄色い家": "yellow door",
     "postbox": "postbox", "post box": "postbox", "mailbox": "postbox",
     "ポスト": "postbox", "郵便ポスト": "postbox",
+
+    # --- Mars ---
+    "cache": "cache", "sample cache": "cache", "sample": "cache",
+    "サンプル": "cache", "採取装置": "cache", "キャッシュ": "cache",
+    "beacon": "beacon", "marker": "beacon", "ビーコン": "beacon", "目印": "beacon",
+    "lander": "lander", "base": "lander", "着陸機": "lander", "着陸船": "lander",
+    "基地": "lander", "ランダー": "lander",
 
     # --- home / laundry ---
     "washer": "washer", "washing machine": "washer", "drum": "washer",

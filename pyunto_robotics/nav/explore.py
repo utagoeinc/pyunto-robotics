@@ -291,6 +291,13 @@ class MaplessNavigator:
         turn_gain: float = 1.4,
         safety_distance: float = 0.55,
         perception_every: int = 4,
+        # How many frames the target may be missing before the robot gives up tracking it and
+        # sweeps again. Twelve suits a corridor, where losing sight of a door means it really
+        # has gone out of frame. Outdoors it is wrong: cresting a dune pitches the camera off
+        # the target for longer than that every time, and the rover abandoned targets it was
+        # tracking perfectly well -- "I saw the beacon but lost sight of it before I got
+        # there", said about a drive that was going fine.
+        lost_frames_allowed: int = 12,
     ):
         self.robot = robot
         self.grounder = grounder
@@ -309,6 +316,7 @@ class MaplessNavigator:
         # Perception is cheap here (~2 ms/frame) but the vision model may not be, so the
         # cadence is configurable independently of the control rate.
         self.perception_every = perception_every
+        self.lost_frames_allowed = lost_frames_allowed
 
     # -- perception ---------------------------------------------------------------
 
@@ -997,7 +1005,7 @@ class MaplessNavigator:
                             )
                         located = (last_seen[0] if last_seen else None, want, range_to)
                         lost_frames = 0
-                    elif lost_frames > 12:
+                    elif lost_frames > self.lost_frames_allowed:
                         # Out of frame. Sweep again, and re-apply the qualifier when we do:
                         # dropping it here would re-acquire whichever door is most convenient
                         # rather than the one that was asked for.

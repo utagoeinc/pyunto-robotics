@@ -590,6 +590,51 @@ Rules:
 )
 
 
+MARS = Domain(
+    name="mars",
+    verbs=(
+        ("survey", ("survey", "look around", "scan the area", "have a look round",
+                    "見回して", "周りを見て", "観測して", "探索して")),
+        ("attitude", ("how steep", "are you tilted", "attitude", "your tilt",
+                      "傾き", "傾いて", "姿勢")),
+        ("home", ("go back to the lander", "return to base", "back to base", "come back",
+                  "着陸機に戻って", "着陸船に戻って", "基地に戻って", "戻って")),
+        ("goto", ("go to", "drive to", "head to", "head for", "make for", "approach",
+                  "行って", "向かって", "移動して", "まで行って")),
+        ("describe", ("what do you see", "describe", "what can you see",
+                      "何が見える", "何が見えますか")),
+        ("where", ("where are you", "your position", "どこにいる", "現在地", "どこですか")),
+    ),
+    objects={
+        "lander": ("lander", "base", "着陸機", "着陸船", "ランダー", "基地"),
+        "cache": ("cache", "sample", "sample cache", "サンプル", "採取装置", "キャッシュ"),
+        "beacon": ("beacon", "marker", "ビーコン", "目印", "標識"),
+    },
+    intransitive=frozenset({"survey", "attitude", "describe", "where", "home"}),
+    help_text=(
+        "I can drive to the sample cache, the beacon or the lander, survey what is visible, "
+        "and report how steeply I am tilted. Try: 「サンプルまで行って」"
+    ),
+    prompt="""You control a six-wheeled rover on Mars, in an old outflow channel. There is a \
+lander (the rover's base) up on the bank, a sample cache out on the channel floor beyond some \
+dunes, and a beacon on the far bank. The ground is rocky and uneven.
+
+Available actions:
+  goto <target>   drive to a target: lander, cache, or beacon
+  survey          turn a full circle and report what hardware is visible
+  describe        say what is currently in view
+  where           report how far the rover is from the lander
+  attitude        report how steeply the rover is tilted
+  home            drive back to the lander
+  report <text>   say something to the user
+
+Rules:
+- Only use the action names and target names listed above.
+- Prefer `goto` when the user names a place to drive to.
+""",
+)
+
+
 DOMAINS: dict[str, Domain] = {
-    "home": HOME, "patrol": PATROL, "lunar": LUNAR, "solar": SOLAR,
+    "home": HOME, "patrol": PATROL, "lunar": LUNAR, "solar": SOLAR, "mars": MARS,
 }

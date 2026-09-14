@@ -34,4 +34,29 @@ def _solar() -> RobotSetup:
     )
 
 
+def _mars() -> RobotSetup:
+    """A rover on Mars, driving to named places by camera alone.
+
+    The clearest demonstration of mapless navigation: there is no map of Mars in the robot,
+    and the targets are found by looking. What differs from the lunar scene it replaces is
+    the landscape -- a channel to follow rather than craters to avoid -- and the light, which
+    on Mars is diffuse enough that a camera can see into shadow.
+    """
+    from ..brain.rover import RoverSkills
+    from ..sim.wheel_drive import SkidDrive
+
+    return RobotSetup(
+        name="R1 (Mars rover)",
+        scene="mars.xml",
+        domain=DOMAINS["mars"],
+        skills=lambda robot, grounder: RoverSkills(robot, grounder),
+        gait=SkidDrive,
+        default_keyframe="lander",
+        keyframe_help="lander (beside the lander), channel (out on the channel floor)",
+        examples=("サンプルまで行って", "drive to the beacon"),
+        camera=Camera(distance=9.0, elevation=-22, azimuth=135),
+    )
+
+
 register("solar", _solar())
+register("mars", _mars())
