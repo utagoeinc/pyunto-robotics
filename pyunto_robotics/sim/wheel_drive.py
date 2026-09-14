@@ -58,6 +58,12 @@ HALF_BASE_M = 0.46
 LEFT_WHEELS = ("drive_lf", "drive_lm", "drive_lr")
 RIGHT_WHEELS = ("drive_rf", "drive_rm", "drive_rr")
 
+# A four-wheeled machine has no middle wheel. Naming the sets rather than assuming six lets
+# the same skid steering drive both -- the geometry of skid steering does not care how many
+# wheels are on each side, only that each side can be driven independently.
+LEFT_WHEELS_4 = ("drive_lf", "drive_lr")
+RIGHT_WHEELS_4 = ("drive_rf", "drive_rr")
+
 
 class SkidDrive:
     """Six-wheel skid steering. Commands wheel speeds; the ground decides the rest."""
@@ -76,6 +82,12 @@ class SkidDrive:
         # slipping away almost the entire difference. This is a real property of driving a
         # skid-steer vehicle on the Moon, not a modelling artefact.
         slip_factor: float = 3.0,
+        # Which actuators are on each side. Defaults to the six-wheel rover; a four-wheeled
+        # machine passes LEFT_WHEELS_4 / RIGHT_WHEELS_4. Unknown names are skipped, so passing
+        # the six-wheel set to a four-wheel robot also works -- but naming it is clearer than
+        # relying on that.
+        left_wheels: tuple[str, ...] = LEFT_WHEELS,
+        right_wheels: tuple[str, ...] = RIGHT_WHEELS,
     ):
         self.accel = accel
         self.yaw_accel = yaw_accel
@@ -84,6 +96,8 @@ class SkidDrive:
         # of what is commanded to slip. Asking for a little more than the geometry implies is
         # how a real skid-steer controller compensates.
         self.slip_factor = slip_factor
+        self.left_wheels = left_wheels
+        self.right_wheels = right_wheels
 
         self._vx = 0.0
         self._wz = 0.0
@@ -125,9 +139,9 @@ class SkidDrive:
         left_speed = (self._vx - turn_component) / WHEEL_RADIUS_M
         right_speed = (self._vx + turn_component) / WHEEL_RADIUS_M
 
-        for name in LEFT_WHEELS:
+        for name in self.left_wheels:
             self._set(model, data, name, left_speed)
-        for name in RIGHT_WHEELS:
+        for name in self.right_wheels:
             self._set(model, data, name, right_speed)
 
         # Point the corner wheels along the arc the rover is trying to follow.

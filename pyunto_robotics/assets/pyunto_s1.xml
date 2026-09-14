@@ -1,0 +1,123 @@
+<!--
+  Pyunto S1 - a four-wheeled robot that carries its own solar panel.
+
+  This is the machine for the demonstration Utagoe cares most about: a robot that is asked to
+  go and fetch energy, finds sunlight on its own, charges, comes home, and powers something
+  with what it collected. So the panel is not decoration. Its area, its tilt and where it sits
+  are the numbers the charging model uses, and they are chosen to be honest ones.
+
+  Sizing, roughly that of a pavement delivery robot:
+    * 0.72 m long, 0.52 m wide, 0.38 m to the deck, about 22 kg.
+    * A 0.60 x 0.42 m panel -- 0.25 m^2. At 1000 W/m^2 and 20% efficiency that is about 50 W,
+      which is a real figure for a panel this size, and it means charging takes minutes rather
+      than being instant. That matters: a demo where energy arrives immediately teaches
+      nothing about why the robot should bother finding the sun.
+
+  Four wheels, not six: this drives on pavement, not regolith, so there is nothing for a
+  rocker-bogie to earn. Skid steering, the same as the rover -- differential wheel speeds,
+  no steering joints.
+
+  The panel tilts on a hinge. A fixed flat panel collects the same power wherever it points,
+  which would make "find the sun" pointless; a tilting one lets the robot aim at the sun and
+  gives the charging model something the robot can actually improve by acting.
+
+  `head_cam` is named and oriented exactly like the humanoid's and the rover's, so the mapless
+  navigator and every grounder work against this robot unchanged.
+-->
+<mujoco model="pyunto_s1">
+  <compiler angle="radian" autolimits="true"/>
+
+  <default>
+    <default class="s1">
+      <geom type="box" condim="3" friction="1.2 0.05 0.01" density="500" group="1"/>
+      <joint type="hinge" damping="1.2" armature="0.01" limited="true"/>
+      <default class="s1_wheel">
+        <geom type="cylinder" size="0.11 0.045" condim="4"
+              friction="1.6 0.06 0.02" density="700" rgba="0.16 0.16 0.18 1"/>
+        <joint type="hinge" axis="0 1 0" damping="0.35" armature="0.008" limited="false"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material name="s1_body" rgba="0.93 0.93 0.95 1" specular="0.3" shininess="0.4"/>
+    <material name="s1_trim" rgba="0.20 0.55 0.85 1" specular="0.4"/>
+    <!-- Dark blue-black with a strong specular: what a photovoltaic panel looks like, and
+         visibly different from the body so the panel reads at a glance. -->
+    <material name="s1_panel" rgba="0.08 0.11 0.26 1" specular="0.85" shininess="0.85"/>
+    <material name="s1_mast" rgba="0.35 0.35 0.38 1" specular="0.3"/>
+  </asset>
+
+  <worldbody>
+    <body name="base" pos="0 0 0.24" childclass="s1">
+      <freejoint name="root"/>
+      <inertial pos="0 0 0" mass="18" diaginertia="0.55 0.75 0.95"/>
+
+      <geom name="chassis" type="box" size="0.36 0.26 0.09" material="s1_body"/>
+      <geom name="bumper_f" type="box" pos="0.37 0 -0.02" size="0.02 0.24 0.05" material="s1_trim"/>
+      <geom name="bumper_r" type="box" pos="-0.37 0 -0.02" size="0.02 0.24 0.05" material="s1_trim"/>
+      <!-- Cargo box: this is a delivery-shaped robot, and it gives the panel something to
+           sit above without shading the camera. -->
+      <geom name="cargo" type="box" pos="-0.06 0 0.16" size="0.22 0.20 0.07" material="s1_body"/>
+
+      <!--
+        The solar panel, on a hinge so it can be aimed. Its geom is named `solar_panel`
+        because the charging model looks it up by that name to read its area and normal --
+        renaming it will silently stop the robot generating anything.
+      -->
+      <body name="panel_mount" pos="-0.06 0 0.25">
+        <joint name="panel_tilt" axis="0 1 0" range="-0.9 0.9" damping="2.0"/>
+        <geom name="solar_panel" type="box" pos="0 0 0.012" size="0.30 0.21 0.012"
+              material="s1_panel" density="250"/>
+      </body>
+
+      <!-- Camera mast, forward of the panel so the panel never shades the lens. -->
+      <body name="mast" pos="0.24 0 0.14">
+        <geom name="mast_post" type="cylinder" size="0.022 0.14" pos="0 0 0.14" material="s1_mast"/>
+        <body name="head" pos="0 0 0.30">
+          <joint name="neck_yaw" axis="0 0 1" range="-1.8 1.8" damping="0.6"/>
+          <geom name="head_shell" type="box" size="0.06 0.07 0.045" material="s1_trim"/>
+          <!--
+            Looking along +x with z up, matching the humanoid and the rover exactly. Every
+            piece of perception in this project assumes this orientation.
+          -->
+          <camera name="head_cam" pos="0.055 0 0.01" xyaxes="0 -1 0  0 0 1" fovy="70"/>
+        </body>
+      </body>
+
+      <body name="wheel_lf" pos="0.24 0.285 -0.13">
+        <joint name="drive_lf" class="s1_wheel"/>
+        <geom name="tyre_lf" class="s1_wheel" euler="1.5708 0 0"/>
+      </body>
+      <body name="wheel_rf" pos="0.24 -0.285 -0.13">
+        <joint name="drive_rf" class="s1_wheel"/>
+        <geom name="tyre_rf" class="s1_wheel" euler="1.5708 0 0"/>
+      </body>
+      <body name="wheel_lr" pos="-0.24 0.285 -0.13">
+        <joint name="drive_lr" class="s1_wheel"/>
+        <geom name="tyre_lr" class="s1_wheel" euler="1.5708 0 0"/>
+      </body>
+      <body name="wheel_rr" pos="-0.24 -0.285 -0.13">
+        <joint name="drive_rr" class="s1_wheel"/>
+        <geom name="tyre_rr" class="s1_wheel" euler="1.5708 0 0"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <velocity name="drive_lf" joint="drive_lf" kv="9" ctrlrange="-18 18"/>
+    <velocity name="drive_rf" joint="drive_rf" kv="9" ctrlrange="-18 18"/>
+    <velocity name="drive_lr" joint="drive_lr" kv="9" ctrlrange="-18 18"/>
+    <velocity name="drive_rr" joint="drive_rr" kv="9" ctrlrange="-18 18"/>
+    <position name="neck_yaw" joint="neck_yaw" kp="12" ctrlrange="-1.8 1.8"/>
+    <position name="panel_tilt" joint="panel_tilt" kp="25" ctrlrange="-0.9 0.9"/>
+  </actuator>
+
+  <keyframe>
+    <!--
+      qpos layout: 7 free joint + panel_tilt + neck_yaw + 4 wheels = 13.
+      The order follows the body tree: panel_mount, then mast/head, then the wheels.
+    -->
+    <key name="stand" qpos="0 0 0.24  1 0 0 0   0 0   0 0 0 0"/>
+  </keyframe>
+</mujoco>

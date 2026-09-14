@@ -78,6 +78,21 @@ _PALETTE: dict[str, tuple[tuple[int, int, int], int]] = {
     "desk": ((140, 102, 71), 30),
     "fridge": ((178, 184, 191), 15),
 
+    # --- residential street (assets/delivery.xml) ---
+    # Front doors are the landmarks here, and each is a different colour because that is how
+    # a person gives the address: "the house with the red door". The four are far apart in
+    # RGB and far from the roofs, hedges and grass, so a door is never confused for scenery.
+    # Tolerances are tight (30) because the doors differ from each other, not from the walls,
+    # and a loose match would let red bleed into the brick-coloured roofs.
+    # Measured from a rendered frame, not copied from the material's rgba: emission, the
+    # sun angle and MuJoCo's tone mapping all move the final pixel, and a palette written
+    # from the XML matched nothing. If a door is retinted, re-measure rather than guess.
+    "red door": ((255, 56, 48), 45),
+    "blue door": ((48, 141, 255), 45),
+    "green door": ((36, 214, 84), 45),
+    "yellow door": ((249, 250, 26), 45),
+    "postbox": ((191, 64, 51), 26),
+
     # --- home / laundry scene (assets/home.xml) ---
     # The washer is white against a white wall, which colour matching cannot see at all -- so
     # the cue is its blue trim ring, exactly as the office doors are found by their orange
@@ -117,6 +132,20 @@ _SYNONYMS: dict[str, str] = {
     "table": "table", "meeting table": "table", "テーブル": "table",
     "desk": "desk", "机": "desk", "デスク": "desk",
     "fridge": "fridge", "refrigerator": "fridge", "冷蔵庫": "fridge",
+
+    # --- residential street ---
+    # Longest-match wins in _canonical, so "red door" beats the bare "door" above and a
+    # delivery instruction naming a colour reaches the right house.
+    "red door": "red door", "赤いドア": "red door", "赤いドアの家": "red door",
+    "red house": "red door", "赤い家": "red door",
+    "blue door": "blue door", "青いドア": "blue door", "青いドアの家": "blue door",
+    "blue house": "blue door", "青い家": "blue door",
+    "green door": "green door", "緑のドア": "green door", "緑のドアの家": "green door",
+    "green house": "green door", "緑の家": "green door",
+    "yellow door": "yellow door", "黄色いドア": "yellow door", "黄色いドアの家": "yellow door",
+    "yellow house": "yellow door", "黄色い家": "yellow door",
+    "postbox": "postbox", "post box": "postbox", "mailbox": "postbox",
+    "ポスト": "postbox", "郵便ポスト": "postbox",
 
     # --- home / laundry ---
     "washer": "washer", "washing machine": "washer", "drum": "washer",
