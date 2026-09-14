@@ -87,6 +87,28 @@ def _orchard() -> RobotSetup:
     )
 
 
+def _hotel() -> RobotSetup:
+    """A cleaning robot that takes the lift between two corridors.
+
+    The lift is the point. A cleaner that works one floor is a novelty; one that moves between
+    them is a machine a hotel can staff a building with.
+    """
+    from ..brain.hotel import HotelSkills
+
+    return RobotSetup(
+        name="H1 (hotel cleaner)",
+        scene="hotel.xml",
+        domain=DOMAINS["hotel"],
+        skills=lambda robot, grounder: HotelSkills(robot, grounder),
+        default_keyframe="corridor",
+        keyframe_help="corridor (ground floor, by the rooms), in_lift (standing in the car)",
+        examples=("両方のフロアを掃除して", "clean both floors"),
+        camera=Camera(distance=9.0, elevation=-18, azimuth=150),
+        max_depth=30.0,
+    )
+
+
 register("solar", _solar())
+register("hotel", _hotel())
 register("orchard", _orchard())
 register("mars", _mars())

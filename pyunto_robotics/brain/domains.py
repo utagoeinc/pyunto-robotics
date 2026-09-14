@@ -687,7 +687,59 @@ Rules:
 )
 
 
+HOTEL = Domain(
+    name="hotel",
+    verbs=(
+        # "Clean both floors" before the bare "clean this corridor", and both before "floor",
+        # because every one of them contains the word the next one matches on.
+        ("clean", ("clean both", "clean the whole", "clean everything", "both floors",
+                   "全部掃除", "両方掃除", "全フロア", "全部きれいに",
+                   # 「両方のフロアを掃除して」 is the natural phrasing and matched none of the
+                   # above -- it fell through to clean_floor and did one corridor. Match on
+                   # the words that mean "both" rather than on whole sentences.
+                   "両方", "両フロア", "二階とも", "全階")),
+        ("clean_floor", ("clean this", "clean the corridor", "clean here", "clean",
+                         "掃除して", "清掃して", "きれいにして")),
+        ("board", ("get in the lift", "board the lift", "into the lift", "take the lift",
+                   "エレベータに乗って", "エレベーターに乗って", "乗って")),
+        ("ride", ("go up", "go down", "next floor", "other floor", "ride",
+                  "上の階", "下の階", "階を移動", "上がって", "降りて")),
+        ("floor", ("which floor", "what floor", "何階", "階数")),
+        ("describe", ("what do you see", "describe", "what can you see",
+                      "何が見える", "何が見えますか")),
+        ("where", ("where are you", "your position", "どこにいる", "現在地", "どこですか")),
+        ("goto", ("go to", "walk to", "head to", "行って", "向かって", "移動して")),
+    ),
+    objects={
+        "lift": ("lift", "elevator", "エレベータ", "エレベーター", "昇降機"),
+    },
+    intransitive=frozenset({
+        "clean", "clean_floor", "board", "ride", "floor", "describe", "where",
+    }),
+    help_text=(
+        "I can clean a corridor, take the lift, and clean the corridor on the other floor. "
+        "Try: 「両方のフロアを掃除して」"
+    ),
+    prompt="""You control a cleaning robot in a small hotel. There are two corridors, one on \
+each of two floors, and a lift at the west end that connects them.
+
+Available actions:
+  clean           the whole job: clean this corridor, ride the lift, clean the other one
+  clean_floor     clean the corridor the robot is standing in
+  board           walk to the lift and get in
+  ride            take the lift to the other floor
+  floor           report which floor the robot is on
+  describe        say where the robot is and what it has cleaned
+  report <text>   say something to the user
+
+Rules:
+- Only use the action names listed above.
+- Prefer `clean` when the user asks for the hotel or both floors to be cleaned.
+""",
+)
+
+
 DOMAINS: dict[str, Domain] = {
     "home": HOME, "patrol": PATROL, "lunar": LUNAR, "solar": SOLAR, "mars": MARS,
-    "orchard": ORCHARD,
+    "orchard": ORCHARD, "hotel": HOTEL,
 }
