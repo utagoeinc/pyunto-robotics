@@ -635,6 +635,59 @@ Rules:
 )
 
 
+ORCHARD = Domain(
+    name="orchard",
+    verbs=(
+        # The whole errand first: "go and fetch the apples" contains "go", and matching the
+        # bare verb would walk the robot out and leave it standing among the trees.
+        ("fetch", ("fetch", "bring the crates", "bring the apples", "bring in", "collect the",
+                   "取ってきて", "運んできて", "持ってきて", "回収して")),
+        # "What are you carrying?" before "carry it in": 「何を運んでいる」 contains 「運んで」,
+        # so asking the question matched the instruction and the robot walked off to the shed
+        # instead of answering.
+        ("carrying", ("what are you carrying", "are you carrying", "carrying",
+                      "何を運んでいる", "何を積んでいる", "積んでいる", "積載")),
+        ("deliver", ("take them to the shed", "carry them in", "deliver", "take it in",
+                     "小屋に運んで", "倉庫に運んで", "運んで", "納めて")),
+        ("collect", ("load", "pick them up", "load up", "積んで", "積み込んで")),
+        ("describe", ("what do you see", "describe", "what can you see",
+                      "何が見える", "何が見えますか")),
+        ("where", ("where are you", "your position", "どこにいる", "現在地", "どこですか")),
+        ("goto", ("go to", "walk to", "head to", "head for", "approach",
+                  "行って", "向かって", "移動して", "まで行って")),
+    ),
+    objects={
+        "crates": ("crates", "crate", "apples", "fruit", "コンテナ", "かご", "リンゴ",
+                   "りんご", "収穫物", "箱"),
+        "shed": ("shed", "packing shed", "barn", "小屋", "倉庫", "作業場", "選果場"),
+    },
+    intransitive=frozenset({"fetch", "deliver", "collect", "carrying", "describe", "where"}),
+    help_text=(
+        "I can walk out to the crates, load them, and carry them to the packing shed. "
+        "Try: 「リンゴのコンテナを取ってきて」"
+    ),
+    prompt="""You control a four-legged robot in an apple orchard. There are two rows of trees \
+with a working lane between them. Crates of picked apples are stacked at the far end of the \
+lane; the packing shed is at the near end, where the robot starts.
+
+Available actions:
+  fetch           the whole errand: walk to the crates, load them, carry them to the shed
+  goto <target>   walk to a target: crates or shed
+  collect         load the crates, if the robot is beside them
+  deliver         carry what it has back to the shed
+  carrying        report what the robot is carrying
+  describe        say what is currently in view
+  where           report how far the robot is from the shed
+  report <text>   say something to the user
+
+Rules:
+- Only use the action names and target names listed above.
+- Prefer `fetch` when the user asks for the fruit to be brought in without saying how.
+""",
+)
+
+
 DOMAINS: dict[str, Domain] = {
     "home": HOME, "patrol": PATROL, "lunar": LUNAR, "solar": SOLAR, "mars": MARS,
+    "orchard": ORCHARD,
 }

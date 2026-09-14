@@ -101,6 +101,13 @@ _PALETTE: dict[str, tuple[tuple[int, int, int], int]] = {
     "beacon": ((36, 235, 100), 45),
     "lander": ((237, 66, 158), 45),
 
+    # --- orchard (assets/orchard.xml) ---
+    # Measured from rendered frames. An orchard is green and brown everywhere, so the two
+    # landmarks are the colours it does not contain; the crates read bright red and the shed
+    # door a strong blue, neither of which appears in bark, leaf, soil or sky.
+    "crates": ((250, 74, 62), 45),
+    "shed": ((46, 117, 255), 45),
+
     # --- home / laundry scene (assets/home.xml) ---
     # The washer is white against a white wall, which colour matching cannot see at all -- so
     # the cue is its blue trim ring, exactly as the office doors are found by their orange
@@ -153,6 +160,13 @@ _SYNONYMS: dict[str, str] = {
     "cache": "cache", "sample cache": "cache", "sample": "cache",
     "サンプル": "cache", "採取装置": "cache", "キャッシュ": "cache",
     "beacon": "beacon", "marker": "beacon", "ビーコン": "beacon", "目印": "beacon",
+
+    # --- orchard ---
+    "crates": "crates", "crate": "crates", "apples": "crates", "fruit": "crates",
+    "コンテナ": "crates", "かご": "crates", "リンゴ": "crates", "りんご": "crates",
+    "収穫物": "crates", "箱": "crates",
+    "shed": "shed", "packing shed": "shed", "barn": "shed",
+    "小屋": "shed", "倉庫": "shed", "作業場": "shed", "選果場": "shed",
     "lander": "lander", "base": "lander", "着陸機": "lander", "着陸船": "lander",
     "基地": "lander", "ランダー": "lander",
 

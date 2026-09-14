@@ -1,0 +1,165 @@
+<!--
+  An apple orchard, for a four-legged robot that carries fruit out to the packing shed.
+
+  Why a quadruped and not a wheeled cart: orchard ground is the reason. It is soft, rutted
+  between the rows, and sloped -- the kind of surface where a farm robot on wheels either sinks
+  or has to stay on a prepared track. Legs are what let a machine walk where the fruit actually
+  is. The terrain here is deliberately uneven for that reason, not as decoration.
+
+  The task the scene exists for: a person writes "the crates by the third tree are ready" in a
+  diary, and the robot walks out along the row, finds them, and carries them to the shed. So
+  the scene is laid out the way an orchard is -- trees in rows with a working lane between --
+  and the things the robot navigates to are the things a picker would name: crates of fruit,
+  and the shed they go to.
+
+  Crates are red and the shed door is blue, for the reason every scene here has learnt: a
+  landmark has to be a colour the background does not contain. An orchard is green and brown
+  from edge to edge, so anything green is invisible as a target.
+-->
+<mujoco model="orchard">
+  <include file="pyunto_q1.xml"/>
+
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.004" integrator="implicitfast"/>
+
+  <visual>
+    <headlight ambient="0.38 0.38 0.36" diffuse="0.45 0.45 0.42" specular="0.08 0.08 0.08"/>
+    <map znear="0.02" zfar="120"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <texture name="sky" type="skybox" builtin="gradient"
+             rgb1="0.48 0.62 0.82" rgb2="0.86 0.90 0.94" width="256" height="256"/>
+    <texture name="soil_tex" type="2d" builtin="checker" rgb1="0.38 0.30 0.22"
+             rgb2="0.34 0.27 0.20" width="256" height="256"/>
+    <material name="soil" texture="soil_tex" texrepeat="20 20" specular="0.03"/>
+    <material name="grass" rgba="0.34 0.46 0.24 1" specular="0.03"/>
+    <material name="bark" rgba="0.32 0.24 0.17 1" specular="0.05"/>
+    <material name="leaf" rgba="0.20 0.42 0.18 1" specular="0.04"/>
+    <material name="shed_wall" rgba="0.78 0.76 0.70 1" specular="0.06"/>
+    <material name="shed_roof" rgba="0.42 0.40 0.38 1" specular="0.1"/>
+    <material name="post" rgba="0.46 0.38 0.28 1" specular="0.05"/>
+
+    <!--
+      The landmarks. Emissive for the same reason the solar scene's doors are: under this
+      lighting a plain material renders far darker than its rgba, and a palette written from
+      the XML matches nothing. Emission ties the rendered colour to the declared one.
+    -->
+    <material name="crate_mat" rgba="0.88 0.16 0.14 1" emission="0.45" specular="0.2"/>
+    <material name="shed_door" rgba="0.12 0.32 0.85 1" emission="0.45" specular="0.2"/>
+    <material name="apple" rgba="0.85 0.18 0.16 1" specular="0.4" shininess="0.5"/>
+  </asset>
+
+  <asset>
+    <!-- Orchard ground: soft and uneven, which is the reason for legs. 96 x 96 over 44 x 36 m
+         is a 0.45 m cell, finer than the robot's foot spacing. -->
+    <hfield name="lawn_hf" nrow="96" ncol="96" size="22 18 0.42 0.04"/>
+  </asset>
+
+  <worldbody>
+    <light name="sun" pos="-14 -18 22" dir="0.42 0.52 -0.74" directional="true"
+           diffuse="0.90 0.88 0.80" specular="0.2 0.2 0.18" castshadow="true"/>
+    <light name="fill" pos="12 14 18" dir="-0.4 -0.5 -0.76" directional="true"
+           diffuse="0.20 0.21 0.22"/>
+
+    <!--
+      A flat plane carries the scene, with the heightfield laid on top as the soft ground
+      between the rows.
+
+      Not the other way round. Making the heightfield the whole world is what the rover scenes
+      do, and it works for six wheels; under a trotting quadruped it threw the robot 500 m into
+      the air within 300 steps. A trot plants and lifts feet against a surface many times a
+      second, and hfield contact normals flip at cell boundaries in a way a plane's never do.
+      The legged scene that already worked was built this way for the same reason.
+    -->
+    <geom name="ground" type="plane" size="40 40 0.05" material="soil"
+          friction="1.1 0.03 0.001" condim="3"/>
+    <geom name="rough" type="hfield" hfield="lawn_hf" pos="0 0 -0.30" material="soil"
+          friction="1.1 0.03 0.001" condim="3"/>
+
+    <!--
+      Two rows of apple trees with a working lane between them, running north. The lane is
+      4 m wide: enough for the robot and a person, which is what an orchard lane is sized for.
+      Trees are at 4 m spacing, which is close planting -- and it means several are in frame
+      at once, so "the crates by the far tree" is a real navigation problem.
+    -->
+    <body name="row_west" pos="-2.4 0 0">
+      <geom name="tree_w1_trunk" type="cylinder" pos="0 -6 0.9" size="0.16 0.9" material="bark"/>
+      <geom name="tree_w1_crown" type="ellipsoid" pos="0 -6 2.3" size="1.2 1.2 1.1" material="leaf"/>
+      <geom name="tree_w2_trunk" type="cylinder" pos="0 -2 0.9" size="0.16 0.9" material="bark"/>
+      <geom name="tree_w2_crown" type="ellipsoid" pos="0 -2 2.3" size="1.2 1.2 1.1" material="leaf"/>
+      <geom name="tree_w3_trunk" type="cylinder" pos="0 2 0.9" size="0.16 0.9" material="bark"/>
+      <geom name="tree_w3_crown" type="ellipsoid" pos="0 2 2.3" size="1.2 1.2 1.1" material="leaf"/>
+      <geom name="tree_w4_trunk" type="cylinder" pos="0 6 0.9" size="0.16 0.9" material="bark"/>
+      <geom name="tree_w4_crown" type="ellipsoid" pos="0 6 2.3" size="1.2 1.2 1.1" material="leaf"/>
+    </body>
+
+    <body name="row_east" pos="2.4 0 0">
+      <geom name="tree_e1_trunk" type="cylinder" pos="0 -6 0.9" size="0.16 0.9" material="bark"/>
+      <geom name="tree_e1_crown" type="ellipsoid" pos="0 -6 2.3" size="1.2 1.2 1.1" material="leaf"/>
+      <geom name="tree_e2_trunk" type="cylinder" pos="0 -2 0.9" size="0.16 0.9" material="bark"/>
+      <geom name="tree_e2_crown" type="ellipsoid" pos="0 -2 2.3" size="1.2 1.2 1.1" material="leaf"/>
+      <geom name="tree_e3_trunk" type="cylinder" pos="0 2 0.9" size="0.16 0.9" material="bark"/>
+      <geom name="tree_e3_crown" type="ellipsoid" pos="0 2 2.3" size="1.2 1.2 1.1" material="leaf"/>
+      <geom name="tree_e4_trunk" type="cylinder" pos="0 6 0.9" size="0.16 0.9" material="bark"/>
+      <geom name="tree_e4_crown" type="ellipsoid" pos="0 6 2.3" size="1.2 1.2 1.1" material="leaf"/>
+    </body>
+
+    <!--
+      The crates, up at the far end of the lane. Stacked and tall enough to be seen from the
+      shed end, which is the whole length of the walk: a landmark a robot cannot see from
+      where it is told to go and get it is not a landmark.
+    -->
+    <body name="crates" pos="0 9.0 0">
+      <geom name="crate_a" type="box" pos="0 0 0.28" size="0.42 0.32 0.28" material="crate_mat"/>
+      <geom name="crate_b" type="box" pos="0 0 0.82" size="0.42 0.32 0.28" material="crate_mat"/>
+      <geom name="crate_c" type="box" pos="0.9 0 0.28" size="0.42 0.32 0.28" material="crate_mat"/>
+      <!-- Loose apples on top, so it reads as fruit rather than as boxes. -->
+      <geom name="apple_a" type="sphere" pos="-0.15 0 1.16" size="0.055" material="apple"/>
+      <geom name="apple_b" type="sphere" pos="0.05 0.12 1.16" size="0.055" material="apple"/>
+      <geom name="apple_c" type="sphere" pos="0.18 -0.09 1.16" size="0.055" material="apple"/>
+    </body>
+
+    <!--
+      The packing shed, at the south end, where the fruit goes. Its door is the landmark; the
+      walls are the same pale stone as half the scene and would not be findable.
+    -->
+    <body name="shed" pos="0 -11.0 0">
+      <geom name="shed_wall" type="box" pos="0 0 1.6" size="2.8 2.2 1.6" material="shed_wall"/>
+      <geom name="shed_roof" type="box" pos="0 0 3.4" size="3.1 2.5 0.18" material="shed_roof"/>
+      <geom name="shed_door" type="box" pos="0 2.22 1.15" size="0.85 0.06 1.15" material="shed_door"/>
+    </body>
+
+    <!-- Fence posts marking the lane, so the robot has near-field structure to avoid. -->
+    <body name="fence" pos="0 0 0">
+      <geom name="post_w" type="cylinder" pos="-4.2 0 0.6" size="0.07 0.6" material="post"/>
+      <geom name="post_e" type="cylinder" pos="4.2 0 0.6" size="0.07 0.6" material="post"/>
+      <geom name="post_w2" type="cylinder" pos="-4.2 6 0.6" size="0.07 0.6" material="post"/>
+      <geom name="post_e2" type="cylinder" pos="4.2 6 0.6" size="0.07 0.6" material="post"/>
+    </body>
+  </worldbody>
+
+  <keyframe>
+    <!--
+      qpos = robot only (19): free joint, then four legs of (abduction, hip, knee).
+
+      "shed" starts at the packing shed facing north up the lane, which is where an errand
+      begins: the robot is told to go and fetch, so it starts where the fruit is delivered.
+      z is above the robot's own 0.3646 because the ground is a heightfield; it settles.
+    -->
+    <key name="shed"
+         qpos="0 -7.5 0.3646  0.7071 0 0 0.7071
+               0 -0.62 1.24
+               0 -0.62 1.24
+               0 -0.62 1.24
+               0 -0.62 1.24"/>
+    <!-- "lane" starts halfway along, for testing the walk without the departure. -->
+    <key name="lane"
+         qpos="0 0 0.3646  0.7071 0 0 0.7071
+               0 -0.62 1.24
+               0 -0.62 1.24
+               0 -0.62 1.24
+               0 -0.62 1.24"/>
+  </keyframe>
+</mujoco>

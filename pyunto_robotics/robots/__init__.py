@@ -63,5 +63,30 @@ def _mars() -> RobotSetup:
     )
 
 
+def _orchard() -> RobotSetup:
+    """A four-legged robot carrying fruit out of an orchard.
+
+    Legs earn their place here: orchard ground between the rows is soft and rutted, which is
+    where the fruit is and where a wheeled machine either sinks or has to stay on a track.
+    """
+    from ..brain.orchard import OrchardSkills
+    from ..sim.quad_gait import TrotGait
+
+    return RobotSetup(
+        name="Q1 (orchard quadruped)",
+        scene="orchard.xml",
+        domain=DOMAINS["orchard"],
+        skills=lambda robot, grounder: OrchardSkills(robot, grounder),
+        gait=TrotGait,
+        default_keyframe="shed",
+        keyframe_help="shed (at the packing shed), lane (halfway up the row)",
+        examples=("リンゴのコンテナを取ってきて", "fetch the apples"),
+        camera=Camera(distance=8.0, elevation=-20, azimuth=110),
+        # The crates are 16 m up the lane from the shed.
+        max_depth=40.0,
+    )
+
+
 register("solar", _solar())
+register("orchard", _orchard())
 register("mars", _mars())
