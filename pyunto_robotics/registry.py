@@ -27,6 +27,7 @@ class RobotSetup:
     """What one robot needs that the others do not."""
 
     name: str
+    # The MuJoCo scene, or "" for a robot with no body to simulate (see demo.py).
     scene: str
     domain: object
     # Builds the skills object. Takes (robot, grounder) and returns anything with a

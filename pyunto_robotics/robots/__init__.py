@@ -108,7 +108,28 @@ def _hotel() -> RobotSetup:
     )
 
 
+def _house() -> RobotSetup:
+    """The devices in a house: air conditioning, lights, a lock, thermometers.
+
+    The simplest robot here and the one most people could actually use. It also proves what
+    `RobotSkills` claims: the contract is one `run()` method, and there is no simulator, no
+    camera and no body behind this one at all. Somebody attaching their own house swaps the
+    bodies of a dozen methods in brain/home_devices.py for HomeKit or Matter calls and changes
+    nothing else.
+    """
+    from ..brain.home_devices import HomeSkills
+
+    return RobotSetup(
+        name="House (air conditioning, lights, lock)",
+        scene="",  # no body to simulate
+        domain=DOMAINS["house"],
+        skills=lambda robot, grounder: HomeSkills(),
+        examples=("リビングのエアコンを24度にして", "is the front door locked?"),
+    )
+
+
 register("solar", _solar())
+register("house", _house())
 register("hotel", _hotel())
 register("orchard", _orchard())
 register("mars", _mars())

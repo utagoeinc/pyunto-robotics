@@ -739,7 +739,72 @@ Rules:
 )
 
 
+HOUSE = Domain(
+    name="house",
+    verbs=(
+        # Order matters throughout: these phrases overlap heavily. "Is the door locked?" is a
+        # question and 「鍵をかけて」 is an instruction, and both contain the word for lock; the
+        # question has to be tested first or asking becomes doing, which for a front door is
+        # the worse way round to get wrong.
+        ("lock_status", ("is the door locked", "is it locked", "did i lock", "door locked",
+                         "鍵はかかってる", "施錠されてる", "鍵かかってる", "戸締まりした")),
+        ("status", ("everything alright", "how is the house", "house status", "all okay",
+                    "家の様子", "全部教えて", "状況", "ぜんぶ")),
+        ("temperature", ("how warm", "how cold", "what is the temperature", "temperature",
+                         "how hot", "何度", "気温", "室温", "温度は")),
+        ("set_temperature", ("set the aircon", "set it to", "set to", "degrees",
+                             "度にして", "度に設定")),
+        ("warmer", ("warmer", "warm it up", "turn up the heat", "too cold",
+                    "暖かく", "あたたかく", "温度を上げて", "寒い")),
+        ("cooler", ("cooler", "cool it down", "turn it down", "too hot", "too warm",
+                    "涼しく", "すずしく", "温度を下げて", "暑い")),
+        ("aircon_off", ("turn the aircon off", "aircon off", "turn off the air",
+                        "エアコンを消して", "エアコンオフ", "冷房を止めて", "暖房を止めて")),
+        ("aircon_on", ("turn the aircon on", "aircon on", "turn on the air", "air conditioning",
+                       "エアコンをつけて", "エアコンオン", "冷房", "暖房", "エアコン")),
+        ("lights_off", ("lights off", "turn the lights off", "turn off the light",
+                        "電気を消して", "明かりを消して", "照明を消して")),
+        ("lights_on", ("lights on", "turn the lights on", "turn on the light",
+                       "電気をつけて", "明かりをつけて", "照明をつけて")),
+        ("unlock", ("unlock", "open the door", "鍵を開けて", "解錠", "開錠")),
+        ("lock", ("lock up", "lock the door", "lock", "鍵をかけて", "施錠", "戸締まり")),
+    ),
+    objects={
+        "living room": ("living room", "lounge", "リビング", "居間"),
+        "bedroom": ("bedroom", "寝室", "ベッドルーム"),
+        "kitchen": ("kitchen", "キッチン", "台所"),
+    },
+    intransitive=frozenset({
+        "lock", "unlock", "lock_status", "status", "temperature", "warmer", "cooler",
+        "aircon_on", "aircon_off", "lights_on", "lights_off",
+    }),
+    help_text=(
+        "I look after the house: the air conditioning, the lights, the front door lock and "
+        "the thermometers. Try: 「リビングのエアコンを24度にして」"
+    ),
+    prompt="""You control the devices in a house: air conditioning, lights and a thermometer \
+in each of three rooms (living room, bedroom, kitchen), and the lock on the front door.
+
+Available actions:
+  temperature       report how warm a room is
+  set_temperature   set the air conditioning to a given temperature
+  warmer / cooler   nudge the air conditioning up or down
+  aircon_on / aircon_off
+  lights_on / lights_off
+  lock / unlock     the front door
+  lock_status       report whether the front door is locked
+  status            report the whole house at once
+  report <text>     say something to the user
+
+Rules:
+- Only use the action names listed above.
+- Put the room in `where` when the user names one.
+- Asking whether the door is locked is `lock_status`, not `lock`.
+""",
+)
+
+
 DOMAINS: dict[str, Domain] = {
     "home": HOME, "patrol": PATROL, "lunar": LUNAR, "solar": SOLAR, "mars": MARS,
-    "orchard": ORCHARD, "hotel": HOTEL,
+    "orchard": ORCHARD, "hotel": HOTEL, "house": HOUSE,
 }

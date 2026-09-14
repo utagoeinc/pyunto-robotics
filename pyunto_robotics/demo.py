@@ -126,13 +126,22 @@ def run_demo(
             print("          In the Pyunto app open a premium space, choose \"Invite a robot\",")
             print("          then run:  pyunto-robotics demo --pair <code>")
 
-    print("window  : opening the simulator…")
-    robot = Robot(setup.scene, gait=setup.gait() if setup.gait else None,
-                  keyframe=setup.default_keyframe, max_depth=setup.max_depth)
-    viewer = open_viewer(robot, speed, setup.camera) if view else None
-    if view and viewer is None:
-        robot.close()
-        return 1
+    # A robot without a scene has no body to simulate.
+    #
+    # `RobotSkills` never required one -- the contract is a single `run()` method, and whether
+    # a MuJoCo humanoid or a lock on a front door sits behind it is not Pyunto's business.
+    # The house is the case that proves it, and it is also the one most people could use.
+    if setup.scene:
+        print("window  : opening the simulator…")
+        robot = Robot(setup.scene, gait=setup.gait() if setup.gait else None,
+                      keyframe=setup.default_keyframe, max_depth=setup.max_depth)
+        viewer = open_viewer(robot, speed, setup.camera) if view else None
+        if view and viewer is None:
+            robot.close()
+            return 1
+    else:
+        robot = None
+        viewer = None
 
     grounder = ColorGrounder()
     planner = (
@@ -178,7 +187,8 @@ def run_demo(
         bridge.stop()
         if viewer:
             viewer.close()
-        robot.close()
+        if robot is not None:
+            robot.close()
     return 0
 
 
