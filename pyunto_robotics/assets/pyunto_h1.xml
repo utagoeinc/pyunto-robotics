@@ -1,0 +1,345 @@
+<!--
+  Pyunto H1 - a humanoid built for this project (not a vendor model).
+
+  Designed around what the demo actually needs:
+    * ~1.5 m tall, shoulders at ~1.15 m, so the hands reach a 0.90 m office door handle
+      with the arm comfortably bent rather than fully extended.
+    * Shoulders use three ORTHOGONAL axes (pitch/roll/yaw). The MuJoCo sample humanoid uses
+      skewed axes like axis="2 1 1", which look fine but make inverse kinematics painful.
+    * A real 2-finger gripper (not a sphere for a hand) so it can push and grasp door handles.
+    * A head camera - this is the robot's only exteroceptive sensor. Navigation is image-based.
+
+  Joint budget, deliberately modest (22 actuated DoF):
+    legs 2x6 = 12   hip yaw/roll/pitch, knee, ankle pitch/roll
+    waist       1   yaw
+    arms 2x4 = 8    shoulder pitch/roll/yaw, elbow
+    grippers 2x1    one actuator per hand, fingers coupled by a tendon
+  Kept small on purpose: fewer joints is easier to keep upright and easier to control.
+
+  Actuators are position-servo (`position` class) rather than raw torque motors, because the
+  first gait implementation is kinematic. A torque-based RL policy can drive the same joints
+  later without changing the body.
+-->
+<mujoco model="pyunto_h1">
+  <compiler angle="radian" autolimits="true"/>
+
+  <default>
+    <!-- Servo defaults. kp is per-joint-group; heavier joints get more authority below. -->
+    <default class="robot">
+      <geom type="capsule" condim="3" friction="0.9 0.05 0.01" density="900"
+            rgba="0.85 0.87 0.9 1" group="1"/>
+      <joint type="hinge" damping="2" armature="0.02" limited="true"/>
+      <position kp="120" dampratio="1" ctrllimited="true"/>
+
+      <default class="leg">
+        <joint damping="5" armature="0.05"/>
+        <position kp="400" forcerange="-200 200"/>
+      </default>
+      <default class="arm">
+        <joint damping="2" armature="0.02"/>
+        <position kp="150" forcerange="-60 60"/>
+      </default>
+      <default class="finger">
+        <joint damping="0.3" armature="0.005"/>
+        <geom rgba="0.25 0.27 0.3 1" friction="2.0 0.1 0.01" condim="4"/>
+        <position kp="30" forcerange="-25 25"/>
+      </default>
+      <!-- Feet: high friction, box-ish contact so the robot does not skate. -->
+      <default class="foot">
+        <geom type="box" friction="1.5 0.1 0.01" condim="6" rgba="0.2 0.22 0.25 1"/>
+      </default>
+      <default class="accent">
+        <geom rgba="0.15 0.55 0.85 1"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material name="body_mat" rgba="0.85 0.87 0.90 1" specular="0.3" shininess="0.4"/>
+    <material name="dark_mat" rgba="0.20 0.22 0.25 1" specular="0.2"/>
+    <material name="accent_mat" rgba="0.15 0.55 0.85 1" specular="0.5" shininess="0.6"/>
+  </asset>
+
+  <worldbody>
+    <!--
+      Pelvis is the floating base. 0.789 is measured, not guessed: with the "stand" keyframe
+      bent knees the leg chain is shorter than fully extended, and this is the height that puts
+      the sole of the foot geom exactly on z=0.
+    -->
+    <body name="pelvis" pos="0 0 0.789" childclass="robot">
+      <freejoint name="root"/>
+      <inertial pos="0 0 0" mass="6.0" diaginertia="0.06 0.05 0.04"/>
+      <geom name="pelvis_g" type="box" size="0.085 0.10 0.06" material="body_mat"/>
+
+      <!-- ================= TORSO ================= -->
+      <body name="torso" pos="0 0 0.105">
+        <joint name="waist_yaw" axis="0 0 1" range="-1.0 1.0"/>
+        <inertial pos="0 0 0.16" mass="11.0" diaginertia="0.18 0.15 0.09"/>
+        <geom name="torso_g" type="box" size="0.100 0.120 0.175" pos="0 0 0.165"
+              material="body_mat"/>
+        <geom name="chest_g" type="box" size="0.055 0.075 0.02" pos="0.055 0 0.22"
+              material="accent_mat" class="accent"/>
+
+        <!-- ================= HEAD + CAMERA ================= -->
+        <!-- A short neck stub separates the head from the torso so they do not interpenetrate. -->
+        <body name="head" pos="0 0 0.455">
+          <inertial pos="0 0 0.03" mass="1.2" diaginertia="0.006 0.006 0.005"/>
+          <!--
+            A neck that actually turns. The head used to be welded to the torso, which meant
+            the robot could only look where it was walking: steering around a wall swung the
+            cameras off the door it was heading for, it lost track of which door that was, and
+            with three identical doors in the office it would re-acquire whichever was nearest.
+
+            Turning the head separates the two. The body takes whatever line keeps it clear of
+            the walls while the head stays pointed at the target, which is what a person does
+            walking across a room toward a door.
+
+            +/- 100 degrees is roughly human. Beyond that the robot has to turn its body, which
+            is also what a person does.
+          -->
+          <joint name="neck_yaw" type="hinge" axis="0 0 1" pos="0 0 -0.055"
+                 range="-1.75 1.75" damping="1.5" stiffness="0" armature="0.005"/>
+          <geom name="neck_g" type="cylinder" size="0.032 0.030" pos="0 0 -0.055"
+                material="dark_mat"/>
+          <geom name="head_g" type="box" size="0.062 0.070 0.062" material="body_mat"/>
+          <geom name="visor_g" type="box" size="0.018 0.062 0.026" pos="0.055 0 0.008"
+                material="dark_mat"/>
+          <!--
+            The robot's eye. xyaxes points +x forward with +z up in the image.
+            fovy 75 is a wide-ish lens, which helps mapless navigation: more of the room per
+            frame means fewer turn-and-look steps.
+          -->
+          <camera name="head_cam" pos="0.075 0 0.01" xyaxes="0 -1 0 0 0 1" fovy="75"/>
+          <site name="head_cam_site" pos="0.075 0 0.01" size="0.008" rgba="1 0 0 0.6"/>
+          <!--
+            Two more head cameras, each turned 60 degrees out. With a 90-degree field of view
+            apiece they overlap head_cam and between them cover about 180 degrees, which is
+            what it takes to notice a wall the robot is walking alongside: a forward camera
+            sees 75 degrees, and the wall being scraped is at 90.
+
+            Mounted on the head rather than the torso so turning to look also turns them, and
+            so that anything behind can be checked by turning the head rather than by adding
+            more cameras.
+
+            Used for depth only. They exist to measure gaps, not to recognise anything.
+          -->
+          <camera name="look_left" pos="0.04 0.05 0.01" xyaxes="0.866 -0.5 0 0 0 1" fovy="90"/>
+          <camera name="look_right" pos="0.04 -0.05 0.01" xyaxes="-0.866 -0.5 0 0 0 1" fovy="90"/>
+        </body>
+
+        <!-- ================= ARMS ================= -->
+        <!--
+          Shoulder axes are orthogonal on purpose:
+            pitch = rotate about y (raise/lower the arm forward)
+            roll  = rotate about x (move the arm away from the body)
+            yaw   = rotate about z (twist the upper arm)
+          That ordering makes a closed-form IK reachable, unlike skewed axes.
+        -->
+        <body name="shoulder_r" pos="0 -0.160 0.345">
+          <joint name="sh_pitch_r" axis="0 1 0" range="-3.1 1.6" class="arm"/>
+          <joint name="sh_roll_r" axis="1 0 0" range="-1.7 0.35" class="arm"/>
+          <joint name="sh_yaw_r" axis="0 0 1" range="-1.6 1.6" class="arm"/>
+          <inertial pos="0 0 -0.14" mass="1.6" diaginertia="0.012 0.012 0.004"/>
+          <geom name="uarm_r" type="capsule" fromto="0 0 0 0 0 -0.285" size="0.038"
+                material="body_mat"/>
+
+          <body name="forearm_r" pos="0 0 -0.285">
+            <joint name="elbow_r" axis="0 1 0" range="-2.4 0.0" class="arm"/>
+            <inertial pos="0 0 -0.12" mass="1.0" diaginertia="0.006 0.006 0.002"/>
+            <geom name="farm_r" type="capsule" fromto="0 0 0 0 0 -0.255" size="0.032"
+                  material="body_mat"/>
+
+            <!-- Palm + 2 fingers. Fingers are coupled by a tendon and driven by one actuator. -->
+            <body name="palm_r" pos="0 0 -0.255">
+              <inertial pos="0 0 -0.02" mass="0.25" diaginertia="0.0004 0.0004 0.0003"/>
+              <geom name="palm_r_g" type="box" size="0.022 0.038 0.022" material="dark_mat"/>
+              <site name="grip_r" pos="0 0 -0.062" size="0.012" rgba="0 1 0 0.5"/>
+              <body name="finger_r1" pos="0 -0.032 -0.018">
+                <joint name="grip_r1" axis="1 0 0" range="0 0.9" class="finger"/>
+                <geom name="fing_r1" type="box" size="0.016 0.010 0.042" pos="0 0 -0.036"
+                      class="finger"/>
+              </body>
+              <body name="finger_r2" pos="0 0.032 -0.018">
+                <joint name="grip_r2" axis="-1 0 0" range="0 0.9" class="finger"/>
+                <geom name="fing_r2" type="box" size="0.016 0.010 0.042" pos="0 0 -0.036"
+                      class="finger"/>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <body name="shoulder_l" pos="0 0.160 0.345">
+          <joint name="sh_pitch_l" axis="0 1 0" range="-3.1 1.6" class="arm"/>
+          <joint name="sh_roll_l" axis="1 0 0" range="-0.35 1.7" class="arm"/>
+          <joint name="sh_yaw_l" axis="0 0 1" range="-1.6 1.6" class="arm"/>
+          <inertial pos="0 0 -0.14" mass="1.6" diaginertia="0.012 0.012 0.004"/>
+          <geom name="uarm_l" type="capsule" fromto="0 0 0 0 0 -0.285" size="0.038"
+                material="body_mat"/>
+
+          <body name="forearm_l" pos="0 0 -0.285">
+            <joint name="elbow_l" axis="0 1 0" range="-2.4 0.0" class="arm"/>
+            <inertial pos="0 0 -0.12" mass="1.0" diaginertia="0.006 0.006 0.002"/>
+            <geom name="farm_l" type="capsule" fromto="0 0 0 0 0 -0.255" size="0.032"
+                  material="body_mat"/>
+
+            <body name="palm_l" pos="0 0 -0.255">
+              <inertial pos="0 0 -0.02" mass="0.25" diaginertia="0.0004 0.0004 0.0003"/>
+              <geom name="palm_l_g" type="box" size="0.022 0.038 0.022" material="dark_mat"/>
+              <site name="grip_l" pos="0 0 -0.062" size="0.012" rgba="0 1 0 0.5"/>
+              <body name="finger_l1" pos="0 -0.032 -0.018">
+                <joint name="grip_l1" axis="1 0 0" range="0 0.9" class="finger"/>
+                <geom name="fing_l1" type="box" size="0.016 0.010 0.042" pos="0 0 -0.036"
+                      class="finger"/>
+              </body>
+              <body name="finger_l2" pos="0 0.032 -0.018">
+                <joint name="grip_l2" axis="-1 0 0" range="0 0.9" class="finger"/>
+                <geom name="fing_l2" type="box" size="0.016 0.010 0.042" pos="0 0 -0.036"
+                      class="finger"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+
+      <!-- ================= LEGS ================= -->
+      <!-- Hip order yaw -> roll -> pitch mirrors how humanoid IK is normally decomposed. -->
+      <body name="hip_r" pos="0 -0.088 -0.062">
+        <joint name="hip_yaw_r" axis="0 0 1" range="-0.7 0.7" class="leg"/>
+        <joint name="hip_roll_r" axis="1 0 0" range="-0.5 0.5" class="leg"/>
+        <joint name="hip_pitch_r" axis="0 1 0" range="-1.9 1.0" class="leg"/>
+        <inertial pos="0 0 -0.18" mass="4.0" diaginertia="0.03 0.03 0.008"/>
+        <geom name="thigh_r" type="capsule" fromto="0 0 0 0 0 -0.367" size="0.052"
+              material="body_mat"/>
+
+        <body name="shin_r" pos="0 0 -0.367">
+          <joint name="knee_r" axis="0 1 0" range="0 2.2" class="leg"/>
+          <inertial pos="0 0 -0.17" mass="2.8" diaginertia="0.02 0.02 0.004"/>
+          <geom name="shin_r_g" type="capsule" fromto="0 0 0 0 0 -0.352" size="0.044"
+                material="body_mat"/>
+
+          <body name="foot_r" pos="0 0 -0.352">
+            <joint name="ank_pitch_r" axis="0 1 0" range="-0.9 0.6" class="leg"/>
+            <joint name="ank_roll_r" axis="1 0 0" range="-0.4 0.4" class="leg"/>
+            <inertial pos="0.02 0 -0.03" mass="0.9" diaginertia="0.003 0.004 0.002"/>
+            <geom name="foot_r_g" size="0.115 0.050 0.0225" pos="0.028 0 -0.0325" class="foot"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="hip_l" pos="0 0.088 -0.062">
+        <joint name="hip_yaw_l" axis="0 0 1" range="-0.7 0.7" class="leg"/>
+        <joint name="hip_roll_l" axis="1 0 0" range="-0.5 0.5" class="leg"/>
+        <joint name="hip_pitch_l" axis="0 1 0" range="-1.9 1.0" class="leg"/>
+        <inertial pos="0 0 -0.18" mass="4.0" diaginertia="0.03 0.03 0.008"/>
+        <geom name="thigh_l" type="capsule" fromto="0 0 0 0 0 -0.367" size="0.052"
+              material="body_mat"/>
+
+        <body name="shin_l" pos="0 0 -0.367">
+          <joint name="knee_l" axis="0 1 0" range="0 2.2" class="leg"/>
+          <inertial pos="0 0 -0.17" mass="2.8" diaginertia="0.02 0.02 0.004"/>
+          <geom name="shin_l_g" type="capsule" fromto="0 0 0 0 0 -0.352" size="0.044"
+                material="body_mat"/>
+
+          <body name="foot_l" pos="0 0 -0.352">
+            <joint name="ank_pitch_l" axis="0 1 0" range="-0.9 0.6" class="leg"/>
+            <joint name="ank_roll_l" axis="1 0 0" range="-0.4 0.4" class="leg"/>
+            <inertial pos="0.02 0 -0.03" mass="0.9" diaginertia="0.003 0.004 0.002"/>
+            <geom name="foot_l_g" size="0.115 0.050 0.0225" pos="0.028 0 -0.0325" class="foot"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- Couple each hand's two fingers so one actuator closes both symmetrically. -->
+  <tendon>
+    <fixed name="grip_r_t">
+      <joint joint="grip_r1" coef="1"/>
+      <joint joint="grip_r2" coef="-1"/>
+    </fixed>
+    <fixed name="grip_l_t">
+      <joint joint="grip_l1" coef="1"/>
+      <joint joint="grip_l2" coef="-1"/>
+    </fixed>
+  </tendon>
+  <equality>
+    <tendon tendon1="grip_r_t"/>
+    <tendon tendon1="grip_l_t"/>
+  </equality>
+
+  <!-- Neighbouring links always touch; excluding them avoids constant contact churn. -->
+  <contact>
+    <exclude body1="pelvis" body2="torso"/>
+    <exclude body1="pelvis" body2="hip_r"/>
+    <exclude body1="pelvis" body2="hip_l"/>
+    <exclude body1="torso" body2="shoulder_r"/>
+    <exclude body1="torso" body2="shoulder_l"/>
+    <exclude body1="torso" body2="head"/>
+    <exclude body1="palm_r" body2="finger_r1"/>
+    <exclude body1="palm_r" body2="finger_r2"/>
+    <exclude body1="palm_l" body2="finger_l1"/>
+    <exclude body1="palm_l" body2="finger_l2"/>
+  </contact>
+
+  <actuator>
+    <!-- neck (1) -->
+    <!--
+      Strong enough to hold the head against the body's motion while walking, which is the
+      whole point: a head that drifts with the torso is no better than a fixed one.
+    -->
+    <position name="neck_yaw" joint="neck_yaw" ctrlrange="-1.75 1.75" kp="25" kv="2.5"/>
+
+    <!-- legs (12) -->
+    <position name="hip_yaw_r" joint="hip_yaw_r" ctrlrange="-0.7 0.7" class="leg"/>
+    <position name="hip_roll_r" joint="hip_roll_r" ctrlrange="-0.5 0.5" class="leg"/>
+    <position name="hip_pitch_r" joint="hip_pitch_r" ctrlrange="-1.9 1.0" class="leg"/>
+    <position name="knee_r" joint="knee_r" ctrlrange="0 2.2" class="leg"/>
+    <position name="ank_pitch_r" joint="ank_pitch_r" ctrlrange="-0.9 0.6" class="leg"/>
+    <position name="ank_roll_r" joint="ank_roll_r" ctrlrange="-0.4 0.4" class="leg"/>
+    <position name="hip_yaw_l" joint="hip_yaw_l" ctrlrange="-0.7 0.7" class="leg"/>
+    <position name="hip_roll_l" joint="hip_roll_l" ctrlrange="-0.5 0.5" class="leg"/>
+    <position name="hip_pitch_l" joint="hip_pitch_l" ctrlrange="-1.9 1.0" class="leg"/>
+    <position name="knee_l" joint="knee_l" ctrlrange="0 2.2" class="leg"/>
+    <position name="ank_pitch_l" joint="ank_pitch_l" ctrlrange="-0.9 0.6" class="leg"/>
+    <position name="ank_roll_l" joint="ank_roll_l" ctrlrange="-0.4 0.4" class="leg"/>
+    <!-- waist (1) -->
+    <position name="waist_yaw" joint="waist_yaw" ctrlrange="-1.0 1.0"/>
+    <!-- arms (8) -->
+    <position name="sh_pitch_r" joint="sh_pitch_r" ctrlrange="-3.1 1.6" class="arm"/>
+    <position name="sh_roll_r" joint="sh_roll_r" ctrlrange="-1.7 0.35" class="arm"/>
+    <position name="sh_yaw_r" joint="sh_yaw_r" ctrlrange="-1.6 1.6" class="arm"/>
+    <position name="elbow_r" joint="elbow_r" ctrlrange="-2.4 0.0" class="arm"/>
+    <position name="sh_pitch_l" joint="sh_pitch_l" ctrlrange="-3.1 1.6" class="arm"/>
+    <position name="sh_roll_l" joint="sh_roll_l" ctrlrange="-0.35 1.7" class="arm"/>
+    <position name="sh_yaw_l" joint="sh_yaw_l" ctrlrange="-1.6 1.6" class="arm"/>
+    <position name="elbow_l" joint="elbow_l" ctrlrange="-2.4 0.0" class="arm"/>
+    <!-- grippers (2): one per hand, fingers follow via the tendon equality -->
+    <position name="grip_r" joint="grip_r1" ctrlrange="0 0.9" class="finger"/>
+    <position name="grip_l" joint="grip_l1" ctrlrange="0 0.9" class="finger"/>
+  </actuator>
+
+  <keyframe>
+    <!--
+      "stand": knees slightly bent, arms down and a touch forward. The pose the kinematic gait
+      returns to, and a sane starting point for any RL policy.
+
+      qpos layout is MuJoCo's joint order, which follows the body tree - torso and arms come
+      BEFORE the legs, because <body name="torso"> is declared before <body name="hip_r">:
+        7  free joint (xyz + quat)
+        1  waist_yaw
+        6  right arm  (sh_pitch, sh_roll, sh_yaw, elbow, grip1, grip2)
+        6  left arm
+        6  right leg  (hip_yaw, hip_roll, hip_pitch, knee, ank_pitch, ank_roll)
+        6  left leg
+      Pelvis height 0.8136 is solved, not guessed: it puts both soles exactly on z=0 while
+      keeping the CoM inside the support polygon.
+    -->
+    <key name="stand"
+         qpos="0 0 0.8136  1 0 0 0
+               0
+               -0.25 -0.12 0 -0.35   0 0
+               -0.25  0.12 0 -0.35   0 0
+               0 0 -0.25 0.5 -0.25 0
+               0 0 -0.25 0.5 -0.25 0"/>
+  </keyframe>
+</mujoco>

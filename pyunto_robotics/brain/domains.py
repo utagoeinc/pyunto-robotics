@@ -520,4 +520,76 @@ If the request is just conversation, reply with:
 )
 
 
-DOMAINS: dict[str, Domain] = {"home": HOME, "patrol": PATROL, "lunar": LUNAR}
+SOLAR = Domain(
+    name="solar",
+    verbs=(
+        # The whole errand in one instruction. This has to come first: "go and get power"
+        # contains "go", and matching the bare verb would send the robot nowhere in particular
+        # with no intention of charging when it arrived.
+        # Order is everything here, because patterns are substrings and the words overlap.
+        # "power the lights" contains "power"; "how much charge" contains "charge". So the
+        # specific intents are listed before the general ones, and the general ones are
+        # matched on the bare noun -- which is how people actually write the request
+        # ("go and fetch SOME power" contains none of "fetch power" or "get power").
+        ("power_lights", ("turn on the lights", "power the lights", "light the house",
+                          "switch on the lights", "the lights", "照明をつけて", "電気をつけて",
+                          "家の明かりをつけて", "ライトをつけて")),
+        ("battery", ("how much charge", "how much power", "battery", "state of charge",
+                     "how full", "バッテリー", "残量", "充電量", "どれくらい貯まった")),
+        ("find_sun", ("find the sun", "find sunlight", "find somewhere sunny", "look for sun",
+                      "日光を探して", "日向を探して", "陽の当たる場所を探して", "日なたを探して")),
+        ("charge", ("charge here", "start charging", "collect here",
+                    "ここで充電", "ここで発電")),
+        ("fetch_power", ("power", "energy", "charge", "電力", "充電", "発電", "電気",
+                         "エネルギー")),
+        ("home", ("go home", "return home", "come back", "back to the carport",
+                  "家に戻って", "帰って", "駐車場に戻って", "戻って")),
+        ("goto", ("go to", "drive to", "head to", "head for", "make for", "approach",
+                  "行って", "向かって", "移動して", "まで行って")),
+        ("describe", ("what do you see", "describe", "what can you see",
+                      "何が見える", "何が見えますか")),
+        ("where", ("where are you", "your position", "どこにいる", "現在地", "どこですか")),
+    ),
+    objects={
+        "park": ("park", "open ground", "the green", "公園", "広場", "空き地"),
+        "street": ("street", "road", "道", "道路", "通り"),
+        "home": ("home", "house", "carport", "家", "自宅", "駐車場", "カーポート"),
+    },
+    intransitive=frozenset({
+        "fetch_power", "find_sun", "charge", "power_lights", "battery",
+        "describe", "where", "home",
+    }),
+    help_text=(
+        "I can go and find sunlight, charge there, come home and put the power into the house "
+        "lights. Try: 「日光が当たる場所まで移動して、電力を取得してきて」"
+    ),
+    prompt="""You control a small four-wheeled robot with a solar panel on its back. It lives \
+in a carport at a house. The carport roof shades it, so it cannot charge at home. The street \
+outside is shaded by tall hedges. To the east there is an open park where the low afternoon \
+sun still reaches the ground.
+
+The robot's battery powers the house lights when it gets home.
+
+Available actions:
+  fetch_power     the whole errand: leave home, find sunlight, charge, come back, light the house
+  find_sun        search for somewhere the sun actually reaches
+  charge          stay put and collect power where the robot is now
+  power_lights    put the stored charge into the house lights
+  battery         report the state of charge
+  goto <target>   drive to a target: park, street, or home
+  home            drive back to the carport
+  describe        say what is currently in view
+  where           report where the robot is
+  report <text>   say something to the user
+
+Rules:
+- Only use the action names and target names listed above.
+- Prefer `fetch_power` when the user asks for power or energy without saying how.
+- Charging in shade collects almost nothing, so find sunlight before charging.
+""",
+)
+
+
+DOMAINS: dict[str, Domain] = {
+    "home": HOME, "patrol": PATROL, "lunar": LUNAR, "solar": SOLAR,
+}

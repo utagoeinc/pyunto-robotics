@@ -1,18 +1,19 @@
 """Agent tests: message in, action out, reply back.
 
-These use a fake Pyunto client so they run offline. The real round trip through
-api.pyunto.com is exercised by scripts/run_robot.py.
+These use a fake Pyunto client so they run offline, and a stub skill layer so they test the
+agent's own behaviour -- planning, step limits, error handling -- rather than any one robot's
+abilities. The real round trip through api.pyunto.com is exercised by `pyunto-robotics demo`.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from typing import Any
+
 import pytest
 
 from pyunto_robotics.agent import RobotAgent
-from pyunto_robotics.brain.planner import Plan, RulePlanner, Step
-from pyunto_agent.client import IncomingMessage
-from pyunto_robotics.perception.grounding import ColorGrounder
-from pyunto_robotics.sim.robot import Robot
+from pyunto_robotics.brain.result import SkillResult
 
 
 class FakeClient:
@@ -29,115 +30,102 @@ class FakeClient:
         pass
 
 
-def _message(text: str) -> IncomingMessage:
-    return IncomingMessage(
-        uuid="m1",
-        text=text,
-        thread_id="t1",
-        chat_space_id="s1",
-        sender_uuid="human",
-        sender_name="Tom",
+@dataclass
+class Step:
+    action: str
+    argument: str = ""
+    where: str = ""
+    expect: Any = None
+
+    def __str__(self) -> str:
+        return f"{self.action} {self.argument}".strip()
+
+
+@dataclass
+class Plan:
+    steps: list[Step] = field(default_factory=list)
+    reply: str | None = None
+
+
+class StubSkills:
+    """Succeeds at everything, and remembers what it was asked to do."""
+
+    actions = ("goto", "charge", "report")
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def run(self, action, argument=None, where=None, expect=None):  # noqa: ANN001
+        self.calls.append(action)
+        return SkillResult(True, f"Did {action}.")
+
+
+def agent_with(planner, skills=None, **kw) -> RobotAgent:
+    """A RobotAgent with no simulator behind it: these tests are about the agent."""
+    return RobotAgent(
+        robot=None, grounder=None, planner=planner, skills=skills or StubSkills(), **kw
     )
 
 
-@pytest.fixture(scope="module")
-def agent():
-    robot = Robot("office.xml", keyframe="lobby")
-    yield RobotAgent(robot, ColorGrounder(), client=FakeClient(), planner=RulePlanner())
-    robot.close()
+def test_skills_are_required_rather_than_guessed():
+    """There is no sensible default: what a robot can do is what differs between robots."""
+    with pytest.raises(ValueError, match="skills"):
+        RobotAgent(robot=None, grounder=None, planner=_Planner([]), skills=None)
 
 
-def test_conversational_message_gets_a_reply_without_moving(agent):
-    agent.robot.reset("lobby")
-    before = agent.robot.position.copy()
+class _Planner:
+    def __init__(self, steps, reply=None):
+        self._steps, self._reply = steps, reply
 
-    execution = agent.execute("こんにちは")
+    def plan(self, text):  # noqa: ANN001
+        return Plan(list(self._steps), self._reply)
 
+
+def test_an_instruction_becomes_actions():
+    skills = StubSkills()
+    agent = agent_with(_Planner([Step("goto", "park"), Step("charge")]), skills)
+    execution = agent.execute("go to the park and charge")
     assert execution.ok
-    assert "Hello" in execution.reply()
-    assert (agent.robot.position == before).all(), "greeting should not move the robot"
+    assert skills.calls == ["goto", "charge"]
 
 
-def test_where_am_i(agent):
-    agent.robot.reset("lobby")
-    execution = agent.execute("where are you")
+def test_an_unknown_instruction_explains_itself():
+    """Silence is the worst answer: the person cannot tell if it landed."""
+    agent = agent_with(_Planner([]))
+    execution = agent.execute("make me a coffee")
     assert execution.ok
-    assert "lobby" in execution.reply()
+    reply = execution.reply()
+    assert "make me a coffee" in reply
+    # And it says what would have worked.
+    assert "goto" in reply
 
 
-def test_unknown_instruction_explains_itself(agent):
-    execution = agent.execute("qwertyuiop")
-    assert execution.ok  # not understanding is not a failure
-    assert "open" in execution.reply().lower()
+def test_a_failed_skill_is_reported_not_raised():
+    class Failing(StubSkills):
+        def run(self, action, argument=None, where=None, expect=None):  # noqa: ANN001
+            return SkillResult(False, "The way was blocked.")
+
+    agent = agent_with(_Planner([Step("goto", "park")]), Failing(), max_replans=0)
+    execution = agent.execute("go to the park")
+    assert execution.ok is False
+    assert "blocked" in execution.reply()
 
 
-def test_failed_skill_is_reported_not_raised(agent):
-    agent.robot.reset("lobby")
-    execution = agent.execute("go to the purple giraffe")
-    assert not execution.ok
-    assert execution.reply()
+def test_plan_length_is_capped_and_said_so():
+    """Silently doing less than asked is the failure worth being loud about."""
+    steps = [Step("goto", f"place{i}") for i in range(6)]
+    agent = agent_with(_Planner(steps), max_steps_per_message=3, max_replans=0)
+    execution = agent.execute("do six things")
+    assert execution.ok is False
+    assert "6 steps" in execution.reply() or "not done" in execution.reply()
 
 
-def test_plan_length_is_capped():
-    """A model that emits a wall of steps has misunderstood; do not run them all.
+def test_measurements_are_kept_per_step():
+    """A reply can say what was measured, not only whether it worked."""
+    class Measuring(StubSkills):
+        def run(self, action, argument=None, where=None, expect=None):  # noqa: ANN001
+            return SkillResult(True, "Arrived.", {"distance_m": 4.2})
 
-    And SAY SO when the cap bites. Silent truncation is indistinguishable from the robot
-    deciding it had finished: a six-part errand cut to four used to end with a cheerful report
-    of the four it did, leaving the user no way to know the last two were never attempted.
-    """
-
-    class Runaway:
-        def plan(self, message: str) -> Plan:
-            return Plan([Step("where") for _ in range(20)])
-
-    robot = Robot("office.xml", keyframe="lobby")
-    try:
-        a = RobotAgent(robot, ColorGrounder(), planner=Runaway(), max_steps_per_message=3)
-        execution = a.execute("anything")
-        # Three steps run, plus one message explaining what was left undone.
-        assert len(execution.messages) == 4
-        assert "not done" in execution.messages[-1]
-        # Truncating counts as not succeeding: the errand was not carried out as asked.
-        assert not execution.ok
-    finally:
-        robot.close()
-
-
-def test_reply_goes_back_to_the_same_thread(agent):
-    agent.client.sent.clear()
-    agent._handle(_message("where are you"))
-    assert agent.pump_once(timeout=1.0)
-
-    assert agent.client.sent, "no reply was sent"
-    space_id, text, thread_id = agent.client.sent[-1]
-    assert space_id == "s1"
-    assert thread_id == "t1", "reply must land in the thread the instruction came from"
-    assert text
-
-
-def test_busy_robot_acknowledges_rather_than_dropping(agent):
-    """A second instruction mid-task should be answered, then queued."""
-    agent.client.sent.clear()
-    agent._busy.set()
-    try:
-        agent._handle(_message("open the door"))
-    finally:
-        agent._busy.clear()
-
-    assert agent.client.sent, "busy robot said nothing"
-    assert "middle of something" in agent.client.sent[-1][1]
-    assert agent._work.qsize() == 1, "the instruction should still be queued"
-    agent._work.get_nowait()  # drain so later tests start clean
-
-
-@pytest.mark.slow
-def test_full_instruction_to_door_open(agent):
-    """The demo path, without the network: instruction in, door open, sentence out."""
-    agent.robot.reset("lobby")
-    agent.client.sent.clear()
-
-    execution = agent.execute("オフィスのドアを開けて")
-
-    assert execution.ok, execution.reply()
-    assert "opened the door" in execution.reply()
-    assert agent.robot.position[1] > 1.0, "robot did not get through the doorway"
+    agent = agent_with(_Planner([Step("goto", "park")]), Measuring())
+    execution = agent.execute("go to the park")
+    assert execution.data[0]["distance_m"] == 4.2

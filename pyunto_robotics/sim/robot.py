@@ -249,7 +249,18 @@ class Robot:
             contact = self.data.contact[i]
             n1 = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1) or ""
             n2 = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2) or ""
-            if contact.dist >= 0 or "floor" in n1 or "floor" in n2:
+            if contact.dist >= 0:
+                continue
+            # The ground is not a wall. "floor" alone was enough indoors; outdoors the
+            # driveable surfaces are named ground, road, park and pavement, and a wheeled
+            # robot rests on them permanently -- so every frame reported a wall on its left
+            # and the avoidance reflex fired continuously, leaving the robot rocking in place
+            # 33 m from home. Anything a machine can stand on belongs on this list.
+            if any(
+                surface in name
+                for name in (n1, n2)
+                for surface in ("floor", "ground", "road", "park", "pavement", "terrain")
+            ):
                 continue
             # Own-body membership from the kinematic tree, not from a list of names. The name
             # list is still consulted below for the parts a caller might reason about, but it

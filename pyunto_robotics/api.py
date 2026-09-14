@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 # Re-exported so there is one import site for everything public.
-from .brain.skills import SkillResult
+from .brain.result import SkillResult
 from .perception.grounding import Detection, Grounder
 from .reporting import NullReporter, Reporter
 from .sim.gait import Gait

@@ -17,7 +17,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .brain.planner import Plan, RulePlanner
-from .brain.skills import Skills
 from pyunto_agent.client import IncomingMessage, PyuntoClient
 from .perception.grounding import Grounder
 from .reporting import NullReporter, Reporter
@@ -62,16 +61,17 @@ class RobotAgent:
         self.robot = robot
         self.client = client
         self.planner = planner or RulePlanner()
-        # Any object with `run(action, argument, where, expect) -> SkillResult` will do. The
-        # office humanoid's Skills is the default; the laundry, patrol and lunar robots pass
-        # their own, which is what lets one agent drive four very different machines.
-        #
-        # The office skills get the planner too, so they can ask it to think about a choice
-        # before doing something irreversible -- opening a door is not undoable in the way
-        # walking is.
-        self.skills = (
-            skills if skills is not None else Skills(robot, grounder, planner=self.planner)
-        )
+        # Any object with `run(action, argument, where, expect) -> SkillResult` will do. There
+        # is no default: what a robot can do is the one thing that genuinely differs between
+        # machines, and inventing a fallback would mean a robot silently driving with another
+        # machine's abilities. The registry supplies these per robot.
+        if skills is None:
+            raise ValueError(
+                "RobotAgent needs skills: an object with "
+                "run(action, argument, where, expect) -> SkillResult. "
+                "See pyunto_robotics/api.py."
+            )
+        self.skills = skills
         self.max_steps_per_message = max_steps_per_message
         # How many times one message may be re-planned after a step fails. Two is enough to
         # get out of the situations that actually arise (something moved, something is in the

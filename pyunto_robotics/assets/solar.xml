@@ -78,7 +78,7 @@
           friction="1.2 0.02 0.001" condim="3"/>
 
     <!-- ================= home, at the west end ================= -->
-    <body name="house" pos="-13 5.5 0">
+    <body name="house" pos="-13 9.0 0">
       <geom name="house_wall" type="box" pos="0 0 1.8" size="3.4 3.0 1.8" material="wall"/>
       <geom name="house_roof" type="box" pos="0 0 3.75" size="3.7 3.3 0.18" material="roof"/>
       <!-- Two windows facing the street. These light up when the robot delivers power. -->
@@ -93,12 +93,25 @@
       is impossible: the robot can sit here all day and collect nothing, which is exactly the
       problem the errand exists to solve.
     -->
-    <body name="carport" pos="-13 0.6 0">
-      <geom name="carport_roof" type="box" pos="0 0 2.3" size="2.6 2.0 0.10" material="roof"/>
-      <geom name="carport_p1" type="cylinder" pos="-2.4 1.8 1.15" size="0.09 1.15" material="post"/>
-      <geom name="carport_p2" type="cylinder" pos="2.4 1.8 1.15" size="0.09 1.15" material="post"/>
-      <geom name="carport_p3" type="cylinder" pos="-2.4 -1.8 1.15" size="0.09 1.15" material="post"/>
-      <geom name="carport_p4" type="cylinder" pos="2.4 -1.8 1.15" size="0.09 1.15" material="post"/>
+    <!--
+      Moved off the road to y=4.6, and its posts pulled in.
+      
+      Sitting astride the road at y=0.6, the carport's four posts stood at y=-1.2 and y=+2.4 --
+      squarely in the corridor the robot drives home along. Every return ended pinned against
+      one of them or against the hedge it was pushed into while dodging them, from 13 m to
+      22 m short depending on which controller was tried. The controller was never the
+      problem: the way home ran through a post.
+
+      A carport beside the house, opening south onto the road, is also what a real one looks
+      like. The robot now drives up the road, turns off it at the end, and parks under the
+      roof -- and the roof still shades it, which is the only thing the carport has to do.
+    -->
+    <body name="carport" pos="-13 4.6 0">
+      <geom name="carport_roof" type="box" pos="0 0 2.3" size="2.2 1.6 0.10" material="roof"/>
+      <geom name="carport_p1" type="cylinder" pos="-2.0 1.4 1.15" size="0.09 1.15" material="post"/>
+      <geom name="carport_p2" type="cylinder" pos="2.0 1.4 1.15" size="0.09 1.15" material="post"/>
+      <geom name="carport_p3" type="cylinder" pos="-2.0 -1.4 1.15" size="0.09 1.15" material="post"/>
+      <geom name="carport_p4" type="cylinder" pos="2.0 -1.4 1.15" size="0.09 1.15" material="post"/>
     </body>
 
     <!--
@@ -107,8 +120,15 @@
       the first open-looking spot it finds.
     -->
     <body name="hedges" pos="0 0 0">
-      <geom name="hedge_a" type="box" pos="-6 3.4 1.3" size="4.5 0.6 1.3" material="hedge"/>
-      <geom name="hedge_b" type="box" pos="4 3.4 1.4" size="4.0 0.6 1.4" material="hedge"/>
+      <!--
+        The east end of the north hedge stops at x=6, leaving the mouth of the street open.
+        With it running to x=8 the robot came back from the park along the park's northern
+        edge, met the hedge end-on at (8.4, 3.2) and stopped there: the way home was blocked
+        by scenery that exists to cast a shadow, not to be an obstacle course. Shortening it
+        keeps the shade over the street and leaves a way in.
+      -->
+      <geom name="hedge_a" type="box" pos="-4.5 3.4 1.3" size="3.0 0.6 1.3" material="hedge"/>
+      <geom name="hedge_b" type="box" pos="2.5 3.4 1.4" size="2.5 0.6 1.4" material="hedge"/>
       <geom name="hedge_c" type="box" pos="-6 -3.4 1.3" size="4.5 0.6 1.3" material="hedge"/>
       <geom name="hedge_d" type="box" pos="4 -3.4 1.2" size="4.0 0.6 1.2" material="hedge"/>
     </body>
@@ -118,7 +138,10 @@
       <geom name="tree_a_trunk" type="cylinder" pos="0 0 1.5" size="0.20 1.5" material="roof"/>
       <geom name="tree_a_crown" type="sphere" pos="0 0 3.3" size="1.5" material="hedge"/>
     </body>
-    <body name="tree_b" pos="7 -5.0 0">
+    <!-- Moved from x=7 to x=11: at 7 it sat directly on the line the robot takes home along
+         the road, and the return caught it at (3.3, -4.5) with 17 m still to go. The tree is
+         here for shade and depth, not to be an obstacle in the one corridor that matters. -->
+    <body name="tree_b" pos="11 -5.0 0">
       <geom name="tree_b_trunk" type="cylinder" pos="0 0 1.5" size="0.20 1.5" material="roof"/>
       <geom name="tree_b_crown" type="sphere" pos="0 0 3.3" size="1.5" material="hedge"/>
     </body>
@@ -141,7 +164,7 @@
       shadow, facing east up the street toward the park. The robot's forward axis is +x and
       the park is east, so the identity quaternion points it the right way.
     -->
-    <key name="carport" qpos="-13 0.6 0.24  1 0 0 0   0 0   0 0 0 0"/>
+    <key name="carport" qpos="-13 4.6 0.24  1 0 0 0   0 0   0 0 0 0"/>
     <!-- "street" starts out on the road, for testing travel without the departure. -->
     <key name="street" qpos="-4 0 0.24  1 0 0 0   0 0   0 0 0 0"/>
     <!-- "park" starts in the sunlit open ground, for testing charging on its own. -->
