@@ -86,7 +86,7 @@ class WatchingSkills:
             self.minute += MINUTES_PER_TICK
             place = self.day.place_at(self.minute)
             target = PLACES.get(place, PLACES["bed"])
-            self.sim.data.ctrl[:3] = target
+            self.sim.data.ctrl[:4] = target
             for _ in range(STEPS_PER_MINUTE):
                 # Step the physics directly rather than through Robot.step, which drives a
                 # gait: there is no robot in this scene, and the humanoid gait it defaults to

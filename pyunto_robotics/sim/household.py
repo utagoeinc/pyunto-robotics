@@ -26,9 +26,14 @@ log = logging.getLogger(__name__)
 # The rooms, and the sensor volume that covers each.
 ROOMS = ("bedroom", "bathroom", "hallway", "living", "kitchen")
 
-# Below this height the person is lying down or sitting rather than standing. The joint runs
-# 0 (standing) to -0.45 (lying), so the midpoint separates them with room to spare.
-LYING_Z = 0.72
+# Below this pitch the person is lying down or sitting rather than standing. Read from the
+# pitch joint rather than from height: a figure that tips flat is unmistakably in bed, where
+# one that merely sinks is a person standing in a hole. -0.4 rad separates upright from
+# reclining with room either side.
+LYING_PITCH = -0.4
+
+# Kept for the height test on the bed sensor, which still asks how low the body is.
+LYING_Z = 0.90
 
 # How long in the bathroom before it is worth remarking on. Twenty minutes is long for a visit
 # and short enough that a fall would not go unnoticed for an hour. Real systems use something
@@ -96,6 +101,8 @@ class HouseholdSensors:
             if geom >= 0:
                 self._volumes[room] = geom
         # Where the person was when they last changed room, in simulated minutes.
+        joint = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "person_pitch")
+        self._pitch = int(model.jnt_qposadr[joint]) if joint >= 0 else None
         self._room = ""
         self._room_since = 0.0
         self._last_change = 0.0
@@ -110,6 +117,7 @@ class HouseholdSensors:
                 room = name
                 break
 
+        pitch_now = float(self.data.qpos[self._pitch]) if self._pitch is not None else 0.0
         if room and room != self._room:
             self._room = room
             self._room_since = minute
@@ -121,12 +129,13 @@ class HouseholdSensors:
         # seven hours deep the moment someone wakes -- so the first reading after a normal
         # night fired the alarm at 07:00, an hour after she was safely asleep and a minute
         # before she got up. What the clock should measure is time motionless while awake.
-        if room == "bedroom" and position[2] < LYING_Z:
+        if room == "bedroom" and pitch_now < LYING_PITCH:
             self._last_change = minute
 
+        pitch = float(self.data.qpos[self._pitch]) if self._pitch is not None else 0.0
         return Reading(
             room=room,
-            lying=bool(position[2] < LYING_Z),
+            lying=bool(pitch < LYING_PITCH),
             minutes_in_room=minute - self._room_since if self._room else 0.0,
             minutes_still=minute - self._last_change,
             position=(float(position[0]), float(position[1])),
@@ -159,13 +168,15 @@ class HouseholdSensors:
 
 
 # Where each part of the day happens, in world coordinates, and whether the person is down.
-PLACES: dict[str, tuple[float, float, float]] = {
-    "bed": (-1.6, 1.6, -0.45),
-    "bedside": (-1.6, 0.4, 0.0),
-    "bathroom": (2.4, 2.6, 0.0),
-    "kitchen": (7.8, 1.0, 0.0),
-    "sofa": (4.4, -1.5, -0.45),
-    "hallway": (1.2, -1.0, 0.0),
+# x, y, height, pitch. Pitch is 0 standing and -1.5 flat, so the figure lies down on the bed
+# and reclines on the sofa instead of sinking into them upright.
+PLACES: dict[str, tuple[float, float, float, float]] = {
+    "bed": (-1.6, 1.6, -0.20, -1.5),
+    "bedside": (-1.6, 0.4, 0.0, 0.0),
+    "bathroom": (2.4, 2.6, 0.0, 0.0),
+    "kitchen": (7.8, 1.0, 0.0, 0.0),
+    "sofa": (4.4, -1.5, -0.28, -0.9),
+    "hallway": (1.2, -1.0, 0.0, 0.0),
 }
 
 

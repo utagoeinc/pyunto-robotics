@@ -48,6 +48,8 @@
     <!-- The person. One warm colour so they are unmistakable in a grey flat. -->
     <material name="person_body" rgba="0.88 0.42 0.30 1" specular="0.15"/>
     <material name="person_head" rgba="0.90 0.76 0.65 1" specular="0.15"/>
+    <material name="person_hair" rgba="0.88 0.88 0.86 1" specular="0.10"/>
+    <material name="person_legs" rgba="0.38 0.40 0.48 1" specular="0.10"/>
 
     <!--
       Sensor volumes, translucent. They are drawn because a demonstration of watching should
@@ -145,30 +147,110 @@
       is measured from wherever that body was declared, so declaring it at the origin makes
       the joint values world coordinates -- which is what the skills reason in.
 
-      Height 0.95 is the standing centre; person_z takes it down to sitting or lying.
+      Height 0.79 puts the soles on the floor when person_z is 0. It was 0.95, sized for the
+      old capsule, and the taller figure then stood with its feet 0.16 m in the air.
     -->
-    <body name="person" pos="0 0 0.95">
+    <body name="person" pos="0 0 0.79">
       <joint name="person_x" type="slide" axis="1 0 0" range="-3.0 9.0" damping="40"/>
       <joint name="person_y" type="slide" axis="0 1 0" range="-3.5 3.5" damping="40"/>
       <joint name="person_z" type="slide" axis="0 0 1" range="-0.45 0.1" damping="40"/>
-      <geom name="person_torso" type="capsule" fromto="0 0 -0.30 0 0 0.22" size="0.16"
-            material="person_body" density="200" contype="0" conaffinity="0"/>
-      <geom name="person_head_g" type="sphere" pos="0 0 0.40" size="0.13"
-            material="person_head" density="200" contype="0" conaffinity="0"/>
+      <!--
+        Declared inertia, because every geom now hangs off the child body below and MuJoCo
+        refuses a moving body with no mass of its own. 55 kg is an older woman; the figure
+        never collides with anything, so this only has to be plausible and non-zero.
+      -->
+      <inertial pos="0 0 0" mass="55" diaginertia="6 6 2"/>
+      <!--
+        A figure, not a capsule with a ball on top.
+
+        Sizes are an older woman's: about 1.55 m standing, narrow shoulders, a slight stoop.
+        None of it is load-bearing -- every geom is contype/conaffinity 0, so the body passes
+        through furniture and the sensors read position rather than contact -- so this is
+        purely so that a person watching the window sees a person.
+
+        The whole figure hangs from `person_pitch` below, which tips it flat for lying down.
+        That is why the parts are positioned relative to the hips rather than to the floor:
+        rotating the parent then carries all of them together.
+      -->
+      <body name="person_body_frame" pos="0 0 0">
+        <joint name="person_pitch" type="hinge" axis="0 1 0" range="-1.6 0.2" damping="30"/>
+
+        <!-- Torso, with a slight forward lean at the shoulders. -->
+        <geom name="person_torso" type="capsule" fromto="0 0 -0.18 0.02 0 0.20" size="0.115"
+              material="person_body" density="200" contype="0" conaffinity="0"/>
+        <geom name="person_hips" type="capsule" fromto="0 -0.07 -0.22 0 0.07 -0.22" size="0.10"
+              material="person_body" density="200" contype="0" conaffinity="0"/>
+
+        <!-- Head and neck. -->
+        <geom name="person_neck" type="capsule" fromto="0.02 0 0.20 0.03 0 0.27" size="0.045"
+              material="person_head" density="200" contype="0" conaffinity="0"/>
+        <geom name="person_head_g" type="sphere" pos="0.035 0 0.36" size="0.095"
+              material="person_head" density="200" contype="0" conaffinity="0"/>
+        <!-- Grey hair, which reads as age at a glance and from any angle. -->
+        <geom name="person_hair" type="sphere" pos="0.03 0 0.395" size="0.088"
+              material="person_hair" density="10" contype="0" conaffinity="0"/>
+
+        <!-- Arms, hanging with a slight bend at the elbow. -->
+        <geom name="person_arm_l" type="capsule" fromto="0.01 0.13 0.14 0.03 0.15 -0.10"
+              size="0.042" material="person_body" density="150"
+              contype="0" conaffinity="0"/>
+        <geom name="person_forearm_l" type="capsule" fromto="0.03 0.15 -0.10 0.07 0.14 -0.30"
+              size="0.037" material="person_head" density="150"
+              contype="0" conaffinity="0"/>
+        <geom name="person_arm_r" type="capsule" fromto="0.01 -0.13 0.14 0.03 -0.15 -0.10"
+              size="0.042" material="person_body" density="150"
+              contype="0" conaffinity="0"/>
+        <geom name="person_forearm_r" type="capsule" fromto="0.03 -0.15 -0.10 0.07 -0.14 -0.30"
+              size="0.037" material="person_head" density="150"
+              contype="0" conaffinity="0"/>
+
+        <!-- Legs. -->
+        <geom name="person_thigh_l" type="capsule" fromto="0 0.07 -0.26 0 0.07 -0.52"
+              size="0.055" material="person_legs" density="180"
+              contype="0" conaffinity="0"/>
+        <geom name="person_shin_l" type="capsule" fromto="0 0.07 -0.52 0 0.06 -0.76"
+              size="0.045" material="person_legs" density="180"
+              contype="0" conaffinity="0"/>
+        <geom name="person_thigh_r" type="capsule" fromto="0 -0.07 -0.26 0 -0.07 -0.52"
+              size="0.055" material="person_legs" density="180"
+              contype="0" conaffinity="0"/>
+        <geom name="person_shin_r" type="capsule" fromto="0 -0.07 -0.52 0 -0.06 -0.76"
+              size="0.045" material="person_legs" density="180"
+              contype="0" conaffinity="0"/>
+        <geom name="person_foot_l" type="box" pos="0.05 0.06 -0.79" size="0.09 0.04 0.03"
+              material="person_legs" density="180" contype="0" conaffinity="0"/>
+        <geom name="person_foot_r" type="box" pos="0.05 -0.06 -0.79" size="0.09 0.04 0.03"
+              material="person_legs" density="180" contype="0" conaffinity="0"/>
+      </body>
     </body>
   </worldbody>
 
   <actuator>
-    <position name="person_x" joint="person_x" kp="900" ctrlrange="-3.0 9.0" forcerange="-900 900"/>
-    <position name="person_y" joint="person_y" kp="900" ctrlrange="-3.5 3.5" forcerange="-900 900"/>
+    <position name="person_x" joint="person_x" kp="4000" ctrlrange="-3.0 9.0" forcerange="-2000 2000"/>
+    <position name="person_y" joint="person_y" kp="4000" ctrlrange="-3.5 3.5" forcerange="-2000 2000"/>
     <!-- Height: 0 is standing, -0.45 is lying down or sitting. The bed and chair sensors
          read this, which is how "in bed" is told from "standing beside the bed". -->
-    <position name="person_z" joint="person_z" kp="900" ctrlrange="-0.45 0.1" forcerange="-900 900"/>
+    <!--
+      kp 40000, forcerange 4000. A position servo's steady-state error is load over gain, and
+      at kp=900 a 55 kg figure sagged the full 0.45 m of the joint's travel: commanded to
+      stand it sat at the bottom stop with its feet through the floor. The figure is heavier
+      than the capsule it replaced, so the gain had to follow.
+    -->
+    <position name="person_z" joint="person_z" kp="40000" ctrlrange="-0.45 0.1"
+              forcerange="-4000 4000"/>
+    <!--
+      Tips the whole figure flat. Standing is 0; -1.5 rad is lying on the bed or reclining on
+      the sofa. Without this she sank into the mattress in an upright posture, which reads as
+      a person standing in a hole rather than a person asleep -- and "is she in bed" is the
+      single most important thing this scene has to show.
+    -->
+    <position name="person_pitch" joint="person_pitch" kp="600" ctrlrange="-1.6 0.2"
+              forcerange="-600 600"/>
   </actuator>
 
   <keyframe>
     <!-- qpos = person only (3): x, y, z. Asleep in bed at the start of the day. -->
-    <key name="asleep" qpos="-1.6 1.6 -0.45"/>
-    <key name="up" qpos="-1.6 0.4 0"/>
+    <key name="asleep" qpos="-1.6 1.6 -0.20 -1.5"/>
+    <key name="up" qpos="-1.6 0.4 0 0"/>
   </keyframe>
 </mujoco>
