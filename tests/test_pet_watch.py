@@ -96,3 +96,44 @@ def test_the_camera_is_what_finds_her_not_the_wheels():
     finally:
         skills.close()
         robot.close()
+
+
+def test_the_renderer_is_not_built_until_it_is_used():
+    """The demo builds skills AFTER opening the viewer.
+
+    On macOS `launch_passive` hands the GL context to the UI thread, so a renderer constructed
+    at init belongs to a context somebody else then owns -- the robot answered the first
+    message and went quiet afterwards. Building it lazily puts it on the thread that renders.
+    """
+    robot, skills = flat()
+    try:
+        assert skills._seg is None, "the renderer must not exist before the first look"
+        skills._cat_in_frame()
+        assert skills._seg is not None, "the renderer should be built on first use"
+    finally:
+        skills.close()
+        robot.close()
+
+
+@pytest.mark.slow
+def test_a_broken_camera_is_not_reported_as_an_empty_flat():
+    """The owner is out. "She is not in any of her usual places" would send them home."""
+
+    class Broken:
+        def update_scene(self, *args, **kwargs):
+            raise RuntimeError("GL context is not current")
+
+        def close(self):
+            pass
+
+    robot, skills = flat("sill")
+    try:
+        assert skills.find().data.get("where") == "sill"
+        skills._seg = Broken()
+        result = skills.find()
+        assert not result.ok
+        assert result.data.get("camera_failed")
+        assert "カメラ" in result.message
+    finally:
+        skills.close()
+        robot.close()

@@ -134,14 +134,16 @@ class PetWatchSkills:
             for n in ("cat_body", "cat_head", "cat_haunch", "cat_chest", "cat_muzzle")
         ]
         self._cat_geoms = [g for g in self._cat_geoms if g >= 0]
-        # Our own segmentation renderer. `Robot.look` returns rgb and depth only, and adding
-        # a third buffer there would cost every other demo a render per frame for something
-        # only this one needs.
-        # 320x240, not 160x120. A cat across a room is a few dozen pixels, and at the lower
-        # resolution the difference between "asleep on the shelf" and "not there" came down to
-        # single pixels -- which made the threshold a coin toss rather than a measurement.
-        self._seg = mujoco.Renderer(self.model, height=240, width=320)
-        self._seg.enable_segmentation_rendering()
+        # Our own segmentation renderer, built on FIRST USE rather than here.
+        #
+        # `Robot.look` returns rgb and depth only, and adding a third buffer there would cost
+        # every other demo a render per frame for something only this one needs. But the demo
+        # builds skills AFTER opening the viewer, and on macOS `launch_passive` hands the GL
+        # context to the UI thread -- so a renderer constructed here belongs to a context
+        # somebody else now owns. It answered once and then stopped, which is exactly the
+        # fault reported. Built lazily, it is created on the thread that actually renders.
+        self._seg: mujoco.Renderer | None = None
+        self._camera_failed = False
         self._hold_cat()
 
     def _hold_cat(self) -> None:
@@ -342,10 +344,25 @@ class PetWatchSkills:
         or the wooden shelf" is exactly the ambiguity a demo should not paper over.
         """
         try:
+            if self._seg is None:
+                # 320x240, not 160x120. A cat across a room is a few dozen pixels, and at the
+                # lower resolution the difference between "asleep on the shelf" and "not
+                # there" came down to single pixels -- a coin toss rather than a measurement.
+                self._seg = mujoco.Renderer(self.model, height=240, width=320)
+                self._seg.enable_segmentation_rendering()
             self._seg.update_scene(self.data, camera="head_cam")
             seg = self._seg.render()
         except Exception:  # noqa: BLE001 - a camera that cannot read is "did not see her"
-            log.debug("segmentation render failed", exc_info=True)
+            # Loud, and once. At debug level this was invisible, and a camera that had stopped
+            # working looked exactly like a cat that was not there: the robot answered the
+            # first message and then said "not found" to everything forever, with nothing in
+            # the log to say why. Warn on the first failure so the cause is on screen.
+            if not self._camera_failed:
+                self._camera_failed = True
+                log.warning("the camera stopped working; every search will now come up "
+                            "empty. This is usually the GL context: on macOS the viewer "
+                            "owns it, and a renderer built on another thread cannot draw.",
+                            exc_info=True)
             return 0.0
         # Channel 0 is the object id, channel 1 the object type. Geom ids are only meaningful
         # where the type is a geom, so mask on that before matching -- otherwise a body id
@@ -356,10 +373,13 @@ class PetWatchSkills:
 
     def close(self) -> None:
         """Release the segmentation renderer."""
+        if self._seg is None:
+            return
         try:
             self._seg.close()
         except Exception:  # noqa: BLE001 - closing must never be fatal
             pass
+        self._seg = None
 
     # -- the skills the owner actually asks for ---------------------------------------
 
@@ -386,6 +406,15 @@ class PetWatchSkills:
                     {"where": key, "where_ja": name, "frame_fraction": round(fraction, 4),
                      "tried": tried},
                 )
+        if self._camera_failed:
+            # Never report a camera fault as an empty room. The owner is out; "she is not in
+            # any of her usual places" would send them home.
+            return SkillResult(
+                False,
+                "カメラが動かなくなりました。猫ちゃんがいないのではなく、"
+                "私が見られなくなっています。",
+                {"where": None, "camera_failed": True},
+            )
         return SkillResult(
             True,
             "見つけられませんでした。"
