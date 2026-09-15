@@ -884,6 +884,10 @@ WATCH = Domain(
                    "今日は", "今日の様子", "一日", "きょうは")),
         ("watch", ("watch for", "keep an eye", "watch the next", "見ていて", "様子を見て",
                    "見守って")),
+        # After `watch`, so 「何時間見ていて」 still asks to watch rather than for the time.
+        # Note there is no bare 「何時間」 here for the same reason.
+        ("time", ("what time is it", "what's the time", "the time now", "time now",
+                  "何時", "なんじ", "時刻", "いま何時", "今の時間")),
         ("lock_status", ("is the door locked", "did she lock", "did he lock",
                          "鍵はかかってる", "施錠されてる", "戸締まり")),
         ("status", ("everything alright", "how is the house", "家の様子", "全部教えて")),
@@ -905,13 +909,13 @@ WATCH = Domain(
         "kitchen": ("kitchen", "キッチン", "台所"),
     },
     intransitive=frozenset({
-        "check", "today", "watch", "lock", "unlock", "lock_status", "status",
+        "check", "today", "watch", "time", "lock", "unlock", "lock_status", "status",
         "temperature", "warmer", "cooler", "aircon_on", "aircon_off",
         "lights_on", "lights_off",
     }),
     help_text=(
-        "I watch the flat and tell you how she is. Ask 「様子はどう？」 or 「今日は何してた？」, "
-        "and I can work the air conditioning, lights and lock too."
+        "I watch the flat and tell you how she is. Ask 「様子はどう？」, 「今日は何してた？」 "
+        "or 「今何時？」, and I can work the air conditioning, lights and lock too."
     ),
     prompt="""You watch a flat where an older person lives alone, through motion sensors in \
 each room and a bed sensor. You also control the air conditioning, the lights and the front \
@@ -924,6 +928,7 @@ Available actions:
   check             where she is now and whether she is up
   today             what has happened today, with times
   watch <hours>     let time pass and report anything worth saying
+  time              what time it is in the flat, and how fast the day is running
   temperature       how warm a room is
   set_temperature / warmer / cooler
   aircon_on / aircon_off
@@ -935,6 +940,7 @@ Available actions:
 Rules:
 - Only use the action names listed above.
 - Prefer `check` when asked how she is or where she is.
+- Use `time` for "what time is it"; use `watch` for "watch her for N hours".
 """,
 )
 

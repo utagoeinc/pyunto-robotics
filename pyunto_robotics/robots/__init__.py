@@ -155,7 +155,7 @@ def _watch() -> RobotSetup:
         greeting=(
             "🏠 この家のスマートハウスです。各部屋のセンサーでお母さまの様子が分かり、"
             "エアコン・照明・玄関の鍵を操作できます。\n"
-            "  • {example_a}\n  • {example_b}\n  • エアコンをつけて\n"
+            "  • {example_a}\n  • {example_b}\n  • エアコンをつけて\n  • 今何時？\n"
             "気になることがあれば、聞かれなくてもこちらからお伝えします。"
         ),
         camera=Camera(distance=11.0, elevation=-55, azimuth=90),

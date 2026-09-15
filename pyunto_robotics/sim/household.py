@@ -179,10 +179,19 @@ class HouseholdSensors:
             self._set_material(f"speed_{pip}", "speed_on" if pip <= speed_pips else "speed_off")
 
     def _set_material(self, geom_name: str, material_name: str) -> None:
+        """Swap a geom's appearance -- clock segments, sensor pads, lamps.
+
+        Sets `geom_rgba` as well as `geom_matid`. The live viewer holds its own copy of the
+        model and `sync()` is what carries changes across; matid alone did not reliably reach
+        the window, so the clock advanced in offscreen renders while the demo's window sat on
+        one time. rgba is per-geom and overrides the material, so writing both means the same
+        thing is shown either way.
+        """
         geom = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom_name)
         material = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_MATERIAL, material_name)
         if geom >= 0 and material >= 0:
             self.model.geom_matid[geom] = material
+            self.model.geom_rgba[geom] = self.model.mat_rgba[material]
 
     def light(self, name: str, on: bool) -> None:
         """Switch one of the flat's lamps, for the viewer."""

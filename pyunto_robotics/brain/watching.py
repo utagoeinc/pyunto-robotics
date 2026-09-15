@@ -63,7 +63,7 @@ class WatchingSkills:
     """Watch the flat, answer questions about it, and work its devices."""
 
     actions = (
-        "check", "today", "watch", "temperature", "set_temperature", "warmer", "cooler",
+        "check", "today", "watch", "time", "temperature", "set_temperature", "warmer", "cooler",
         "aircon_on", "aircon_off", "lights_on", "lights_off",
         "lock", "unlock", "lock_status", "status", "report",
     )
@@ -325,6 +325,27 @@ class WatchingSkills:
         return SkillResult(True, "\n".join(said), {"minute": int(self.minute),
                                                    "notes": len(said)})
 
+    def time(self) -> SkillResult:
+        """What time it is in the flat, and how fast the day is running.
+
+        The wall clock shows this, but somebody reading the diary on a phone is not looking at
+        the window -- and the first thing anybody asks of a scene that compresses a day is how
+        far along it is. Saying the rate too, because "14:52" alone invites the reasonable
+        assumption that it is 14:52 where the reader is.
+        """
+        # Only quote a rate once one has actually been timed. Before that `speed_pips` is
+        # its default, and stating it would be inventing a measurement.
+        if self._elapsed_wall > 0.005:
+            rate = {1: "ほぼ実時間", 2: "実時間の数十倍", 3: "実時間の約100倍",
+                    4: "実時間の約1000倍", 5: "1日が数秒"}.get(self.speed_pips, "")
+            text = f"いまこの家は {_clock(self.minute)} です（{rate}で進んでいます）。"
+        else:
+            text = f"いまこの家は {_clock(self.minute)} です（まだ動き始めたところです）。"
+        log.info("skill: time -> %s", _clock(self.minute))
+        return SkillResult(True, text, {"minute": int(self.minute),
+                                        "clock": _clock(self.minute),
+                                        "speed_pips": self.speed_pips})
+
     # -- dispatch -------------------------------------------------------------------
 
     def run(
@@ -334,9 +355,10 @@ class WatchingSkills:
         where: str | None = None,
         expect: int | None = None,
     ) -> SkillResult:
-        if action in ("check", "today", "watch"):
+        if action in ("check", "today", "watch", "time"):
             handler = {"check": lambda: self.check(),
                        "today": lambda: self.today(),
+                       "time": lambda: self.time(),
                        "watch": lambda: self.watch(argument)}[action]
             log.info("skill: %s(%s)", action, argument or "")
             return handler()
