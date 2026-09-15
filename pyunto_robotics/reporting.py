@@ -76,6 +76,11 @@ class ThreadReporter:
         robot=None,  # noqa: ANN001 - anything with .look(camera) -> Observation
         camera: str = "head_cam",
         send_images: bool = True,
+        # Who to notify. The person who gave the instruction, so their phone tells them the
+        # robot answered. Without it the server notifies "everyone in the thread" and each
+        # recipient's own settings decide -- a phone set to mentions-only shows nothing, and
+        # the narration lands in the diary unannounced.
+        notify_users: list[str] | None = None,
     ):
         self.client = client
         self.chat_space_id = chat_space_id
@@ -85,6 +90,7 @@ class ThreadReporter:
         # Pictures need a thread to live in -- the upload endpoint is per-thread -- and they
         # are the one part of this a person may not want, so it is switchable.
         self.send_images = send_images and thread_id is not None and robot is not None
+        self.notify_users = notify_users or None
         self._started_at: float | None = None
         self._step_number = 0
         self._last_frame: bytes | None = None
@@ -95,7 +101,8 @@ class ThreadReporter:
         if not text:
             return
         try:
-            self.client.send(self.chat_space_id, text, thread_id=self.thread_id)
+            self.client.send(self.chat_space_id, text, thread_id=self.thread_id,
+                             notify_users=self.notify_users)
         except Exception:  # noqa: BLE001 - narration must never break the errand
             log.warning("could not post progress: %s", text[:60], exc_info=True)
 

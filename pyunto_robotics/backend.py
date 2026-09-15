@@ -62,6 +62,10 @@ class RobotBackend:
             reporter = ThreadReporter(
                 self.client, ctx.chat_space_id, ctx.thread_id,
                 robot=self.robot, camera=self.camera, send_images=self.send_images,
+                # Notify whoever gave the instruction, so their phone tells them the robot
+                # answered. The narration is posted by the reporter rather than returned to
+                # Bridge, so it has to name the recipient itself.
+                notify_users=[ctx.sender_uuid] if ctx.sender_uuid else None,
             )
         execution = self.agent.execute(instruction, report=reporter)
         if reporter is not None:
