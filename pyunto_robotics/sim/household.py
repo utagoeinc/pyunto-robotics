@@ -174,11 +174,17 @@ class HouseholdSensors:
 # x, y, height, pitch. Pitch is 0 standing and -1.5 flat, so the figure lies down on the bed
 # and reclines on the sofa instead of sinking into them upright.
 PLACES: dict[str, tuple[float, float, float, float]] = {
-    "bed": (-1.6, 1.6, -0.20, -1.5),
+    # -0.09 puts her lowest part at 0.62, which is exactly the top of the mattress.
+    #
+    # It was -0.20, and that is the wrong DIRECTION: lying down was treated as lowering the
+    # body, but a bed is above the floor. She sank into it -- torso at 0.58, legs at 0.52,
+    # against a mattress surface of 0.62 -- and only her head showed, so she appeared to be a
+    # person with no legs buried in the bedding. Measured, not guessed.
+    "bed": (-1.6, 1.6, -0.09, -1.5),
     "bedside": (-1.6, 0.4, 0.0, 0.0),
     "bathroom": (2.4, 2.6, 0.0, 0.0),
     "kitchen": (7.8, 1.0, 0.0, 0.0),
-    "sofa": (4.4, -1.5, -0.28, -0.9),
+    "sofa": (4.4, -1.5, -0.30, -1.0),
     "hallway": (1.2, -1.0, 0.0, 0.0),
 }
 

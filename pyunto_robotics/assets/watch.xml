@@ -163,13 +163,13 @@
       is measured from wherever that body was declared, so declaring it at the origin makes
       the joint values world coordinates -- which is what the skills reason in.
 
-      Height 0.79 puts the soles on the floor when person_z is 0. It was 0.95, sized for the
+      Height 0.82 puts the soles on the floor when person_z is 0. It was 0.95, sized for the
       old capsule, and the taller figure then stood with its feet 0.16 m in the air.
     -->
-    <body name="person" pos="0 0 0.79">
+    <body name="person" pos="0 0 0.82">
       <joint name="person_x" type="slide" axis="1 0 0" range="-3.0 9.0" damping="40"/>
       <joint name="person_y" type="slide" axis="0 1 0" range="-3.5 3.5" damping="40"/>
-      <joint name="person_z" type="slide" axis="0 0 1" range="-0.45 0.1" damping="40"/>
+      <joint name="person_z" type="slide" axis="0 0 1" range="-0.45 0.9" damping="40"/>
       <!--
         Declared inertia, because every geom now hangs off the child body below and MuJoCo
         refuses a moving body with no mass of its own. 55 kg is an older woman; the figure
@@ -252,7 +252,7 @@
       stand it sat at the bottom stop with its feet through the floor. The figure is heavier
       than the capsule it replaced, so the gain had to follow.
     -->
-    <position name="person_z" joint="person_z" kp="40000" ctrlrange="-0.45 0.1"
+    <position name="person_z" joint="person_z" kp="40000" ctrlrange="-0.45 0.9"
               forcerange="-4000 4000"/>
     <!--
       Tips the whole figure flat. Standing is 0; -1.5 rad is lying on the bed or reclining on
