@@ -239,3 +239,48 @@ def test_an_unusual_day_does_not_quietly_resolve_itself():
         assert skills.sensors.read(skills.minute).room == "bathroom"
     finally:
         robot.close()
+
+
+def test_there_is_no_camera_inside_the_flat():
+    """A constraint, not an omission. See the module docstring in brain/watching.py.
+
+    The person being watched did not ask for any of this; her family did. Indoor footage is
+    the line between a product somebody would install in their mother's home and one they
+    would not, so it is pinned here rather than left to whoever edits the scene next.
+    """
+    import mujoco
+
+    robot, _ = flat()
+    try:
+        cameras = [
+            mujoco.mj_id2name(robot.model, mujoco.mjtObj.mjOBJ_CAMERA, i)
+            for i in range(robot.model.ncam)
+        ]
+        assert not cameras, f"the watching flat must have no indoor camera: {cameras}"
+    finally:
+        robot.close()
+
+
+@pytest.mark.slow
+def test_unanswered_calls_corroborate_a_bad_day():
+    """The doorphone earns its place by being a better sensor, not only a safer one.
+
+    Three unanswered callers on a day she did not get up is evidence a motion sensor alone
+    cannot give -- and it is obtained without a lens pointed at her.
+    """
+    robot, skills = flat()
+    try:
+        skills.advance(19 * 60)
+        ordinary = skills.run("visitors").data["visitors"]
+        assert ordinary, "nobody called on an ordinary day"
+        assert all(c["answered"] for c in ordinary), ordinary
+    finally:
+        robot.close()
+
+    robot, skills = flat(day=Day.did_not_get_up())
+    try:
+        skills.advance(19 * 60)
+        bad = skills.run("visitors").data["visitors"]
+        assert bad and not any(c["answered"] for c in bad), bad
+    finally:
+        robot.close()

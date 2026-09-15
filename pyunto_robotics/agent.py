@@ -274,7 +274,18 @@ class RobotAgent:
     # -- Pyunto loop --------------------------------------------------------------
 
     def _handle(self, message: IncomingMessage) -> None:
-        """Socket.IO callback. Must return fast; the work happens on the worker thread."""
+        """Socket.IO callback. Must return fast; the work happens on the worker thread.
+
+        This is the standalone path (``RobotAgent.run()``), used when the robot listens for
+        itself rather than through ``pyunto_agent.Bridge``. It therefore has to repeat the
+        Bridge's refusal: a machine takes orders from people, never from another program.
+        Leaving it out here would make the protection depend on which entry point a
+        deployment happened to use.
+        """
+        if message.sender_is_agent:
+            log.info("ignoring entry from %s: a robot takes orders only from people",
+                     message.sender_name)
+            return
         if self._busy.is_set():
             self._reply(message, "I am in the middle of something - I will get to that next.")
         self._work.put(message)

@@ -41,11 +41,29 @@ STEP_C = 2.0
 
 
 @dataclass
+class DoorCall:
+    """Somebody at the front door, and whether it was answered.
+
+    The doorphone is the one camera in this house, and it points OUTWARD at the porch. That
+    distinction is the whole privacy argument: a camera watching a person in their own living
+    room is surveillance of them, while one watching who rings their bell is a record of
+    visitors -- the same thing the door's peephole has always been, kept for later.
+    """
+
+    minute: float
+    who: str
+    answered: bool
+    # Whether a still from the porch camera is available for this call.
+    has_image: bool = True
+
+
+@dataclass
 class Room:
     """One room, and the things in it."""
 
     name: str
     temperature_c: float
+    humidity_pct: float = 52.0
     lights_on: bool = False
     aircon_on: bool = False
     aircon_target_c: float = COMFORT_C
@@ -67,6 +85,10 @@ class HomeDevices:
     })
     locked: bool = False
     outside_c: float = 27.0
+    outside_humidity_pct: float = 62.0
+    # Who has rung the bell, most recent last. A real integration replaces this with the
+    # doorphone's own log.
+    door_calls: list[DoorCall] = field(default_factory=list)
 
     def room(self, name: str | None) -> Room:
         """The named room, or the living room when nobody said which.
@@ -86,9 +108,9 @@ class HomeSkills:
     """Ask the house things, and tell it to do things."""
 
     actions = (
-        "temperature", "set_temperature", "warmer", "cooler",
+        "temperature", "humidity", "set_temperature", "warmer", "cooler",
         "aircon_on", "aircon_off", "lights_on", "lights_off",
-        "lock", "unlock", "lock_status", "status", "report",
+        "lock", "unlock", "lock_status", "visitors", "doorphone", "status", "report",
     )
 
     def __init__(self, devices: HomeDevices | None = None):
@@ -249,11 +271,101 @@ class HomeSkills:
 
     # -- everything at once ---------------------------------------------------------
 
+    # -- humidity ------------------------------------------------------------------
+
+    def humidity(self, room_name: str | None = None) -> SkillResult:
+        """How damp a room is, and whether that is worth doing anything about.
+
+        Worth asking after in an older person's flat for two ordinary reasons rather than any
+        dramatic one: dry air in winter and mould in summer. Like the thermometer, this says
+        what the number means, because "52%" is data and "a little dry" is the answer.
+        """
+        room = self.devices.room(room_name)
+        rh = room.humidity_pct
+        if rh >= 70.0:
+            note = "That is damp enough for mould to take hold."
+        elif rh >= 60.0:
+            note = "A little humid."
+        elif rh >= 40.0:
+            note = "Comfortable."
+        elif rh >= 30.0:
+            note = "A little dry — worth a humidifier if her throat is sore."
+        else:
+            note = "Very dry."
+        return SkillResult(
+            True,
+            f"The {room.name} is at {rh:.0f}% humidity. {note}",
+            {"room": room.name, "humidity_pct": round(rh, 1),
+             "outside_humidity_pct": round(self.devices.outside_humidity_pct, 1)},
+        )
+
+    # -- the front door, from outside ------------------------------------------------
+
+    def visitors(self, _argument: str | None = None) -> SkillResult:
+        """Who has been to the door, and whether she answered.
+
+        This is the part of watching that does not require watching HER. That somebody called
+        at 14:20 and she did not answer is worth a family member knowing, and it is arrived at
+        without a single camera pointed inside the flat.
+        """
+        calls = self.devices.door_calls
+        if not calls:
+            return SkillResult(True, "Nobody has been to the door today.",
+                               {"visitors": []})
+        lines = []
+        for call in calls:
+            when = f"{int(call.minute) // 60 % 24:02d}:{int(call.minute) % 60:02d}"
+            lines.append(
+                f"  {when}  {call.who} — "
+                + ("she answered" if call.answered else "no answer")
+            )
+        unanswered = sum(1 for c in calls if not c.answered)
+        head = f"{len(calls)} caller(s) at the door today"
+        if unanswered:
+            head += f", {unanswered} unanswered"
+        return SkillResult(
+            True,
+            head + ":\n" + "\n".join(lines),
+            {"visitors": [
+                {"minute": int(c.minute), "who": c.who, "answered": c.answered,
+                 "has_image": c.has_image}
+                for c in calls
+            ]},
+        )
+
+    def doorphone(self, _argument: str | None = None) -> SkillResult:
+        """The porch camera's view of the most recent caller.
+
+        The only camera in this house, and it faces the street. Asking for "the camera" in a
+        flat where someone lives alone should get you the doorstep, not her sitting room --
+        see `DoorCall`. A real integration returns the doorphone's own still here.
+        """
+        calls = [c for c in self.devices.door_calls if c.has_image]
+        if not calls:
+            return SkillResult(True, "No doorphone picture — nobody has rung the bell today.",
+                               {"image": None})
+        last = calls[-1]
+        when = f"{int(last.minute) // 60 % 24:02d}:{int(last.minute) % 60:02d}"
+        return SkillResult(
+            True,
+            f"📷 The doorphone at {when}: {last.who} — "
+            + ("she answered." if last.answered else "no answer."),
+            {"image": "doorphone", "minute": int(last.minute), "who": last.who,
+             "answered": last.answered},
+        )
+
     def status(self) -> SkillResult:
         """The whole house in one reply, for "is everything alright?"."""
         lines = [f"The front door is {'locked' if self.devices.locked else 'unlocked'}."]
+        calls = self.devices.door_calls
+        if calls:
+            unanswered = sum(1 for c in calls if not c.answered)
+            lines.append(
+                f"{len(calls)} caller(s) at the door today"
+                + (f", {unanswered} unanswered." if unanswered else ".")
+            )
         for room in self.devices.rooms.values():
-            bits = [f"{room.temperature_c:.1f}°C"]
+            bits = [f"{room.temperature_c:.1f}°C", f"{room.humidity_pct:.0f}%RH"]
             if room.aircon_on:
                 bits.append(f"aircon on at {room.aircon_target_c:.0f}°C")
             if room.lights_on:
@@ -267,6 +379,7 @@ class HomeSkills:
                 "rooms": {
                     r.name: {
                         "temperature_c": round(r.temperature_c, 1),
+                        "humidity_pct": round(r.humidity_pct, 1),
                         "aircon_on": r.aircon_on,
                         "lights_on": r.lights_on,
                     }
@@ -289,6 +402,7 @@ class HomeSkills:
         room = where or _room_in(argument)
         handlers = {
             "temperature": lambda: self.temperature(room),
+            "humidity": lambda: self.humidity(room),
             "set_temperature": lambda: self.set_temperature(argument, room),
             "warmer": lambda: self.warmer(room),
             "cooler": lambda: self.cooler(room),
@@ -299,6 +413,8 @@ class HomeSkills:
             "lock": lambda: self.lock(),
             "unlock": lambda: self.unlock(),
             "lock_status": lambda: self.lock_status(),
+            "visitors": lambda: self.visitors(argument),
+            "doorphone": lambda: self.doorphone(argument),
             "status": lambda: self.status(),
             "report": lambda: SkillResult(True, argument or "Done."),
         }

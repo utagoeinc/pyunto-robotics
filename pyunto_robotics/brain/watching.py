@@ -15,6 +15,21 @@ The devices from the old `house` robot live here too: an older person's flat has
 conditioner and lights and a front door, and the reason to connect them is that watching and
 acting belong together. Noticing the room is 29°C is worth something; turning the air
 conditioning on is worth more.
+
+No cameras inside the flat. Not an omission -- a constraint, and the one that decides whether
+this is a product somebody would put in their mother's home. The person being watched did not
+ask for any of this; the daughter did. So the watching is built from things that describe a
+home rather than record a person: floor-level motion sensors in each room, a bed sensor,
+temperature and humidity, the door lock, and the doorphone.
+
+The doorphone is the only camera, and it faces the street. That single fact carries the
+argument: a camera in the living room is surveillance of her, while one on the porch is a
+record of visitors -- the same thing a peephole has always been, kept for later. And it turns
+out to be the better sensor anyway. Three unanswered calls on a day she did not get up is
+corroboration a motion sensor alone cannot give, arrived at without watching her at all.
+
+Anyone extending this should keep that line. If a request seems to need indoor footage, the
+answer is another sensor, not a lens.
 """
 
 from __future__ import annotations
@@ -34,7 +49,7 @@ from ..sim.household import (
     Day,
     HouseholdSensors,
 )
-from .home_devices import HomeDevices, HomeSkills
+from .home_devices import DoorCall, HomeDevices, HomeSkills
 from .result import SkillResult
 
 log = logging.getLogger(__name__)
@@ -54,6 +69,18 @@ MINUTES_PER_SECOND = 120.0
 
 # Don't step on every redraw; the viewer runs far faster than the day needs to move.
 TICKS_PER_SECOND = 10.0
+
+# Who calls at the door, as (minute, who, answered-if-she-is-up).
+#
+# The doorphone faces the street, so this is the one camera in the flat and it watches
+# visitors rather than the person -- which is the whole reason the watching can be thorough
+# without being surveillance. Whether she answers is not scripted: it depends on where she
+# actually is when the bell goes, which is what makes "14:20, no answer" worth reading.
+DOOR_CALLS = (
+    (615, "宅配便"),          # 10:15
+    (860, "郵便配達"),        # 14:20
+    (1125, "隣の田中さん"),   # 18:45
+)
 
 
 def _clock(minute: float) -> str:
@@ -141,6 +168,7 @@ class WatchingSkills:
 
             self._roll_over_at_midnight()
             reading = self.sensors.read(self.minute)
+            self._ring_the_doorbell(reading)
             for room in ("bedroom", "bathroom", "hallway", "living", "kitchen"):
                 self.sensors.show_sensor(room, room == reading.room)
             # Her clock, on the wall, so a viewer can see the day moving.
@@ -164,6 +192,30 @@ class WatchingSkills:
             self.speed_pips = max(1, min(5, int(math.log10(max(ratio, 1.0)) + 1)))
         return said
 
+    def _ring_the_doorbell(self, reading) -> None:  # noqa: ANN001
+        """Let the day's callers arrive, and record whether she got to the door.
+
+        Answered is decided by where she is, not by a script: if she is in bed or the bathroom
+        when the bell goes, nobody comes. That is the point of keeping the log -- a family
+        member seeing "14:20 郵便配達 — no answer" learns something real, and learns it
+        without anyone watching her.
+        """
+        minute_of_day = self.minute % MINUTES_PER_DAY
+        for when, who in DOOR_CALLS:
+            if not (when <= minute_of_day < when + MINUTES_PER_TICK):
+                continue
+            if any(int(c.minute) == int(minute_of_day) for c in self.devices.devices.door_calls):
+                continue
+            # Reclining on the sofa is not "cannot reach the door" -- she gets up for the
+            # bell like anyone else. What stops her answering is being asleep in bed or
+            # occupied in the bathroom, which is also exactly when an unanswered call is
+            # worth reading about.
+            answered = reading.room not in ("bathroom", "bedroom")
+            self.devices.devices.door_calls.append(
+                DoorCall(minute=minute_of_day, who=who, answered=answered)
+            )
+            log.info("doorbell: %s at %s answered=%s", who, _clock(self.minute), answered)
+
     def _roll_over_at_midnight(self) -> None:
         """Start each day with a clean slate.
 
@@ -183,6 +235,8 @@ class WatchingSkills:
         # `events` is the diary `today` reads back, so it is emptied with the rest. Anything
         # worth keeping across days has already been said into the thread.
         self.events.clear()
+        # The doorphone log is "today's callers", so it turns over with the day too.
+        self.devices.devices.door_calls.clear()
 
     def _notice(self, reading) -> str | None:  # noqa: ANN001
         """Decide whether this reading is worth a word in the diary.

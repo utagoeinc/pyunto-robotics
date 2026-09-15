@@ -26,6 +26,11 @@ class RobotBackend:
     """Adapts a `RobotAgent` to the `pyunto_agent.backends.Backend` protocol."""
 
     name = "robot"
+    #: Replying here means the machine moves, so the Bridge applies its stricter gate:
+    #: never take instructions from another program, and act only when addressed by name.
+    #: Set on the class so every way of building a robot Bridge gets it, including callers
+    #: written before the flag existed.
+    acts_physically = True
 
     def __init__(self, agent: RobotAgent, client=None, robot=None, camera: str = "head_cam",
                  send_images: bool = True):  # noqa: ANN001

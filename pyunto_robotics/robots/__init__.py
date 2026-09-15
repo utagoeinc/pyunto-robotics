@@ -153,9 +153,11 @@ def _watch() -> RobotSetup:
         keyframe_help="asleep (in bed, start of the day), up (out of bed)",
         examples=("母の様子はどう？", "how is she today?"),
         greeting=(
-            "🏠 この家のスマートハウスです。各部屋のセンサーでお母さまの様子が分かり、"
-            "エアコン・照明・玄関の鍵を操作できます。\n"
-            "  • {example_a}\n  • {example_b}\n  • エアコンをつけて\n  • 今何時？\n"
+            "🏠 この家のスマートハウスです。各部屋の人感センサー（床）と温湿度計、"
+            "玄関の鍵、ドアフォンがつながっています。\n"
+            "  • {example_a}\n  • {example_b}\n"
+            "  • 今日は誰か来た？\n  • 湿度は？\n  • エアコンをつけて\n"
+            "室内にカメラはありません。映像はドアフォン（外向き）だけです。\n"
             "気になることがあれば、聞かれなくてもこちらからお伝えします。"
         ),
         camera=Camera(distance=11.0, elevation=-55, azimuth=90),

@@ -891,8 +891,18 @@ WATCH = Domain(
         ("lock_status", ("is the door locked", "did she lock", "did he lock",
                          "鍵はかかってる", "施錠されてる", "戸締まり")),
         ("status", ("everything alright", "how is the house", "家の様子", "全部教えて")),
+        # Before `temperature`: 「湿度」 contains 「度」, and temperature's 「何度」 would
+        # otherwise swallow 「湿度は何度？」.
+        ("humidity", ("humidity", "how humid", "how damp", "damp",
+                      "湿度", "しつど", "乾燥", "じめじめ")),
         ("temperature", ("how warm", "how cold", "what is the temperature", "temperature",
                          "何度", "気温", "室温", "温度は")),
+        # The doorphone: the one camera here, and it faces the street. Before `visitors` so
+        # 「ドアフォンの映像」 gets the picture rather than the list.
+        ("doorphone", ("doorphone", "door camera", "porch camera", "picture of the door",
+                       "ドアフォン", "インターフォンの映像", "玄関の映像", "玄関のカメラ")),
+        ("visitors", ("who came", "who called", "any visitors", "visitors", "the door today",
+                      "来客", "訪問", "誰か来た", "誰が来た", "インターフォン", "チャイム")),
         ("set_temperature", ("set the aircon", "set it to", "度にして", "度に設定")),
         ("warmer", ("warmer", "warm it up", "暖かく", "温度を上げて", "寒い")),
         ("cooler", ("cooler", "cool it down", "涼しく", "温度を下げて", "暑い")),
@@ -910,7 +920,8 @@ WATCH = Domain(
     },
     intransitive=frozenset({
         "check", "today", "watch", "time", "lock", "unlock", "lock_status", "status",
-        "temperature", "warmer", "cooler", "aircon_on", "aircon_off",
+        "temperature", "humidity", "visitors", "doorphone",
+        "warmer", "cooler", "aircon_on", "aircon_off",
         "lights_on", "lights_off",
     }),
     help_text=(
@@ -930,6 +941,9 @@ Available actions:
   watch <hours>     let time pass and report anything worth saying
   time              what time it is in the flat, and how fast the day is running
   temperature       how warm a room is
+  humidity          how damp a room is
+  visitors          who has been to the front door today, and whether she answered
+  doorphone         the porch camera's view of the most recent caller
   set_temperature / warmer / cooler
   aircon_on / aircon_off
   lights_on / lights_off
@@ -941,6 +955,9 @@ Rules:
 - Only use the action names listed above.
 - Prefer `check` when asked how she is or where she is.
 - Use `time` for "what time is it"; use `watch` for "watch her for N hours".
+- There are no cameras inside the flat, by design. The only camera is the doorphone, which
+  faces the street: `doorphone` shows who rang the bell, never the person being watched.
+  If asked for a picture of a room or of her, say that and offer `check` instead.
 """,
 )
 

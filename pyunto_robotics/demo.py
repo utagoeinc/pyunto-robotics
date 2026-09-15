@@ -182,6 +182,9 @@ def run_demo(
         # Redraw the window while waiting, and let a scene that has its own life live it.
         # The reply loop owns this thread, so nothing else can do either.
         on_idle=_idle_hook(viewer, skills),
+        # This backend moves a machine, so the Bridge applies the stricter gate: no
+        # instructions from other programs, and only when addressed by name.
+        acts_physically=True,
     )
     print("\nlistening — message the robot from the Pyunto app. Ctrl-C to stop.\n")
     try:
