@@ -17,6 +17,7 @@ demonstrated anything; energy that turns the house lights on has.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 
 import mujoco
 import numpy as np
@@ -322,15 +323,53 @@ class SolarErrandSkills:
         )
 
     def battery(self) -> SkillResult:
+        """State of charge, and when it would be full at the present rate.
+
+        "How long until it is full?" is the question people actually ask, and a percentage
+        alone does not answer it. The estimate is the honest arithmetic -- what is missing
+        divided by what the panel is making right now -- which means it is only true while
+        the robot stays where it is. In shade it is making less than it spends, and the right
+        answer is that it will never fill here, not a number.
+        """
         reading = self.panel.read()
-        return SkillResult(
-            True,
-            f"The battery is at {self.panel.percent:.0f}% ({self.panel.charge_wh:.1f} Wh). "
-            f"Right now the panel is making {max(reading.power_w, 0):.0f} W.",
-            {"battery_percent": round(self.panel.percent),
-             "battery_wh": round(self.panel.charge_wh, 1),
-             "power_w": round(max(reading.power_w, 0))},
+        power = reading.power_w
+        percent = self.panel.percent
+        missing_wh = max(self.panel.capacity_wh - self.panel.charge_wh, 0.0)
+
+        message = (
+            f"The battery is at {percent:.0f}% ({self.panel.charge_wh:.1f} of "
+            f"{self.panel.capacity_wh:.0f} Wh). The panel is making {max(power, 0):.0f} W."
         )
+        data = {
+            "battery_percent": round(percent),
+            "battery_wh": round(self.panel.charge_wh, 1),
+            "capacity_wh": round(self.panel.capacity_wh),
+            "power_w": round(max(power, 0)),
+        }
+
+        if missing_wh <= 0.1:
+            message += " It is full."
+        elif power <= 0.5:
+            # Idle draw exceeds what the panel collects: it is going down, not up. Saying
+            # "3 hours" here would be arithmetic on a number with the wrong sign.
+            message += (
+                " Here in the shade it is not charging at all — I would need to find"
+                " sunlight before it fills."
+            )
+            data["charging"] = False
+        else:
+            hours = missing_wh / power
+            eta = datetime.now() + timedelta(hours=hours)
+            if hours < 1:
+                when = f"{hours * 60:.0f} minutes"
+            else:
+                when = f"{hours:.1f} hours"
+            message += f" At this rate it would be full in about {when}, around {eta:%H:%M}."
+            data["charging"] = True
+            data["hours_to_full"] = round(hours, 2)
+            data["full_at"] = eta.strftime("%H:%M")
+
+        return SkillResult(True, message, data)
 
     def describe(self) -> SkillResult:
         reading = self.panel.read()

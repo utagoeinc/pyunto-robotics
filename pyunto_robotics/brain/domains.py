@@ -559,8 +559,17 @@ SOLAR = Domain(
         ("power_lights", ("turn on the lights", "power the lights", "light the house",
                           "switch on the lights", "the lights", "照明をつけて", "電気をつけて",
                           "家の明かりをつけて", "ライトをつけて")),
+        # Asking ABOUT the battery, before any instruction to go and fill it.
+        #
+        # 「あとどのくらいで充電が満タンになりますか？」 is a question, and it matched
+        # fetch_power on the strength of 充電 -- so the robot answered a question by driving
+        # off on an errand. Questions are recognised by what they ask about (charge level,
+        # how long, how full) rather than by the word 充電, which appears in both.
         ("battery", ("how much charge", "how much power", "battery", "state of charge",
-                     "how full", "バッテリー", "残量", "充電量", "どれくらい貯まった")),
+                     "how full", "how long until", "how long to", "when will it be full",
+                     "バッテリー", "残量", "充電量", "どれくらい貯まった",
+                     "満タン", "何%", "何パーセント", "充電レベル", "どのくらいで",
+                     "あとどのくらい", "あとどれくらい", "充電は足りて")),
         # Matched on the SUN, not on the verb.
         #
         # These patterns only caught 探して ("search"), so 「日が当たるところに移動して」 --
