@@ -47,6 +47,14 @@ class RobotSetup:
     # Builds the planner. `None` means "build a Domain planner from `domain`", which is what
     # the newer robots do. The office humanoid predates Domain and brings its own planner.
     planner: Callable[[bool], object] | None = None
+    # What this machine says when it joins the space, in its own voice.
+    #
+    # There was one greeting for everything, and it described a humanoid: it offered to raise
+    # its right hand and to photograph the room when it was done. A rover has no hands, and
+    # the watching flat has no body at all -- a person messaging it is addressing a house.
+    # Telling somebody they are talking to the wrong kind of thing is a bad first sentence,
+    # so each robot brings its own. `{example_a}` and `{example_b}` are filled from `examples`.
+    greeting: str = ""
 
 
 _REGISTRY: dict[str, RobotSetup] = {}

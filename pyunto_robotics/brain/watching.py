@@ -46,6 +46,14 @@ MINUTES_PER_TICK = 1.0
 # under their position actuators rather than teleporting.
 STEPS_PER_MINUTE = 60
 
+# How the day is paced when nobody is asking anything. A demonstration has to show a whole
+# day in the minutes somebody will actually watch for, and the interesting events -- a long
+# bathroom visit, a morning she does not get up -- are hours apart.
+MINUTES_PER_SECOND = 120.0
+
+# Don't step on every redraw; the viewer runs far faster than the day needs to move.
+TICKS_PER_SECOND = 10.0
+
 
 def _clock(minute: float) -> str:
     return f"{int(minute) // 60 % 24:02d}:{int(minute) % 60:02d}"
@@ -82,7 +90,31 @@ class WatchingSkills:
         self.speed_pips = 3
         self._elapsed_wall = 0.0
         self._elapsed_sim = 0.0
+        self._last_tick: float | None = None
         self.sensors.show_time(self.minute, speed_pips=self.speed_pips)
+
+    # -- the day runs whether or not anyone is asking ------------------------------
+
+    def tick(self) -> list[str]:
+        """Advance the day a little. Safe to call as often as the viewer redraws.
+
+        Without this the flat is frozen between messages: the clock holds one time and she
+        never leaves the bed, so a viewer watching the window sees a photograph. The point of
+        the scene is that it keeps living while nobody is asking it anything -- that is what
+        makes "she has been in the bathroom 20 minutes" mean something when it arrives.
+
+        Paced against the wall clock rather than the call count, because the idle hook fires
+        at whatever rate the viewer happens to redraw at.
+        """
+        now = time.monotonic()
+        if self._last_tick is None:
+            self._last_tick = now
+            return []
+        elapsed = now - self._last_tick
+        if elapsed < 1.0 / TICKS_PER_SECOND:
+            return []
+        self._last_tick = now
+        return self.advance(elapsed * MINUTES_PER_SECOND)
 
     # -- watching -------------------------------------------------------------------
 

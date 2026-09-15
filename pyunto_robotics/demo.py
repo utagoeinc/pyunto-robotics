@@ -26,11 +26,13 @@ from .viewer import open_viewer
 
 log = logging.getLogger(__name__)
 
+# What a robot says when it joins, if it has not brought its own (see RobotSetup.greeting).
+# Deliberately vague about the body: a third-party machine may have no arms, or no legs, or
+# be a building. The bundled robots each override this with something true about themselves.
 GREETING = (
-    "🤖 I am here and I can see the room. Tell me what to do — try one of these:\n"
-    "  • {example_a}\n  • {example_b}\n  • raise your right hand\n"
-    "I will say how I understood you before I move, report each step as I go, "
-    "and send a photograph when I am done."
+    "🤖 I am here and ready. Tell me what to do — try one of these:\n"
+    "  • {example_a}\n  • {example_b}\n"
+    "I will say how I understood you before I start, and report as I go."
 )
 
 
@@ -160,7 +162,9 @@ def run_demo(
         try:
             connection.client.send(
                 space_id,
-                GREETING.format(example_a=examples[0], example_b=examples[-1]),
+                (setup.greeting or GREETING).format(
+                    example_a=examples[0], example_b=examples[-1]
+                ),
             )
         except Exception:  # noqa: BLE001 - a greeting is nice to have, not required
             log.debug("could not post the greeting", exc_info=True)
@@ -175,8 +179,9 @@ def run_demo(
         persona="",  # the robot acts; it does not role-play
         space_ids={space_id} if space_id else None,
         history=4,
-        # Redraw the window while waiting. The reply loop owns this thread, so nothing else can.
-        on_idle=viewer.sync if viewer else None,
+        # Redraw the window while waiting, and let a scene that has its own life live it.
+        # The reply loop owns this thread, so nothing else can do either.
+        on_idle=_idle_hook(viewer, skills),
     )
     print("\nlistening — message the robot from the Pyunto app. Ctrl-C to stop.\n")
     try:
@@ -190,6 +195,30 @@ def run_demo(
         if robot is not None:
             robot.close()
     return 0
+
+
+def _idle_hook(viewer, skills):  # noqa: ANN001
+    """What to do between messages: redraw, and run the scene forward if it has a clock.
+
+    Most robots stand still until told to move, and for those redrawing is all there is to do.
+    The watching flat is the exception -- a day passes there whether or not anybody is asking,
+    and without this the window is a photograph: the clock holds one time and she never leaves
+    the bed. `tick` is optional on purpose, so a robot that does not have one costs nothing.
+    """
+    tick = getattr(skills, "tick", None)
+    if viewer is None and tick is None:
+        return None
+
+    def idle() -> None:
+        if tick is not None:
+            try:
+                tick()
+            except Exception:  # noqa: BLE001 - a stalled idle tick must not kill the listener
+                log.debug("idle tick failed", exc_info=True)
+        if viewer is not None:
+            viewer.sync()
+
+    return idle
 
 
 def _domain_planner(setup, use_llm: bool):
