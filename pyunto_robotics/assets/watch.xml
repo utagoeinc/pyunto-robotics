@@ -28,6 +28,7 @@
     <headlight ambient="0.48 0.47 0.46" diffuse="0.40 0.40 0.39" specular="0.05 0.05 0.05"/>
     <map znear="0.02" zfar="60"/>
     <quality shadowsize="4096"/>
+    <global offwidth="1600" offheight="1200"/>
   </visual>
 
   <asset>
@@ -40,7 +41,7 @@
     <material name="inner_wall" rgba="0.88 0.86 0.83 1" specular="0.04"/>
 
     <!-- Furniture, muted so the person and the sensors are what the eye goes to. -->
-    <material name="bed_mat" rgba="0.55 0.60 0.68 1" specular="0.08"/>
+    <material name="bed_mat" rgba="0.93 0.89 0.80 1" specular="0.05"/>
     <material name="wood" rgba="0.52 0.40 0.28 1" specular="0.12"/>
     <material name="appliance" rgba="0.80 0.81 0.83 1" specular="0.45" shininess="0.5"/>
     <material name="porcelain" rgba="0.95 0.95 0.94 1" specular="0.5" shininess="0.6"/>
@@ -78,10 +79,10 @@
       dark segments too, and hiding them entirely makes the digits float.
     -->
     <material name="clock_case" rgba="0.12 0.12 0.14 1" specular="0.3"/>
-    <material name="seg_off" rgba="0.20 0.20 0.22 1"/>
-    <material name="seg_on" rgba="1.00 0.42 0.20 1" emission="0.95"/>
+    <material name="seg_off" rgba="0.26 0.27 0.30 1"/>
+    <material name="seg_on" rgba="1.00 0.45 0.12 1" emission="0.25"/>
     <material name="speed_off" rgba="0.22 0.24 0.26 1"/>
-    <material name="speed_on" rgba="0.30 0.85 0.45 1" emission="0.85"/>
+    <material name="speed_on" rgba="0.34 0.88 0.48 1" emission="0.5"/>
     <material name="lamp_on" rgba="1.0 0.93 0.62 1" emission="0.95" specular="0.4"/>
   </asset>
 
@@ -181,59 +182,63 @@
       On the hallway wall, high and facing into the flat, so it is in shot from the overhead
       view the scene opens with.
     -->
-    <body name="clock" pos="0.9 -3.40 2.05">
-      <geom name="clock_case" type="box" pos="0.32 0.06 0" size="0.42 0.05 0.16"
+    <!--
+      ===== the clock, laid flat on the hallway floor =====
+      A wall clock faces one way and the camera looks down on this flat, so a wall clock is
+      invisible from the view the demo opens with. Laid on the floor the time is readable
+      from any angle a viewer picks. Digits are 0.7m tall -- legible from the 11m opening
+      view without zooming in.
+
+      Laid out in plain reading order: for this camera world +x runs rightwards on screen,
+      so no mirroring is wanted. (Both mirroring the digit slots and mirroring the glyph
+      strokes were tried; each writes the time backwards.)
+    -->
+    <body name="clock" pos="-0.30 -2.15 0.0">
+      <geom name="clock_case" type="box" pos="0.79 0 0.030" size="1.50 0.95 0.010"
             material="clock_case" contype="0" conaffinity="0"/>
-      <geom name="clock_d0_a" type="box" pos="0.000 0 0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d0_b" type="box" pos="0.056 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d0_c" type="box" pos="0.056 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d0_d" type="box" pos="0.000 0 -0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d0_e" type="box" pos="-0.056 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d0_f" type="box" pos="-0.056 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d0_g" type="box" pos="0.000 0 0.000" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d1_a" type="box" pos="0.135 0 0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d1_b" type="box" pos="0.191 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d1_c" type="box" pos="0.191 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d1_d" type="box" pos="0.135 0 -0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d1_e" type="box" pos="0.079 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d1_f" type="box" pos="0.079 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d1_g" type="box" pos="0.135 0 0.000" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d2_a" type="box" pos="0.330 0 0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d2_b" type="box" pos="0.386 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d2_c" type="box" pos="0.386 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d2_d" type="box" pos="0.330 0 -0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d2_e" type="box" pos="0.274 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d2_f" type="box" pos="0.274 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d2_g" type="box" pos="0.330 0 0.000" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d3_a" type="box" pos="0.465 0 0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d3_b" type="box" pos="0.521 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d3_c" type="box" pos="0.521 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d3_d" type="box" pos="0.465 0 -0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d3_e" type="box" pos="0.409 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d3_f" type="box" pos="0.409 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
-      <geom name="clock_d3_g" type="box" pos="0.465 0 0.000" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
-      <!-- The colon between hours and minutes. Always lit; a blinking one would be read as
-           a fault in a still image. -->
-      <geom name="clock_colon_top" type="box" pos="0.322 0 0.035" size="0.009 0.006 0.009"
-            material="seg_on" contype="0" conaffinity="0"/>
-      <geom name="clock_colon_bot" type="box" pos="0.322 0 -0.035" size="0.009 0.006 0.009"
-            material="seg_on" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_a" type="box" pos="0.0 0.357 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_b" type="box" pos="0.1904 0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_c" type="box" pos="0.1904 -0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_d" type="box" pos="0.0 -0.357 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_e" type="box" pos="-0.1904 -0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_f" type="box" pos="-0.1904 0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_g" type="box" pos="0.0 0.0 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_a" type="box" pos="0.459 0.357 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_b" type="box" pos="0.6494 0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_c" type="box" pos="0.6494 -0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_d" type="box" pos="0.459 -0.357 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_e" type="box" pos="0.2686 -0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_f" type="box" pos="0.2686 0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_g" type="box" pos="0.459 0.0 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_a" type="box" pos="1.122 0.357 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_b" type="box" pos="1.3124 0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_c" type="box" pos="1.3124 -0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_d" type="box" pos="1.122 -0.357 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_e" type="box" pos="0.9316 -0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_f" type="box" pos="0.9316 0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_g" type="box" pos="1.122 0.0 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_a" type="box" pos="1.581 0.357 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_b" type="box" pos="1.7714 0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_c" type="box" pos="1.7714 -0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_d" type="box" pos="1.581 -0.357 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_e" type="box" pos="1.3906 -0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_f" type="box" pos="1.3906 0.1802 0.065" size="0.0306 0.153 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_g" type="box" pos="1.581 0.0 0.065" size="0.1768 0.0306 0.035" material="seg_off" contype="0" conaffinity="0"/>
+      <!-- The colon between hours and minutes. Always lit; a blinking one would be
+           read as a fault in a still image. -->
+      <geom name="clock_colon_top" type="box" pos="0.7905 0.119 0.065" size="0.0306 0.0306 0.035" material="seg_on" contype="0" conaffinity="0"/>
+      <geom name="clock_colon_bot" type="box" pos="0.7905 -0.119 0.065" size="0.0306 0.0306 0.035" material="seg_on" contype="0" conaffinity="0"/>
 
       <!--
-        Speed, as a row of five pips: one lit is slow, five is fast. A number would need more
-        digits and would be read less quickly than a bar, and the question a viewer has is
-        "is this running, and roughly how fast", not "what is the exact multiplier".
+        Speed, as a row of five pips: one lit is slow, five is fast. A number would need
+        more digits and would be read less quickly than a bar, and the question a viewer
+        has is "is this running, and roughly how fast", not the exact multiplier.
       -->
-      <geom name="speed_1" type="box" pos="0.10 0 -0.205" size="0.022 0.006 0.012"
-            material="speed_off" contype="0" conaffinity="0"/>
-      <geom name="speed_2" type="box" pos="0.16 0 -0.205" size="0.022 0.006 0.012"
-            material="speed_off" contype="0" conaffinity="0"/>
-      <geom name="speed_3" type="box" pos="0.22 0 -0.205" size="0.022 0.006 0.012"
-            material="speed_off" contype="0" conaffinity="0"/>
-      <geom name="speed_4" type="box" pos="0.28 0 -0.205" size="0.022 0.006 0.012"
-            material="speed_off" contype="0" conaffinity="0"/>
-      <geom name="speed_5" type="box" pos="0.34 0 -0.205" size="0.022 0.006 0.012"
-            material="speed_off" contype="0" conaffinity="0"/>
+      <geom name="speed_1" type="box" pos="0.34 0.62 0.065" size="0.0952 0.0476 0.035" material="speed_off" contype="0" conaffinity="0"/>
+      <geom name="speed_2" type="box" pos="0.595 0.62 0.065" size="0.0952 0.0476 0.035" material="speed_off" contype="0" conaffinity="0"/>
+      <geom name="speed_3" type="box" pos="0.85 0.62 0.065" size="0.0952 0.0476 0.035" material="speed_off" contype="0" conaffinity="0"/>
+      <geom name="speed_4" type="box" pos="1.105 0.62 0.065" size="0.0952 0.0476 0.035" material="speed_off" contype="0" conaffinity="0"/>
+      <geom name="speed_5" type="box" pos="1.36 0.62 0.065" size="0.0952 0.0476 0.035" material="speed_off" contype="0" conaffinity="0"/>
     </body>
 
     <!--

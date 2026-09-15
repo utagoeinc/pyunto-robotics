@@ -224,7 +224,7 @@ PLACES: dict[str, tuple[float, float, float, float]] = {
     # body, but a bed is above the floor. She sank into it -- torso at 0.58, legs at 0.52,
     # against a mattress surface of 0.62 -- and only her head showed, so she appeared to be a
     # person with no legs buried in the bedding. Measured, not guessed.
-    "bed": (-1.6, 1.6, -0.05, -1.5),
+    "bed": (-1.6, 1.6, -0.02, -1.5),
     "bedside": (-1.6, 0.4, 0.0, 0.0),
     "bathroom": (2.4, 2.6, 0.0, 0.0),
     "kitchen": (7.8, 1.0, 0.0, 0.0),
