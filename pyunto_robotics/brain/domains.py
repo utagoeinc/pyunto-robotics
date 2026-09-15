@@ -536,10 +536,45 @@ SOLAR = Domain(
                           "家の明かりをつけて", "ライトをつけて")),
         ("battery", ("how much charge", "how much power", "battery", "state of charge",
                      "how full", "バッテリー", "残量", "充電量", "どれくらい貯まった")),
+        # Matched on the SUN, not on the verb.
+        #
+        # These patterns only caught 探して ("search"), so 「日が当たるところに移動して」 --
+        # which is how the instruction actually gets written -- fell through to `goto` on the
+        # strength of 移動して, and the robot went hunting for a landmark called
+        # "日が当たるところに移動して". The subject of the sentence is what matters here: any
+        # instruction naming sunlight and a place means find the sun, whichever verb it uses.
+        # "Go to the sun AND charge" is the whole errand, so it has to be tested before
+        # either half. Both halves appear in it -- the sun words and the power words -- and
+        # whichever is listed first would otherwise win and do only that half: measured
+        # 「日の当たるところに移動して、充電して」 matching find_sun and stopping in the park
+        # without charging.
+        ("fetch_power", (
+            "電力を取", "電力を取得", "充電してきて", "発電してきて", "電気を取って",
+            "エネルギーを取", "取ってきて",
+            # 「…に移動して、充電して」 -- the errand written as two clauses. It ends in
+            # 充電して, not 充電してきて, so the patterns above missed it and the sun half
+            # won: the robot walked to the park and stopped there without charging.
+            "移動して、充電", "移動して充電", "行って、充電", "行って充電",
+            "fetch power", "get power", "collect power", "fetch energy", "get energy",
+            "collect energy", "charge up and come back",
+        )),
+        # Matched on the SUN, not on the verb.
+        #
+        # These patterns only caught 探して ("search"), so 「日が当たるところに移動して」 --
+        # which is how the instruction actually gets written -- fell through to `goto` on the
+        # strength of 移動して, and the robot went hunting for a landmark called
+        # "日が当たるところに移動して". The subject of the sentence is what matters: an
+        # instruction naming sunlight and a place means find the sun, whichever verb it uses.
         ("find_sun", ("find the sun", "find sunlight", "find somewhere sunny", "look for sun",
-                      "日光を探して", "日向を探して", "陽の当たる場所を探して", "日なたを探して")),
+                      "sunny spot", "in the sun",
+                      "日光", "日向", "日なた", "陽の当たる", "日の当たる", "日が当たる",
+                      "陽が当たる", "太陽")),
         ("charge", ("charge here", "start charging", "collect here",
                     "ここで充電", "ここで発電")),
+        # The bare nouns, last. Anything still mentioning power or charge after the specific
+        # phrasings above have had their turn means the whole errand. Named `fetch_power`
+        # again rather than a separate verb, because it IS the same action -- an earlier
+        # attempt at a distinct name left a verb the skills had no handler for.
         ("fetch_power", ("power", "energy", "charge", "電力", "充電", "発電", "電気",
                          "エネルギー")),
         ("home", ("go home", "return home", "come back", "back to the carport",
