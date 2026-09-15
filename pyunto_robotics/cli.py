@@ -4,6 +4,7 @@
     pyunto-robotics robots                 # what machines are installed
     pyunto-robotics whoami                 # this robot's account and spaces
     pyunto-robotics pair K3F9QZ            # join a space without opening a window
+    pyunto-robotics showqr                 # show a QR for someone to scan in the app
 
 On macOS a MuJoCo window must be owned by `mjpython`, not `python`. Rather than print an
 instruction and stop -- which turns a one-command demo into a two-command one -- this
@@ -65,6 +66,14 @@ def main(argv: list[str] | None = None) -> int:
     p_pair = sub.add_parser("pair", help="join a space with a pairing code, then exit")
     p_pair.add_argument("code")
 
+    p_qr = sub.add_parser(
+        "showqr", help="show a QR code for someone to scan in the Pyunto app"
+    )
+    p_qr.add_argument("--operator", default="",
+                      help="who runs this robot; shown to the person before they approve")
+    p_qr.add_argument("--big", action="store_true",
+                      help="draw the square larger; use it when a phone will not scan")
+
     args = ap.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
@@ -107,6 +116,44 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"joined space {space_id}.")
         print("Open that space in the Pyunto app once so the robot is given the key.")
+        return 0
+
+    if args.cmd == "showqr":
+        # The same payload and renderer the agent uses, so one scanner path in the app
+        # handles both. A robot is not a different kind of guest -- it is another program
+        # asking to be let into a diary, and the person answers the same question.
+        from pyunto_agent.pairing import encode_payload, pairing_payload, render_qr
+
+        try:
+            connection = connect()
+        except AuthError as e:
+            print(f"ERROR: {e}")
+            return 2
+
+        payload = pairing_payload(
+            user_id=connection.user_id,
+            display_name=connection.identity.display_name,
+            public_key=connection.identity_store.public_key_b64,
+            operator=args.operator,
+            runtime="self_hosted",
+        )
+        text = encode_payload(payload)
+        qr = render_qr(text, big=args.big)
+        print()
+        if qr:
+            print(qr)
+        else:
+            print("(install the 'qr' extra to draw this as a scannable square:")
+            print("     pip install 'pyunto-agent[qr]')")
+            print()
+            print(text)
+        print()
+        print(f"Scan this in the Pyunto app to let {connection.identity.display_name} into a diary.")
+        print("The app asks which space, and shows who runs this robot before anything is shared.")
+        print("Nothing here is secret: it names the account asking, and the decision stays with")
+        print("whoever holds the phone.")
+        print()
+        print("Afterwards, open that space in the app once so the robot is given the key.")
         return 0
 
     if args.cmd == "demo":

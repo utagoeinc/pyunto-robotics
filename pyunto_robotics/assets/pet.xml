@@ -1,0 +1,229 @@
+<!--
+  A flat with a cat in it, and a small camera robot that goes looking for her.
+
+  The owner is out. That single fact is what makes this demonstration different from the
+  watching flat: there, the person being observed had not asked to be, and the design answer
+  was to use no indoor camera at all. Here the only human is the one holding the phone, in
+  their own home, looking for their own cat -- so a camera is the right instrument rather
+  than an intrusion, and the demonstration is about aiming it.
+
+  Which is why the cat is placed the way she is. A camera robot that only drives around
+  proves nothing, because a fixed forward-facing lens would find a cat on the floor just as
+  well. So the hiding places are at different HEIGHTS -- under the sofa, on the windowsill,
+  on top of the bookshelf, in the cat tree -- and finding her means tilting as well as
+  turning. The pan/tilt head is load-bearing, not decoration.
+
+  The cat is a body on slide joints with a scripted routine, exactly like the person in
+  watch.xml and for the same reason: the robot must find her by looking, not be told. She
+  sleeps most of the day, which is the honest thing to model -- most of what a pet camera
+  sees is a cat asleep somewhere, and a demo where the cat performs on cue would teach the
+  wrong lesson about what these cameras are for.
+
+  Rooms, west to east: living room with the sofa and the bookshelf, then the kitchen at the
+  east end past a half-height divider. One space, as a small flat actually is.
+-->
+<mujoco model="pet">
+  <include file="pyunto_p1.xml"/>
+
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.004" integrator="implicitfast" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight ambient="0.46 0.46 0.45" diffuse="0.42 0.42 0.41" specular="0.06 0.06 0.06"/>
+    <map znear="0.02" zfar="60"/>
+    <quality shadowsize="4096"/>
+    <global offwidth="1600" offheight="1200"/>
+  </visual>
+
+  <asset>
+    <texture name="sky" type="skybox" builtin="gradient"
+             rgb1="0.55 0.62 0.72" rgb2="0.86 0.88 0.90" width="256" height="256"/>
+    <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.78 0.72 0.63"
+             rgb2="0.74 0.68 0.59" width="256" height="256"/>
+    <material name="floor" texture="floor_tex" texrepeat="8 6" specular="0.05"/>
+    <material name="wall" rgba="0.93 0.91 0.87 1" specular="0.04"/>
+    <material name="inner_wall" rgba="0.90 0.88 0.84 1" specular="0.04"/>
+    <material name="wood" rgba="0.54 0.38 0.24 1" specular="0.15"/>
+    <material name="sofa_mat" rgba="0.36 0.45 0.55 1" specular="0.08"/>
+    <material name="cushion_mat" rgba="0.82 0.80 0.74 1" specular="0.05"/>
+    <material name="shelf_mat" rgba="0.62 0.46 0.30 1" specular="0.12"/>
+    <material name="rug_mat" rgba="0.72 0.40 0.36 1" specular="0.03"/>
+    <material name="sill_mat" rgba="0.88 0.87 0.84 1" specular="0.06"/>
+    <material name="carpet_mat" rgba="0.80 0.74 0.62 1" specular="0.04"/>
+    <material name="steel" rgba="0.72 0.73 0.76 1" specular="0.5" shininess="0.6"/>
+
+    <!--
+      The cat. Ginger, because she has to be findable in a camera frame against wood, cream
+      walls and a blue sofa -- the three things she will usually be in front of. A grey cat
+      in this room would be a test of the renderer rather than of the robot.
+    -->
+    <material name="cat_fur" rgba="0.87 0.52 0.22 1" specular="0.06"/>
+    <material name="cat_belly" rgba="0.96 0.92 0.86 1" specular="0.05"/>
+    <material name="cat_dark" rgba="0.42 0.24 0.12 1" specular="0.06"/>
+    <material name="cat_eye" rgba="0.55 0.78 0.35 1" emission="0.25"/>
+
+    <material name="bowl_mat" rgba="0.90 0.90 0.92 1" specular="0.35"/>
+    <material name="water_mat" rgba="0.55 0.72 0.85 0.75" specular="0.5"/>
+    <material name="dock_mat" rgba="0.30 0.32 0.36 1" specular="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light name="sun" directional="true" pos="2 0 5" dir="-0.2 0.15 -1"
+           diffuse="0.55 0.54 0.52" specular="0.08 0.08 0.08"/>
+    <!-- Warm light through the south window, so the sill reads as the sunny spot a cat
+         would actually choose. -->
+    <light name="window_light" pos="1.6 -2.6 1.9" dir="0 0.6 -0.5"
+           diffuse="0.35 0.31 0.24" specular="0.05 0.05 0.05"/>
+
+    <geom name="floor" type="plane" size="20 20 0.05" material="floor"
+          friction="1.0 0.02 0.001" condim="3"/>
+
+    <!-- ===== outer walls ===== -->
+    <geom name="wall_n" type="box" pos="2.0 3.0 1.3" size="4.2 0.12 1.3" material="wall"/>
+    <geom name="wall_s" type="box" pos="2.0 -3.0 1.3" size="4.2 0.12 1.3" material="wall"/>
+    <geom name="wall_w" type="box" pos="-2.3 0 1.3" size="0.12 3.0 1.3" material="wall"/>
+    <geom name="wall_e" type="box" pos="6.3 0 1.3" size="0.12 3.0 1.3" material="wall"/>
+
+    <!-- Half-height divider to the kitchen: a cat goes over it, the robot must go round. -->
+    <geom name="div_kitchen" type="box" pos="3.6 1.6 0.45" size="0.10 1.4 0.45"
+          material="inner_wall"/>
+
+    <!-- ===== living room (west) ===== -->
+    <geom name="rug" type="box" pos="0.6 0.2 0.006" size="1.5 1.1 0.006" material="rug_mat"/>
+
+    <!--
+      Sofa, raised on legs with a real gap underneath. The gap is 0.17 m -- too low for the
+      robot to drive into and exactly the sort of place a cat goes, so "look under the sofa"
+      has to be solved by tilting the camera down from outside rather than by driving in.
+    -->
+    <body name="sofa" pos="-1.2 0.4 0">
+      <geom name="sofa_leg_a" type="box" pos="0.32 0.78 0.13" size="0.05 0.05 0.13" material="wood"/>
+      <geom name="sofa_leg_b" type="box" pos="0.32 -0.78 0.13" size="0.05 0.05 0.13" material="wood"/>
+      <geom name="sofa_leg_c" type="box" pos="-0.32 0.78 0.13" size="0.05 0.05 0.13" material="wood"/>
+      <geom name="sofa_leg_d" type="box" pos="-0.32 -0.78 0.13" size="0.05 0.05 0.13" material="wood"/>
+      <geom name="sofa_seat" type="box" pos="0 0 0.325" size="0.42 0.88 0.08" material="sofa_mat"/>
+      <geom name="sofa_back" type="box" pos="-0.33 0 0.56" size="0.10 0.88 0.30" material="sofa_mat"/>
+      <geom name="sofa_arm_l" type="box" pos="0 0.82 0.51" size="0.42 0.07 0.16" material="sofa_mat"/>
+      <geom name="sofa_arm_r" type="box" pos="0 -0.82 0.51" size="0.42 0.07 0.16" material="sofa_mat"/>
+      <geom name="sofa_cushion" type="box" pos="0.05 0.30 0.43" size="0.22 0.22 0.06"
+            material="cushion_mat"/>
+    </body>
+
+    <!--
+      Bookshelf. The top is at 1.62 m, well above the robot's camera at 0.25 m, so a cat up
+      there can only be found by tilting UP -- the other half of what the head is for.
+    -->
+    <body name="shelf" pos="0.2 2.6 0">
+      <geom name="shelf_side_l" type="box" pos="-0.55 0 0.80" size="0.03 0.16 0.80" material="shelf_mat"/>
+      <geom name="shelf_side_r" type="box" pos="0.55 0 0.80" size="0.03 0.16 0.80" material="shelf_mat"/>
+      <geom name="shelf_b0" type="box" pos="0 0 0.02" size="0.58 0.16 0.02" material="shelf_mat"/>
+      <geom name="shelf_b1" type="box" pos="0 0 0.56" size="0.58 0.16 0.02" material="shelf_mat"/>
+      <geom name="shelf_b2" type="box" pos="0 0 1.10" size="0.58 0.16 0.02" material="shelf_mat"/>
+      <geom name="shelf_top" type="box" pos="0 0 1.60" size="0.58 0.16 0.02" material="shelf_mat"/>
+    </body>
+
+    <!-- Window sill on the south wall: the sunny spot, at 0.62 m. -->
+    <geom name="sill" type="box" pos="1.6 -2.72 0.62" size="0.85 0.16 0.04" material="sill_mat"/>
+
+    <!--
+      Cat tree, the third height. A cat asleep in the cradle at 0.95 m is visible from across
+      the room only if the camera is aimed at it.
+    -->
+    <body name="tree" pos="2.9 -1.9 0">
+      <geom name="tree_base" type="box" pos="0 0 0.03" size="0.30 0.30 0.03" material="carpet_mat"/>
+      <geom name="tree_post" type="cylinder" pos="0 0 0.48" size="0.055 0.45" material="carpet_mat"/>
+      <geom name="tree_cradle" type="box" pos="0 0 0.95" size="0.26 0.26 0.04" material="carpet_mat"/>
+      <geom name="tree_rim_n" type="box" pos="0 0.22 1.03" size="0.26 0.04 0.05" material="carpet_mat"/>
+      <geom name="tree_rim_s" type="box" pos="0 -0.22 1.03" size="0.26 0.04 0.05" material="carpet_mat"/>
+    </body>
+
+    <!-- ===== kitchen (east) ===== -->
+    <geom name="counter" type="box" pos="5.4 1.2 0.45" size="0.70 1.5 0.45" material="wood"/>
+
+    <!-- Food and water, by the kitchen doorway. Whether the bowl has been visited is the
+         other thing an owner wants to know, so it is somewhere the robot can see. -->
+    <body name="bowls" pos="4.4 -0.6 0">
+      <geom name="bowl_food" type="cylinder" pos="0 0.16 0.025" size="0.11 0.025" material="bowl_mat"/>
+      <geom name="bowl_water" type="cylinder" pos="0 -0.16 0.025" size="0.11 0.025" material="bowl_mat"/>
+      <geom name="water" type="cylinder" pos="0 -0.16 0.045" size="0.095 0.008" material="water_mat"/>
+    </body>
+
+    <!-- The robot's dock, out of the way against the west wall. -->
+    <geom name="dock" type="box" pos="-1.9 -2.4 0.012" size="0.26 0.20 0.012" material="dock_mat"/>
+
+    <!--
+      ===== the cat =====
+
+      Slide joints in x, y and z plus a hinge for facing, driven by position actuators -- the
+      same construction as the person in watch.xml. Not an articulated animal: a cat's gait is
+      a research project and this scene is about finding her, not about how she walks.
+
+      The z slide is what the person in the other scene did not need. A cat's day is vertical:
+      floor, then sill, then the top of a shelf. Without it she could not use the places that
+      make the tilt joint matter.
+    -->
+    <body name="cat" pos="0 0 0.16">
+      <joint name="cat_x" type="slide" axis="1 0 0" range="-3.0 7.0" damping="14"/>
+      <joint name="cat_y" type="slide" axis="0 1 0" range="-3.2 3.2" damping="14"/>
+      <joint name="cat_z" type="slide" axis="0 0 1" range="-0.06 1.60" damping="14"/>
+      <joint name="cat_yaw" type="hinge" axis="0 0 1" range="-3.2 3.2" damping="2.0"/>
+
+      <!-- Curled small: about 0.34 m nose to tail base when sitting, which is a real cat. -->
+      <geom name="cat_body" type="capsule" fromto="-0.11 0 0  0.09 0 0" size="0.072"
+            material="cat_fur" contype="0" conaffinity="0"/>
+      <geom name="cat_haunch" type="sphere" pos="-0.12 0 -0.01" size="0.075"
+            material="cat_fur" contype="0" conaffinity="0"/>
+      <geom name="cat_chest" type="sphere" pos="0.07 0 -0.02" size="0.058"
+            material="cat_belly" contype="0" conaffinity="0"/>
+      <geom name="cat_head" type="sphere" pos="0.17 0 0.045" size="0.055"
+            material="cat_fur" contype="0" conaffinity="0"/>
+      <geom name="cat_muzzle" type="sphere" pos="0.213 0 0.022" size="0.030"
+            material="cat_belly" contype="0" conaffinity="0"/>
+      <geom name="cat_ear_l" type="box" pos="0.155 0.035 0.092" size="0.016 0.008 0.024"
+            material="cat_dark" contype="0" conaffinity="0"/>
+      <geom name="cat_ear_r" type="box" pos="0.155 -0.035 0.092" size="0.016 0.008 0.024"
+            material="cat_dark" contype="0" conaffinity="0"/>
+      <geom name="cat_eye_l" type="sphere" pos="0.207 0.026 0.058" size="0.011"
+            material="cat_eye" contype="0" conaffinity="0"/>
+      <geom name="cat_eye_r" type="sphere" pos="0.207 -0.026 0.058" size="0.011"
+            material="cat_eye" contype="0" conaffinity="0"/>
+      <!-- Tail curled round the body, the way a sleeping cat's is. -->
+      <geom name="cat_tail_a" type="capsule" fromto="-0.17 0 -0.02  -0.24 0.07 -0.01"
+            size="0.020" material="cat_fur" contype="0" conaffinity="0"/>
+      <geom name="cat_tail_b" type="capsule" fromto="-0.24 0.07 -0.01  -0.22 0.16 0.00"
+            size="0.018" material="cat_fur" contype="0" conaffinity="0"/>
+      <geom name="cat_paw_l" type="capsule" fromto="0.08 0.045 -0.062  0.17 0.045 -0.062"
+            size="0.022" material="cat_belly" contype="0" conaffinity="0"/>
+      <geom name="cat_paw_r" type="capsule" fromto="0.08 -0.045 -0.062  0.17 -0.045 -0.062"
+            size="0.022" material="cat_belly" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="cat_x" joint="cat_x" kp="900" ctrlrange="-3.0 7.0" forcerange="-260 260"/>
+    <position name="cat_y" joint="cat_y" kp="900" ctrlrange="-3.2 3.2" forcerange="-260 260"/>
+    <position name="cat_z" joint="cat_z" kp="1400" ctrlrange="-0.06 1.60" forcerange="-420 420"/>
+    <position name="cat_yaw" joint="cat_yaw" kp="40" ctrlrange="-3.2 3.2" forcerange="-25 25"/>
+  </actuator>
+
+  <keyframe>
+    <!--
+      qpos = robot (13) then the cat's four joints: x, y, z, yaw.
+
+      The cat's z is measured from her body origin at 0.16 m, so 0 is standing on the floor.
+      The sill at 0.62 and the shelf top at 1.62 are +0.50 and +1.50 from there.
+    -->
+    <!-- The ordinary start: robot on its dock, cat asleep under the sofa. -->
+    <key name="dock" qpos="-1.9 -2.4 0.062 1 0 0 0  0 0  0 0 0 0
+                           -1.2 0.4 -0.076 0"/>
+    <!-- Cat in the sun on the windowsill, for testing the tilt without the search. -->
+    <key name="sill" qpos="-1.9 -2.4 0.062 1 0 0 0  0 0  0 0 0 0
+                           1.6 -2.62 0.584 1.5708"/>
+    <!-- Cat on top of the bookshelf: the one place that needs the camera aimed upward. -->
+    <key name="shelf" qpos="-1.9 -2.4 0.062 1 0 0 0  0 0  0 0 0 0
+                            0.2 2.54 1.544 -1.5708"/>
+    <!-- Cat asleep in the cat tree, the third height. -->
+    <key name="tree" qpos="-1.9 -2.4 0.062 1 0 0 0  0 0  0 0 0 0
+                           2.9 -1.9 0.914 0"/>
+  </keyframe>
+</mujoco>

@@ -164,8 +164,48 @@ def _watch() -> RobotSetup:
     )
 
 
+def _pet() -> RobotSetup:
+    """A small camera robot looking after a cat while the owner is out.
+
+    The counterpart to the watching flat, and deliberately its opposite. There, the person
+    observed had not asked to be, and the answer was to use no indoor camera at all. Here the
+    only human is the one holding the phone, in their own home, looking for their own cat --
+    so a camera is the right instrument, and the demonstration is about aiming it.
+
+    Which is the point: the cat's four usual places are at four different heights, and none of
+    them can be reached by driving alone. A robot that only moved would find a cat on the
+    floor and nothing else.
+    """
+    from ..brain.pet_watch import PetWatchSkills
+    from ..sim.wheel_drive import LEFT_WHEELS_4, RIGHT_WHEELS_4, SkidDrive
+
+    return RobotSetup(
+        name="P1 (pet camera)",
+        scene="pet.xml",
+        domain=DOMAINS["pet"],
+        skills=lambda robot, grounder: PetWatchSkills(robot, grounder),
+        gait=lambda: SkidDrive(
+            left_wheels=LEFT_WHEELS_4, right_wheels=RIGHT_WHEELS_4, slip_factor=1.2
+        ),
+        default_keyframe="dock",
+        keyframe_help="dock (cat under the sofa), sill, tree, shelf (cat in each place)",
+        examples=("猫はどこにいる？", "where is the cat?"),
+        greeting=(
+            "🐱 お留守番中の見守りカメラです。部屋を回って、カメラを上下左右に向けて"
+            "猫ちゃんを探せます。\n"
+            "  • {example_a}\n  • {example_b}\n"
+            "  • 見回って\n  • 写真を送って\n  • カメラを上に向けて\n"
+            "見つからないときは、見つからなかったとお伝えします。"
+        ),
+        # Indoors: nothing is more than about 9 m away.
+        max_depth=12.0,
+        camera=Camera(distance=7.6, elevation=-52, azimuth=215),
+    )
+
+
 register("solar", _solar())
 register("watch", _watch())
+register("pet", _pet())
 register("hotel", _hotel())
 register("orchard", _orchard())
 register("mars", _mars())

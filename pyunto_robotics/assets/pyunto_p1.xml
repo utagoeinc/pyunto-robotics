@@ -1,0 +1,119 @@
+<!--
+  Pyunto P1 - a small indoor camera robot that looks after a pet while the owner is out.
+
+  Deliberately unlike the S1 it is descended from. That robot is a pavement machine with a
+  solar panel; this one has to get under a sofa and round a chair leg without knocking
+  anything over, so it is a third of the size and a tenth of the weight:
+
+    * 0.30 m long, 0.24 m wide, 0.14 m to the deck, about 2.4 kg.
+    * Small wheels and a low deck, so it fits under furniture -- which is where cats are.
+
+  The mast carries the lens to 0.62 m. That is not a styling choice: a windowsill is 0.66 m
+  and a camera below it cannot see what is on top from ANY distance -- the slab is in the way
+  at every angle, which a sightline probe showed as a flat zero across the room. So the robot
+  is low-bodied for going under furniture but tall-headed for seeing onto it.
+
+  The camera is the whole point, so unlike the S1's yaw-only neck this head has BOTH pan and
+  tilt. A cat is as likely to be on top of a shelf as under a table, and a camera that can
+  only turn left and right cannot answer "where is she?" in a room with any height to it.
+  Tilt range is asymmetric for the same reason: further down than up, because pets are
+  usually below a robot this size, but enough up to find one on a windowsill.
+
+  `head_cam` is named and oriented exactly like the humanoid's, the rover's and the S1's --
+  looking along +x with z up -- so the mapless navigator and every grounder work unchanged.
+-->
+<mujoco model="pyunto_p1">
+  <compiler angle="radian" autolimits="true"/>
+
+  <default>
+    <default class="p1">
+      <geom type="box" condim="3" friction="1.1 0.05 0.01" density="320" group="1"/>
+      <joint type="hinge" damping="0.4" armature="0.004" limited="true"/>
+      <default class="p1_wheel">
+        <geom type="cylinder" size="0.045 0.018" condim="4"
+              friction="1.6 0.06 0.02" density="600" rgba="0.16 0.16 0.18 1"/>
+        <joint type="hinge" axis="0 1 0" damping="0.08" armature="0.0015" limited="false"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material name="p1_body" rgba="0.95 0.95 0.96 1" specular="0.3" shininess="0.4"/>
+    <material name="p1_trim" rgba="0.35 0.70 0.62 1" specular="0.4"/>
+    <material name="p1_lens" rgba="0.08 0.09 0.12 1" specular="0.9" shininess="0.9"/>
+  </asset>
+
+  <worldbody>
+    <body name="base" pos="0 0 0.062" childclass="p1">
+      <freejoint name="root"/>
+      <inertial pos="0 0 0" mass="2.2" diaginertia="0.010 0.014 0.018"/>
+
+      <geom name="chassis" type="box" size="0.15 0.12 0.035" material="p1_body"/>
+      <geom name="bumper_f" type="box" pos="0.155 0 -0.012" size="0.012 0.105 0.022"
+            material="p1_trim"/>
+      <geom name="bumper_r" type="box" pos="-0.155 0 -0.012" size="0.012 0.105 0.022"
+            material="p1_trim"/>
+
+      <!--
+        Camera mast. Short on purpose: tall enough to see over a cushion, low enough that the
+        robot still goes under a dining chair. The pan and tilt joints are separate bodies so
+        the tilt rides on top of the pan, which is the order a real gimbal uses.
+      -->
+      <body name="mast" pos="0.06 0 0.035">
+        <geom name="mast_post" type="cylinder" size="0.016 0.27" pos="0 0 0.27"
+              material="p1_trim"/>
+        <body name="pan" pos="0 0 0.56">
+          <joint name="cam_pan" axis="0 0 1" range="-2.6 2.6" damping="0.25"/>
+          <geom name="pan_shell" type="cylinder" size="0.032 0.014" material="p1_body"/>
+          <body name="head" pos="0 0 0.026">
+            <joint name="cam_tilt" axis="0 1 0" range="-1.35 0.75" damping="0.2"/>
+            <geom name="head_shell" type="box" size="0.036 0.042 0.028" material="p1_body"/>
+            <geom name="lens" type="cylinder" size="0.017 0.008" pos="0.040 0 0"
+                  euler="0 1.5708 0" material="p1_lens"/>
+            <!--
+              Looking along +x with z up, matching every other robot in this package. Every
+              piece of perception here assumes this orientation.
+
+              Note the tilt joint's sign: positive `cam_tilt` pitches the lens DOWN, because
+              the hinge is about +y and the camera looks along +x. The skills convert from
+              "look up"/"look down" so nobody has to remember that.
+            -->
+            <camera name="head_cam" pos="0.046 0 0" xyaxes="0 -1 0  0 0 1" fovy="72"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="wheel_lf" pos="0.095 0.128 -0.017">
+        <joint name="drive_lf" class="p1_wheel"/>
+        <geom name="tyre_lf" class="p1_wheel" euler="1.5708 0 0"/>
+      </body>
+      <body name="wheel_rf" pos="0.095 -0.128 -0.017">
+        <joint name="drive_rf" class="p1_wheel"/>
+        <geom name="tyre_rf" class="p1_wheel" euler="1.5708 0 0"/>
+      </body>
+      <body name="wheel_lr" pos="-0.095 0.128 -0.017">
+        <joint name="drive_lr" class="p1_wheel"/>
+        <geom name="tyre_lr" class="p1_wheel" euler="1.5708 0 0"/>
+      </body>
+      <body name="wheel_rr" pos="-0.095 -0.128 -0.017">
+        <joint name="drive_rr" class="p1_wheel"/>
+        <geom name="tyre_rr" class="p1_wheel" euler="1.5708 0 0"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <velocity name="drive_lf" joint="drive_lf" kv="2.4" ctrlrange="-34 34"/>
+    <velocity name="drive_rf" joint="drive_rf" kv="2.4" ctrlrange="-34 34"/>
+    <velocity name="drive_lr" joint="drive_lr" kv="2.4" ctrlrange="-34 34"/>
+    <velocity name="drive_rr" joint="drive_rr" kv="2.4" ctrlrange="-34 34"/>
+    <position name="cam_pan" joint="cam_pan" kp="3.5" ctrlrange="-2.6 2.6"/>
+    <position name="cam_tilt" joint="cam_tilt" kp="2.5" ctrlrange="-1.35 0.75"/>
+  </actuator>
+
+  <!--
+    No keyframe here. A scene that includes this robot also has its own joints -- the cat's,
+    in pet.xml -- and MuJoCo keyframes must cover every joint in the finished model, so the
+    poses live in the scene rather than in the machine.
+  -->
+</mujoco>

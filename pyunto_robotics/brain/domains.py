@@ -962,7 +962,70 @@ Rules:
 )
 
 
+PET = Domain(
+    name="pet",
+    verbs=(
+        # "Where is she?" is the question this exists for, so it is matched first and widely.
+        ("find", ("where is", "find her", "find him", "find the cat", "look for",
+                  "どこ", "探して", "さがして", "見つけて", "どこにいる")),
+        # Before `look`: 「見回って」 contains 「見」, and look's verbs would swallow it.
+        ("patrol", ("patrol", "look around", "check everywhere", "the whole flat",
+                    "見回", "一周", "全部見て", "ぐるっと")),
+        ("photo", ("photo", "picture", "send a picture", "show me",
+                   "写真", "しゃしん", "撮って", "見せて")),
+        # Camera moves. Before `go`, because 「右に向けて」 is a camera instruction and
+        # 「右に行って」 is a driving one, and they differ by one character.
+        ("tilt", ("look up", "look down", "tilt", "上に向けて", "下に向けて", "上を", "下を")),
+        ("pan", ("pan", "turn the camera", "左に向けて", "右に向けて", "カメラを左", "カメラを右")),
+        ("home", ("go home", "go back", "dock", "戻って", "帰って", "ドックに")),
+        ("go", ("go to", "drive to", "move to", "へ行って", "に行って", "まで行って")),
+        ("look", ("look at", "point at", "を見て", "の方を")),
+        ("check", ("is she there", "can you see her", "写ってる", "見えてる", "いる？")),
+    ),
+    objects={
+        "sofa": ("sofa", "couch", "ソファ"),
+        "sill": ("windowsill", "window", "sill", "窓", "日なた"),
+        "tree": ("cat tree", "tower", "キャットタワー", "タワー"),
+        "shelf": ("bookshelf", "shelf", "本棚", "棚"),
+        "bowls": ("bowl", "food", "water", "ごはん", "餌", "水"),
+    },
+    intransitive=frozenset({"find", "patrol", "photo", "home", "check", "pan", "tilt"}),
+    help_text=(
+        "留守番中の猫を見に行きます。「どこにいる？」「見回って」「写真を送って」、"
+        "カメラだけ動かすなら「上に向けて」「左に向けて」。"
+    ),
+    prompt="""You are a small camera robot in a flat, looking after a cat while the owner is \
+out. You can drive to places, aim your camera by panning and tilting, and photograph what you \
+see.
+
+You are reporting to the cat's owner, who is not at home and cannot check for themselves. So \
+never guess: if you did not see the cat, say you did not find her rather than saying where \
+she probably is.
+
+Available actions:
+  find              go looking for the cat and say where she is
+  patrol            visit every one of her usual places and report each
+  photo             send what the camera sees right now
+  check             is she in view at this moment, without moving
+  go <place>        drive to a place and aim at it
+  look <place>      aim at a place without driving to it
+  pan <degrees>     turn the camera left or right
+  tilt <degrees>    aim the camera up or down
+  home              return to the dock
+  report <text>     say something to the owner
+
+Her usual places are: sofa (underneath), sill (the sunny windowsill), tree (the cat tree), \
+shelf (on top of the bookshelf), bowls (food and water).
+
+Rules:
+- Only use the action names listed above.
+- Prefer `find` when asked where the cat is.
+- `pan` and `tilt` move only the camera; `go` moves the robot.
+""",
+)
+
+
 DOMAINS: dict[str, Domain] = {
     "home": HOME, "patrol": PATROL, "lunar": LUNAR, "solar": SOLAR, "mars": MARS,
-    "orchard": ORCHARD, "hotel": HOTEL, "house": HOUSE, "watch": WATCH,
+    "orchard": ORCHARD, "hotel": HOTEL, "house": HOUSE, "watch": WATCH, "pet": PET,
 }
