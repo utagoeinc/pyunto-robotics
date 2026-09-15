@@ -35,6 +35,31 @@ _GREETINGS = (
 )
 
 
+
+# What every domain prompt has to end with, and none of them did.
+#
+# The model was answering correctly -- asked to move somewhere sunny it replied
+# `fetch_power` -- and `parse_plan` threw the answer away, because it looks for a JSON array
+# and nothing had asked the model for one. Worse, the prompts never included the user's
+# message at all: the model was being asked to plan for a sentence it had not been shown, and
+# only got the right answer by guessing from the domain description. Every LLM plan silently
+# fell back to the keyword rules, which is why --llm appeared to do nothing.
+#
+# Kept in one place so a fifth domain cannot forget it.
+_OUTPUT_FORMAT = """
+
+The user said: "{message}"
+
+Reply with ONLY a JSON array of steps, no other text. Examples:
+
+  [{{"action": "<action>"}}]
+  [{{"action": "<action>", "argument": "<target>"}}]
+  [{{"action": "<first>"}}, {{"action": "<second>"}}]
+
+If the request is just conversation, reply with:
+  [{{"action": "report", "argument": "<your reply>"}}]
+"""
+
 @dataclass(frozen=True)
 class Domain:
     """Everything that makes one robot's language different from another's."""
@@ -621,7 +646,7 @@ Rules:
 - Only use the action names and target names listed above.
 - Prefer `fetch_power` when the user asks for power or energy without saying how.
 - Charging in shade collects almost nothing, so find sunlight before charging.
-""",
+""" + _OUTPUT_FORMAT,
 )
 
 
@@ -666,7 +691,7 @@ Available actions:
 Rules:
 - Only use the action names and target names listed above.
 - Prefer `goto` when the user names a place to drive to.
-""",
+""" + _OUTPUT_FORMAT,
 )
 
 
@@ -718,7 +743,7 @@ Available actions:
 Rules:
 - Only use the action names and target names listed above.
 - Prefer `fetch` when the user asks for the fruit to be brought in without saying how.
-""",
+""" + _OUTPUT_FORMAT,
 )
 
 
@@ -770,7 +795,7 @@ Available actions:
 Rules:
 - Only use the action names listed above.
 - Prefer `clean` when the user asks for the hotel or both floors to be cleaned.
-""",
+""" + _OUTPUT_FORMAT,
 )
 
 
@@ -835,7 +860,7 @@ Rules:
 - Only use the action names listed above.
 - Put the room in `where` when the user names one.
 - Asking whether the door is locked is `lock_status`, not `lock`.
-""",
+""" + _OUTPUT_FORMAT,
 )
 
 

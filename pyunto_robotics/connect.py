@@ -85,15 +85,30 @@ def connect(display_name: str = "Robot", base_url: str | None = None) -> Connect
     email = (os.environ.get("PYUNTO_EMAIL") or "").strip() or None
     password = (os.environ.get("PYUNTO_PASSWORD") or "").strip() or None
     if email and password:
-        # A registered account. Its display name is whatever the person set, so the app cannot
-        # tell it is a robot -- warn once rather than silently losing the label in the
-        # participant list. PYUNTO_ROBOT_ACCOUNT=1 suppresses this for deliberate setups.
+        # A robot signed in as the person it is meant to answer cannot answer them.
+        #
+        # This is a refusal, not a warning, and it used to be the other way round. The old
+        # warning said the participant list would miss its 🤖 label, which is true and beside
+        # the point: the agent discards its own posts (it has to, or it answers its own
+        # replies forever), so when the robot IS the person, every instruction they write is
+        # dropped on the first line. The robot sits there looking connected and does nothing,
+        # and nothing in the logs says why. That cost an afternoon to find, twice.
+        #
+        # PYUNTO_ROBOT_ACCOUNT=1 is the way through, for a registered account genuinely
+        # separate from the person using the diary.
         if not os.environ.get("PYUNTO_ROBOT_ACCOUNT"):
-            log.warning(
-                "using the registered account in PYUNTO_EMAIL. The Pyunto app labels robots by "
-                "a display name starting with %r; rename the account, or unset PYUNTO_EMAIL to "
-                "let an anonymous robot account be created.",
-                ROBOT_NAME_PREFIX.strip(),
+            raise AuthError(
+                f"PYUNTO_EMAIL is set to {email}, so this robot would sign in as that "
+                f"account.\n\n"
+                f"A robot ignores its own posts -- otherwise it replies to itself forever -- "
+                f"so if you write to the diary from the same account, the robot will see your "
+                f"messages as its own and do nothing at all.\n\n"
+                f"Either run without those credentials, which creates a robot account of its "
+                f"own:\n"
+                f"    PYUNTO_EMAIL= PYUNTO_PASSWORD= pyunto-robotics demo ...\n"
+                f"or remove PYUNTO_EMAIL and PYUNTO_PASSWORD from your .env.\n\n"
+                f"If {email} really is a separate account for the robot, set "
+                f"PYUNTO_ROBOT_ACCOUNT=1 to use it anyway."
             )
         session = Session(base, email, password)
     else:
