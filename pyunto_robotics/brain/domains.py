@@ -873,7 +873,73 @@ Rules:
 )
 
 
+WATCH = Domain(
+    name="watch",
+    verbs=(
+        # "How is she?" is the question this exists for, so it is matched first and widely.
+        ("check", ("how is she", "how is he", "how is mum", "how is dad", "is she alright",
+                   "is he alright", "where is she", "what is she doing",
+                   "様子", "元気", "どうしてる", "どこにいる", "無事")),
+        ("today", ("what happened today", "today so far", "how was today", "the day",
+                   "今日は", "今日の様子", "一日", "きょうは")),
+        ("watch", ("watch for", "keep an eye", "watch the next", "見ていて", "様子を見て",
+                   "見守って")),
+        ("lock_status", ("is the door locked", "did she lock", "did he lock",
+                         "鍵はかかってる", "施錠されてる", "戸締まり")),
+        ("status", ("everything alright", "how is the house", "家の様子", "全部教えて")),
+        ("temperature", ("how warm", "how cold", "what is the temperature", "temperature",
+                         "何度", "気温", "室温", "温度は")),
+        ("set_temperature", ("set the aircon", "set it to", "度にして", "度に設定")),
+        ("warmer", ("warmer", "warm it up", "暖かく", "温度を上げて", "寒い")),
+        ("cooler", ("cooler", "cool it down", "涼しく", "温度を下げて", "暑い")),
+        ("aircon_off", ("turn the aircon off", "aircon off", "エアコンを消して", "冷房を止めて")),
+        ("aircon_on", ("turn the aircon on", "aircon on", "エアコンをつけて", "冷房", "エアコン")),
+        ("lights_off", ("lights off", "turn the lights off", "電気を消して", "照明を消して")),
+        ("lights_on", ("lights on", "turn the lights on", "電気をつけて", "照明をつけて")),
+        ("unlock", ("unlock", "鍵を開けて", "解錠")),
+        ("lock", ("lock up", "lock the door", "鍵をかけて", "施錠")),
+    ),
+    objects={
+        "living room": ("living room", "リビング", "居間"),
+        "bedroom": ("bedroom", "寝室"),
+        "kitchen": ("kitchen", "キッチン", "台所"),
+    },
+    intransitive=frozenset({
+        "check", "today", "watch", "lock", "unlock", "lock_status", "status",
+        "temperature", "warmer", "cooler", "aircon_on", "aircon_off",
+        "lights_on", "lights_off",
+    }),
+    help_text=(
+        "I watch the flat and tell you how she is. Ask 「様子はどう？」 or 「今日は何してた？」, "
+        "and I can work the air conditioning, lights and lock too."
+    ),
+    prompt="""You watch a flat where an older person lives alone, through motion sensors in \
+each room and a bed sensor. You also control the air conditioning, the lights and the front \
+door lock.
+
+You are reporting to a family member who lives elsewhere. Answer their questions, and speak \
+plainly: say what the sensors saw, not what it might mean medically.
+
+Available actions:
+  check             where she is now and whether she is up
+  today             what has happened today, with times
+  watch <hours>     let time pass and report anything worth saying
+  temperature       how warm a room is
+  set_temperature / warmer / cooler
+  aircon_on / aircon_off
+  lights_on / lights_off
+  lock / unlock / lock_status
+  status            the whole flat at once
+  report <text>     say something to the user
+
+Rules:
+- Only use the action names listed above.
+- Prefer `check` when asked how she is or where she is.
+""",
+)
+
+
 DOMAINS: dict[str, Domain] = {
     "home": HOME, "patrol": PATROL, "lunar": LUNAR, "solar": SOLAR, "mars": MARS,
-    "orchard": ORCHARD, "hotel": HOTEL, "house": HOUSE,
+    "orchard": ORCHARD, "hotel": HOTEL, "house": HOUSE, "watch": WATCH,
 }

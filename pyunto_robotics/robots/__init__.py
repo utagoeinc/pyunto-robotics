@@ -108,28 +108,33 @@ def _hotel() -> RobotSetup:
     )
 
 
-def _house() -> RobotSetup:
-    """The devices in a house: air conditioning, lights, a lock, thermometers.
+def _watch() -> RobotSetup:
+    """A flat that watches an older person living alone.
 
-    The simplest robot here and the one most people could actually use. It also proves what
-    `RobotSkills` claims: the contract is one `run()` method, and there is no simulator, no
-    camera and no body behind this one at all. Somebody attaching their own house swaps the
-    bodies of a dozen methods in brain/home_devices.py for HomeKit or Matter calls and changes
-    nothing else.
+    The only demonstration here with no robot in it. Nothing is commanded: the house watches,
+    and what it sees goes into a diary that a family member reads from another city. That is
+    what a diary is for, and it is the case where the record is the product rather than the
+    by-product of an errand.
+
+    Replaces the earlier `house` robot, whose devices it keeps -- noticing a room is 29°C is
+    worth something, and turning the air conditioning on is worth more.
     """
-    from ..brain.home_devices import HomeSkills
+    from ..brain.watching import WatchingSkills
 
     return RobotSetup(
-        name="House (air conditioning, lights, lock)",
-        scene="",  # no body to simulate
-        domain=DOMAINS["house"],
-        skills=lambda robot, grounder: HomeSkills(),
-        examples=("リビングのエアコンを24度にして", "is the front door locked?"),
+        name="Watching flat (sensors, aircon, lights, lock)",
+        scene="watch.xml",
+        domain=DOMAINS["watch"],
+        skills=lambda robot, grounder: WatchingSkills(robot, grounder),
+        default_keyframe="asleep",
+        keyframe_help="asleep (in bed, start of the day), up (out of bed)",
+        examples=("母の様子はどう？", "how is she today?"),
+        camera=Camera(distance=11.0, elevation=-55, azimuth=90),
     )
 
 
 register("solar", _solar())
-register("house", _house())
+register("watch", _watch())
 register("hotel", _hotel())
 register("orchard", _orchard())
 register("mars", _mars())

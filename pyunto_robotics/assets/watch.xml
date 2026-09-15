@@ -1,0 +1,174 @@
+<!--
+  A one-bedroom flat with an older person living in it, and sensors that notice.
+
+  This is the demonstration where nothing is a robot. There is no machine to command: the
+  house watches, and what it sees goes into a diary that a daughter in another city reads.
+  That is a different product from "tell the robot to do something", and it is the one that
+  fits a diary best -- the record IS the point, not a side effect of an errand.
+
+  The person is a body on slide joints, driven by a scripted day rather than by physics
+  alone: they get up, cross to the kitchen, sit a long while, visit the bathroom, go back to
+  bed. Modelling them as something that moves through the rooms -- rather than as a state
+  machine printing "in kitchen" -- is what makes the sensors real. A motion sensor fires
+  because a body entered its volume, and the bed sensor reads a load because someone is on
+  the bed. Change the routine and the readings change with it, which is the only way to tell
+  whether the detection logic works.
+
+  Rooms, west to east: bedroom, hallway with the bathroom off it, then the living room and
+  the kitchen at the east end. Doors are open; an older person's flat is laid out for that.
+  Sensor volumes are the geoms named `pir_*`; they are visual markers, and the code asks
+  where the person's body is rather than relying on contacts, because a PIR sensor watches a
+  volume it never touches.
+-->
+<mujoco model="watch">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.004" integrator="implicitfast" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight ambient="0.48 0.47 0.46" diffuse="0.40 0.40 0.39" specular="0.05 0.05 0.05"/>
+    <map znear="0.02" zfar="60"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <texture name="sky" type="skybox" builtin="gradient"
+             rgb1="0.55 0.62 0.72" rgb2="0.86 0.88 0.90" width="256" height="256"/>
+    <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.72 0.66 0.58"
+             rgb2="0.68 0.62 0.54" width="256" height="256"/>
+    <material name="floor" texture="floor_tex" texrepeat="10 8" specular="0.05"/>
+    <material name="wall" rgba="0.92 0.90 0.86 1" specular="0.04"/>
+    <material name="inner_wall" rgba="0.88 0.86 0.83 1" specular="0.04"/>
+
+    <!-- Furniture, muted so the person and the sensors are what the eye goes to. -->
+    <material name="bed_mat" rgba="0.55 0.60 0.68 1" specular="0.08"/>
+    <material name="wood" rgba="0.52 0.40 0.28 1" specular="0.12"/>
+    <material name="appliance" rgba="0.80 0.81 0.83 1" specular="0.45" shininess="0.5"/>
+    <material name="porcelain" rgba="0.95 0.95 0.94 1" specular="0.5" shininess="0.6"/>
+
+    <!-- The person. One warm colour so they are unmistakable in a grey flat. -->
+    <material name="person_body" rgba="0.88 0.42 0.30 1" specular="0.15"/>
+    <material name="person_head" rgba="0.90 0.76 0.65 1" specular="0.15"/>
+
+    <!--
+      Sensor volumes, translucent. They are drawn because a demonstration of watching should
+      show what is being watched; an invisible sensor teaches nobody anything. Each lights up
+      in the viewer when it fires (the skill swaps the material).
+    -->
+    <material name="pir_idle" rgba="0.35 0.65 0.90 0.13"/>
+    <material name="pir_fired" rgba="1.00 0.72 0.15 0.40" emission="0.45"/>
+    <material name="lamp_off" rgba="0.35 0.35 0.36 1" specular="0.2"/>
+    <material name="lamp_on" rgba="1.0 0.93 0.62 1" emission="0.95" specular="0.4"/>
+  </asset>
+
+  <worldbody>
+    <light name="ceiling" pos="3 1.5 3.4" dir="0 0 -1" directional="true"
+           diffuse="0.68 0.67 0.64" specular="0.08 0.08 0.08" castshadow="true"/>
+    <light name="fill" pos="-2 -4 3" dir="0.4 0.6 -0.7" directional="true"
+           diffuse="0.20 0.20 0.22"/>
+
+    <geom name="floor" type="plane" size="20 20 0.05" material="floor"
+          friction="1.0 0.02 0.001" condim="3"/>
+
+    <!-- ===== outer walls ===== -->
+    <geom name="wall_n" type="box" pos="3.0 3.6 1.3" size="6.2 0.12 1.3" material="wall"/>
+    <geom name="wall_s" type="box" pos="3.0 -3.6 1.3" size="6.2 0.12 1.3" material="wall"/>
+    <geom name="wall_w" type="box" pos="-3.1 0 1.3" size="0.12 3.6 1.3" material="wall"/>
+    <geom name="wall_e" type="box" pos="9.1 0 1.3" size="0.12 3.6 1.3" material="wall"/>
+
+    <!-- ===== inner walls, leaving doorways ===== -->
+    <!-- bedroom / hallway divider, doorway at the south end -->
+    <geom name="div_bed" type="box" pos="0.0 1.9 1.3" size="0.10 1.7 1.3" material="inner_wall"/>
+    <!-- bathroom, a small room off the hallway -->
+    <geom name="bath_n" type="box" pos="2.4 1.5 1.3" size="1.3 0.10 1.3" material="inner_wall"/>
+    <geom name="bath_e" type="box" pos="3.6 2.6 1.3" size="0.10 1.2 1.3" material="inner_wall"/>
+    <!-- living / kitchen divider, doorway at the north end -->
+    <geom name="div_kitchen" type="box" pos="6.2 -2.0 1.3" size="0.10 1.6 1.3" material="inner_wall"/>
+
+    <!-- ===== bedroom (west) ===== -->
+    <body name="bed" pos="-1.6 1.6 0">
+      <geom name="bed_frame" type="box" pos="0 0 0.22" size="1.0 0.75 0.22" material="wood"/>
+      <geom name="bed_mattress" type="box" pos="0 0 0.52" size="0.95 0.70 0.10" material="bed_mat"/>
+      <geom name="bed_pillow" type="box" pos="-0.70 0 0.66" size="0.22 0.32 0.06" material="porcelain"/>
+    </body>
+    <geom name="bedside_lamp" type="box" pos="-0.3 1.6 0.55" size="0.10 0.10 0.18"
+          material="lamp_off"/>
+
+    <!-- ===== bathroom ===== -->
+    <geom name="toilet" type="box" pos="2.4 2.6 0.25" size="0.24 0.32 0.25" material="porcelain"/>
+    <geom name="basin" type="box" pos="1.4 2.9 0.45" size="0.28 0.20 0.10" material="porcelain"/>
+
+    <!-- ===== living room ===== -->
+    <body name="sofa" pos="4.4 -1.8 0">
+      <geom name="sofa_seat" type="box" pos="0 0 0.25" size="0.95 0.45 0.12" material="bed_mat"/>
+      <geom name="sofa_back" type="box" pos="0 -0.38 0.55" size="0.95 0.10 0.30" material="bed_mat"/>
+    </body>
+    <geom name="tv" type="box" pos="4.4 1.0 0.85" size="0.55 0.06 0.35" material="appliance"/>
+    <geom name="living_lamp" type="box" pos="6.0 0.9 0.60" size="0.10 0.10 0.20"
+          material="lamp_off"/>
+
+    <!-- ===== kitchen (east) ===== -->
+    <geom name="counter" type="box" pos="7.8 1.6 0.45" size="1.1 0.35 0.45" material="wood"/>
+    <geom name="fridge" type="box" pos="8.6 -1.0 0.85" size="0.35 0.35 0.85" material="appliance"/>
+    <geom name="kettle" type="box" pos="7.4 1.6 1.00" size="0.10 0.10 0.10" material="appliance"/>
+    <geom name="kitchen_lamp" type="box" pos="7.8 0.6 0.60" size="0.10 0.10 0.20"
+          material="lamp_off"/>
+
+    <!--
+      ===== sensor volumes =====
+      One per room, sized to the room and sitting at body height. The code tests whether the
+      person's centre is inside these boxes, which is what a PIR sensor's cone amounts to and
+      is far more robust than counting contacts with furniture.
+    -->
+    <geom name="pir_bedroom" type="box" pos="-1.5 1.4 0.9" size="1.4 2.0 0.9" material="pir_idle"
+          contype="0" conaffinity="0"/>
+    <geom name="pir_bathroom" type="box" pos="2.4 2.6 0.9" size="1.2 0.9 0.9" material="pir_idle"
+          contype="0" conaffinity="0"/>
+    <geom name="pir_living" type="box" pos="4.3 -0.8 0.9" size="2.0 2.6 0.9" material="pir_idle"
+          contype="0" conaffinity="0"/>
+    <geom name="pir_kitchen" type="box" pos="7.9 0.4 0.9" size="1.1 3.0 0.9" material="pir_idle"
+          contype="0" conaffinity="0"/>
+    <geom name="pir_hallway" type="box" pos="1.2 -1.4 0.9" size="1.2 2.0 0.9" material="pir_idle"
+          contype="0" conaffinity="0"/>
+
+    <!--
+      ===== the person =====
+      Slide joints in x and y and a hinge for facing, driven by position actuators. Not a
+      humanoid: legs would be a locomotion problem, and this scene is not about locomotion.
+      What matters is that a body with a real position moves through real rooms, so the
+      sensors are reading something rather than being told what to say.
+    -->
+    <!--
+      The body's frame sits at the origin, not at the bed.
+
+      Placed at the bed, the slide joints measured from there: commanding x=7.8 for the
+      kitchen put the person at 6.2, and every sensor test missed. A joint that moves a body
+      is measured from wherever that body was declared, so declaring it at the origin makes
+      the joint values world coordinates -- which is what the skills reason in.
+
+      Height 0.95 is the standing centre; person_z takes it down to sitting or lying.
+    -->
+    <body name="person" pos="0 0 0.95">
+      <joint name="person_x" type="slide" axis="1 0 0" range="-3.0 9.0" damping="40"/>
+      <joint name="person_y" type="slide" axis="0 1 0" range="-3.5 3.5" damping="40"/>
+      <joint name="person_z" type="slide" axis="0 0 1" range="-0.45 0.1" damping="40"/>
+      <geom name="person_torso" type="capsule" fromto="0 0 -0.30 0 0 0.22" size="0.16"
+            material="person_body" density="200" contype="0" conaffinity="0"/>
+      <geom name="person_head_g" type="sphere" pos="0 0 0.40" size="0.13"
+            material="person_head" density="200" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="person_x" joint="person_x" kp="900" ctrlrange="-3.0 9.0" forcerange="-900 900"/>
+    <position name="person_y" joint="person_y" kp="900" ctrlrange="-3.5 3.5" forcerange="-900 900"/>
+    <!-- Height: 0 is standing, -0.45 is lying down or sitting. The bed and chair sensors
+         read this, which is how "in bed" is told from "standing beside the bed". -->
+    <position name="person_z" joint="person_z" kp="900" ctrlrange="-0.45 0.1" forcerange="-900 900"/>
+  </actuator>
+
+  <keyframe>
+    <!-- qpos = person only (3): x, y, z. Asleep in bed at the start of the day. -->
+    <key name="asleep" qpos="-1.6 1.6 -0.45"/>
+    <key name="up" qpos="-1.6 0.4 0"/>
+  </keyframe>
+</mujoco>
