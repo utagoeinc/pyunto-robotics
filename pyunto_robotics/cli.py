@@ -46,6 +46,34 @@ def _reexec_under_mjpython_if_needed(wants_window: bool) -> None:
     os.execv(str(launcher), [str(launcher), "-m", "pyunto_robotics.cli", *sys.argv[1:]])
 
 
+def _llm_wanted(asked: bool) -> bool:
+    """Whether to read the sentence with the local model, saying why when it cannot.
+
+    Understanding is on by default. Keyword tables only match the phrasings somebody thought
+    to write down -- told 「日が当たるところに移動して」 the matcher went looking for a landmark
+    of that name -- and every miss needs another pattern, in every language the product ships
+    in. That is not a table anybody can finish.
+
+    The model reads the sentence instead, and it runs on this machine, so nothing is sent
+    anywhere to be understood. When it is not available this says so in one line and carries
+    on with keywords rather than refusing to start: a robot that will not open because a
+    5 GB download is missing is worse than one that understands less.
+    """
+    if not asked:
+        return False
+    if sys.platform != "darwin":
+        print("note    : the local model needs Apple silicon; matching keywords instead.")
+        return False
+    try:
+        import mlx_vlm  # noqa: F401, PLC0415
+    except ImportError:
+        print("note    : the local model is not installed, so keywords are being matched.")
+        print("          To let it read sentences instead of matching words:")
+        print("              python scripts/download_model.py")
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     ap = argparse.ArgumentParser(prog="pyunto-robotics", description=__doc__.split("\n")[0])
@@ -54,8 +82,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p_demo = sub.add_parser("demo", help="open a robot and answer messages from the app")
     p_demo.add_argument("--pair", help="pairing code shown by the Pyunto app")
-    p_demo.add_argument("--robot", default="office", help="which machine (see `robots`)")
-    p_demo.add_argument("--llm", action="store_true", help="use the local language model to plan")
+    # The solar errand robot: the demonstration the SDK leads with, and the one that shows a
+    # robot finding something by measurement rather than following a script. The old default
+    # was "office", a humanoid that no longer exists -- so a bare `demo` raised KeyError.
+    p_demo.add_argument("--robot", default="solar", help="which machine (see `robots`)")
+    # On by default. See `_llm_wanted`: a keyword table cannot be finished, least of all in
+    # every language, and the fallback when the model is missing is the table anyway.
+    p_demo.add_argument("--no-llm", action="store_true",
+                        help="match keywords instead of reading the sentence with the local model")
     p_demo.add_argument("--no-window", dest="view", action="store_false", help="run headless")
     p_demo.add_argument("--speed", type=float, default=1.0, help="playback speed (1.0 = real time)")
     p_demo.add_argument("--no-photos", dest="send_images", action="store_false",
@@ -73,6 +107,14 @@ def main(argv: list[str] | None = None) -> int:
                       help="who runs this robot; shown to the person before they approve")
     p_qr.add_argument("--big", action="store_true",
                       help="draw the square larger; use it when a phone will not scan")
+    p_qr.add_argument("--robot", default="solar", help="which machine to open once paired")
+    p_qr.add_argument("--no-run", action="store_true",
+                      help="draw the square and exit, instead of opening the robot once paired")
+    p_qr.add_argument("--no-llm", action="store_true",
+                      help="match keywords instead of reading the sentence with the local model")
+    p_qr.add_argument("--no-window", action="store_true")
+    p_qr.add_argument("--speed", type=float, default=1.0)
+    p_qr.add_argument("--no-photos", action="store_true")
 
     args = ap.parse_args(argv)
     logging.basicConfig(
@@ -152,9 +194,31 @@ def main(argv: list[str] | None = None) -> int:
         print("The app asks which space, and shows who runs this robot before anything is shared.")
         print("Nothing here is secret: it names the account asking, and the decision stays with")
         print("whoever holds the phone.")
+        if args.no_run:
+            print()
+            print("Afterwards, open that space in the app once so the robot is given the key.")
+            return 0
+
+        # Wait for the scan, then open the robot. Drawing a square and exiting made the
+        # person run a second command, and gave them no way to tell whether the scan had
+        # worked -- the square just sat there either way. Scanning IS the approval.
+        from pyunto_agent.pairing import wait_for_scan
+
         print()
-        print("Afterwards, open that space in the app once so the robot is given the key.")
-        return 0
+        print("waiting for the scan… (Ctrl-C to stop)")
+        space_id = wait_for_scan(connection.client)
+        if space_id is None:
+            print("Nobody scanned it. Run this again when you are ready.")
+            return 1
+        print("paired — opening the robot.\n")
+        return run_demo(
+            robot_name=args.robot,
+            pair=None,
+            use_llm=_llm_wanted(not args.no_llm),
+            view=not args.no_window,
+            speed=args.speed,
+            send_images=not args.no_photos,
+        )
 
     if args.cmd == "demo":
         _reexec_under_mjpython_if_needed(args.view)
@@ -163,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_demo(
             robot_name=args.robot,
             pair=args.pair,
-            use_llm=args.llm,
+            use_llm=_llm_wanted(not args.no_llm),
             view=args.view,
             speed=args.speed,
             send_images=args.send_images,

@@ -4,43 +4,87 @@ Message a robot from the Pyunto diary app, and watch it act.
 
 ```bash
 pip install pyunto-robotics
-pyunto-robotics demo --pair K3F9QZ
+pyunto-robotics showqr
 ```
 
-A window opens with a humanoid standing in an office. Write "walk to the door" in the diary on
-your phone, and it walks to the door and tells you what it did.
+Scan the square that appears with the Pyunto app. A window opens on a robot parked in a
+carport with a solar panel on its back; write 「日光が当たる場所まで移動して、電力を取得してきて」
+in the diary on your phone, and it drives out, finds sunlight by measuring what the panel
+receives, charges, comes home, and turns the house lights on with what it collected.
 
 The robot runs on **your** computer. Pyunto never sees the room, the camera, or anything the
 robot does — the diary is end-to-end encrypted, and decryption happens on your machine.
 
 ---
 
-## The demonstration, step by step
+## Quick start
 
-1. In the Pyunto app, open a premium space and choose **Invite a robot**. A six-character
-   pairing code appears.
-2. On your computer:
-   ```bash
-   pyunto-robotics demo --pair <code>
-   ```
-3. Open that space in the app once. Because the diary is end-to-end encrypted, a member has to
-   let the robot in — the server cannot hand out a key on its own. The robot says hello when it
-   is through.
-4. Write an entry. The robot acts and replies in the same thread.
-
-Four robots and four worlds ship with the package:
-
-| `--robot` | Machine | World |
-|---|---|---|
-| `office` (default) | H1 humanoid | three-room office, opens doors |
-| `home` | Momo humanoid | laundry room, empties a washer and folds |
-| `patrol` | Q1 quadruped | outdoor site, walks a perimeter and climbs steps |
-| `lunar` | R1 rover | lunar south pole, drives cratered regolith |
+Three commands, and the only thing to remember is the first one.
 
 ```bash
-pyunto-robotics robots      # what is installed
-pyunto-robotics whoami      # this robot's account and the spaces it is in
+pip install pyunto-robotics
+python scripts/download_model.py     # so it reads sentences, not keywords (once, ~5.5 GB)
+pyunto-robotics showqr               # a square appears in the terminal
 ```
+
+Scan that square with the Pyunto app. The app asks which diary to let the robot into and shows
+who runs it; when you approve, **the robot opens by itself** — no second command, nothing to
+copy back into the terminal.
+
+```
+waiting for the scan… (Ctrl-C to stop)
+paired — opening the robot.
+
+listening — message the robot from the Pyunto app. Ctrl-C to stop.
+```
+
+Then write in the diary, in your own words:
+
+```
+日光が当たる場所まで移動して、電力を取得してきて
+```
+
+The robot says how it understood you, drives out, finds the sun by measuring, charges, comes
+home, and turns the house lights on — reporting each step in the same thread.
+
+Open that space in the app once after pairing. The diary is end-to-end encrypted, so a member
+has to hand the robot a key; the server cannot do it alone.
+
+### If you were given a six-character code instead
+
+Older builds of the app show a code rather than a square. That still works:
+
+```bash
+pyunto-robotics demo --pair K3F9QZ
+```
+
+### Choosing a robot
+
+```bash
+pyunto-robotics robots                  # what is installed
+pyunto-robotics showqr --robot pet      # pair and open a particular one
+pyunto-robotics demo --robot watch      # if already paired
+pyunto-robotics whoami                  # this robot's account and its spaces
+```
+
+---
+
+## Writing in your own words
+
+You do not have to learn any commands. A local language model reads the entry:
+
+```
+「そろそろ電気が足りないかも」        ->  find_sun -> goto(park)
+「猫はどこ？」                      ->  find
+「母の様子はどう？」                 ->  check
+```
+
+None of those are in any keyword list. The model runs on your machine, so the diary is never
+sent anywhere to be understood.
+
+It needs Apple silicon. Everywhere else — and until `download_model.py` has run — the robot
+matches keywords instead and says so in one line at startup, rather than refusing to open.
+Add `--no-llm` to force that.
 
 ---
 
@@ -50,14 +94,13 @@ A robot that accepts an instruction, goes quiet, and posts one sentence a minute
 indistinguishable from a robot that has crashed. So it narrates, in the same thread the
 instruction arrived in.
 
-Write 「オフィスのドアを開けて」 and the diary fills in as it happens:
+Write 「猫はどこにいる？」 and the diary fills in as it happens:
 
 ```
-🤖 Understood: “オフィスのドアを開けて”
-   I will: goto door → open door
-✅ goto door — Walked to the door. It is 0.4 m ahead. (38s)
-✅ open door — Pushed it to 109 degrees and went through.
-[a photograph of the room beyond the door]
+🤖 Understood: “猫はどこにいる？”
+   I will: find
+✅ find — 🐱 窓辺の日なたにいました。カメラを向けています。
+[a photograph from the robot's own camera]
 ```
 
 Three things are worth noticing.
@@ -71,54 +114,29 @@ An instruction the robot cannot parse is answered too, rather than ignored:
 
 ```
 🤖 I did not understand “make me a coffee”.
-   I know how to: describe, face, goto, home, lower_arm, open, raise_arm, wave, where…
+   I know how to: check, find, go, home, look, pan, patrol, photo, tilt…
 ```
 
 This is the most common outcome of all, and the one where silence does the most damage.
 
-Simple gestures work, which is what people try first:
+Each robot answers in its own vocabulary — asking the pet camera to raise its hand gets the
+list above, not a shrug. A few that people try first:
 
 | You write | The robot does |
 |---|---|
-| 「右手を挙げて」 / "raise your right hand" | lifts the right hand and holds it up |
-| 「左手を振って」 / "wave your left hand" | raises the left arm, waves, lowers it |
-| 「手を下ろして」 / "put your hand down" | returns the arm to its side |
+| 「猫はどこ？」 (`pet`) | drives the flat, aims the camera at each of her places, reports where she is |
+| 「カメラを上に向けて」 (`pet`) | tilts the lens up without moving the robot |
+| 「母の様子はどう？」 (`watch`) | reads the sensors and says where she is and whether she is up |
+| 「誰か来た？」 (`watch`) | the day's doorphone callers, and whether she answered |
 
 Add `--no-photos` to report in words only.
 
 ---
 
-## Understanding what you wrote
-
-Out of the box the robots match keywords, which works for the phrasings somebody thought to
-list and fails for everything else. Told 「日が当たるところに移動して」 the matcher went looking
-for a landmark named "日が当たるところに移動して", because the sentence says "move to" rather
-than "search for" and only the latter was in the table. Every such failure needs another
-pattern, and there is no end to them.
-
-A local language model reads the sentence instead:
-
-```bash
-python scripts/download_model.py          # Gemma 4 E2B, about 5.5 GB, once
-pyunto-robotics demo --robot solar --llm
-```
-
-```
-「そろそろ電気が足りないかも」  ->  find_sun -> goto(park)
-```
-
-No keyword list contains that. The model runs on your machine, so the diary is not sent
-anywhere to be understood.
-
-Apple Silicon only, which is why `--llm` is a flag rather than the default. Everywhere else
-the keyword matcher is still there, and a model that fails to load falls back to it rather
-than stopping the robot.
-
----
 
 ## Bringing your own robot
 
-The SDK is not four robots; it is a way to attach *any* robot to a diary. One class, one method:
+The SDK is not six robots; it is a way to attach *any* robot to a diary. One class, one method:
 
 ```python
 from pyunto_robotics.api import SkillResult
