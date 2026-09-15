@@ -153,3 +153,37 @@ def test_instructions_reach_the_right_action():
     assert domain.verb("2時間見ていて") == "watch"
     assert domain.verb("エアコンをつけて") == "aircon_on"
     assert domain.verb("鍵はかかってる？") == "lock_status"
+
+
+@pytest.mark.slow
+def test_the_wall_clock_shows_her_time_of_day():
+    """A viewer cannot tell a quiet afternoon from a frozen simulation without one."""
+    import mujoco
+
+    robot, skills = flat()
+    try:
+        skills.advance(7 * 60 + 35)  # 07:35
+
+        def lit(name: str) -> bool:
+            geom = mujoco.mj_name2id(robot.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            on = mujoco.mj_name2id(robot.model, mujoco.mjtObj.mjOBJ_MATERIAL, "seg_on")
+            return robot.model.geom_matid[geom] == on
+
+        # "0" lights every segment but the middle bar; "1" lights only the right-hand pair.
+        assert lit("clock_d0_a") and not lit("clock_d0_g"), "first digit should read 0"
+        assert lit("clock_d1_b") and lit("clock_d1_c"), "second digit should read 7"
+    finally:
+        robot.close()
+
+
+@pytest.mark.slow
+def test_the_speed_shown_is_measured_not_declared():
+    """A fixed number would be decoration: the rate depends on the machine."""
+    robot, skills = flat()
+    try:
+        skills.advance(120)
+        assert 1 <= skills.speed_pips <= 5
+        # This runs far faster than real time, so it should be at the top of the scale.
+        assert skills.speed_pips >= 4, skills.speed_pips
+    finally:
+        robot.close()

@@ -53,6 +53,18 @@ STILL_CONCERN_MINUTES = 300.0
 STILL_IN_BED_BY_MINUTE = 660.0  # 11:00
 
 
+# Which segments light for each digit, in the usual seven-segment lettering:
+#      a
+#    f   b
+#      g
+#    e   c
+#      d
+DIGIT_SEGMENTS = {
+    0: "abcdef", 1: "bc", 2: "abdeg", 3: "abcdg", 4: "bcfg",
+    5: "acdfg", 6: "acdefg", 7: "abc", 8: "abcdefg", 9: "abcdfg",
+}
+
+
 @dataclass
 class Reading:
     """What the sensors say at one moment."""
@@ -143,6 +155,34 @@ class HouseholdSensors:
             minutes_still=minute - self._last_change,
             position=(float(position[0]), float(position[1])),
         )
+
+    def show_time(self, minute: float, speed_pips: int = 3) -> None:
+        """Put the time of day on the wall clock, and how fast it is running.
+
+        A demonstration that compresses a day into minutes has to say so. Without a clock a
+        viewer cannot tell a quiet afternoon from a simulation that has stopped, and the first
+        question anybody asks of this scene -- "how long is that in real time?" -- has no
+        visible answer.
+
+        Drawn with geometry rather than an overlay because this scene mostly lives in
+        screenshots and recordings, and an overlay appears in neither.
+        """
+        hours, minutes = int(minute) // 60 % 24, int(minute) % 60
+        for position, value in enumerate((hours // 10, hours % 10,
+                                          minutes // 10, minutes % 10)):
+            for segment in "abcdefg":
+                self._set_material(
+                    f"clock_d{position}_{segment}",
+                    "seg_on" if segment in DIGIT_SEGMENTS[value] else "seg_off",
+                )
+        for pip in range(1, 6):
+            self._set_material(f"speed_{pip}", "speed_on" if pip <= speed_pips else "speed_off")
+
+    def _set_material(self, geom_name: str, material_name: str) -> None:
+        geom = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom_name)
+        material = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_MATERIAL, material_name)
+        if geom >= 0 and material >= 0:
+            self.model.geom_matid[geom] = material
 
     def light(self, name: str, on: bool) -> None:
         """Switch one of the flat's lamps, for the viewer."""

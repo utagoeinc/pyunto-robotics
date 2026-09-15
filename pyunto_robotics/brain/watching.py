@@ -20,6 +20,8 @@ conditioning on is worth more.
 from __future__ import annotations
 
 import logging
+import math
+import time
 
 import mujoco
 
@@ -72,6 +74,15 @@ class WatchingSkills:
         # The flat's own devices, so "it is 29 degrees in there" can become "I turned the air
         # conditioning on".
         self.devices = HomeSkills(HomeDevices())
+        # How fast the day is running, shown as pips and measured rather than declared.
+        #
+        # A fixed number would be a decoration. The rate depends on the machine and on
+        # whether a viewer window is redrawing, so it is timed from the simulation itself and
+        # the pips follow: 1 is near real time, 5 is a day in seconds.
+        self.speed_pips = 3
+        self._elapsed_wall = 0.0
+        self._elapsed_sim = 0.0
+        self.sensors.show_time(self.minute, speed_pips=self.speed_pips)
 
     # -- watching -------------------------------------------------------------------
 
@@ -82,6 +93,7 @@ class WatchingSkills:
         flat keeps living while nobody is asking it anything.
         """
         said: list[str] = []
+        started = time.monotonic()
         for _ in range(int(minutes / MINUTES_PER_TICK)):
             self.minute += MINUTES_PER_TICK
             place = self.day.place_at(self.minute)
@@ -96,10 +108,25 @@ class WatchingSkills:
             reading = self.sensors.read(self.minute)
             for room in ("bedroom", "bathroom", "hallway", "living", "kitchen"):
                 self.sensors.show_sensor(room, room == reading.room)
+            # Her clock, on the wall, so a viewer can see the day moving.
+            self.sensors.show_time(self.minute, speed_pips=self.speed_pips)
 
             note = self._notice(reading)
             if note:
                 said.append(note)
+
+        # Time how fast the day actually ran, and set the pips from it. Averaged over the
+        # whole call rather than per minute, because a single minute is too short to time.
+        self._elapsed_wall += time.monotonic() - started
+        self._elapsed_sim += minutes * 60.0
+        # 5 ms, not 50. Two simulated hours can pass in 24 ms here, and at the higher
+        # threshold the pips never updated at all on a short call -- they sat at their
+        # default, which is exactly the decoration this was meant to replace.
+        if self._elapsed_wall > 0.005:
+            ratio = self._elapsed_sim / self._elapsed_wall
+            # 1 pip: real time. 5 pips: a day in a few seconds. A log scale, because the
+            # range this spans is four orders of magnitude and a linear bar would sit at 5.
+            self.speed_pips = max(1, min(5, int(math.log10(max(ratio, 1.0)) + 1)))
         return said
 
     def _notice(self, reading) -> str | None:  # noqa: ANN001

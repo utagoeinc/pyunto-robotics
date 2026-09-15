@@ -64,6 +64,17 @@
     <material name="pir_idle" rgba="0.35 0.62 0.88 0.30"/>
     <material name="pir_fired" rgba="1.00 0.70 0.10 0.85" emission="0.6"/>
     <material name="lamp_off" rgba="0.35 0.35 0.36 1" specular="0.2"/>
+
+    <!--
+      The wall clock. Segments are emissive when lit so they read as a display rather than
+      as painted-on shapes, and nearly black when off -- a real seven-segment panel shows its
+      dark segments too, and hiding them entirely makes the digits float.
+    -->
+    <material name="clock_case" rgba="0.12 0.12 0.14 1" specular="0.3"/>
+    <material name="seg_off" rgba="0.20 0.20 0.22 1"/>
+    <material name="seg_on" rgba="1.00 0.42 0.20 1" emission="0.95"/>
+    <material name="speed_off" rgba="0.22 0.24 0.26 1"/>
+    <material name="speed_on" rgba="0.30 0.85 0.45 1" emission="0.85"/>
     <material name="lamp_on" rgba="1.0 0.93 0.62 1" emission="0.95" specular="0.4"/>
   </asset>
 
@@ -147,6 +158,76 @@
           material="pir_idle" contype="0" conaffinity="0"/>
     <geom name="pir_hallway" type="box" pos="1.2 -1.4 0.012" size="1.2 2.0 0.012"
           material="pir_idle" contype="0" conaffinity="0"/>
+
+
+    <!--
+      ===== the wall clock =====
+
+      A demonstration that compresses a day into a few minutes has to say so, or the viewer
+      cannot tell a quiet afternoon from a frozen simulation. The panel shows her time of day
+      and how fast it is running.
+
+      Seven-segment digits made of geoms, switched by swapping materials. There is no text in
+      MuJoCo, and a clock that needs an overlay is a clock that does not appear in a
+      screenshot or a recording -- which is where this demonstration mostly lives.
+
+      On the hallway wall, high and facing into the flat, so it is in shot from the overhead
+      view the scene opens with.
+    -->
+    <body name="clock" pos="0.9 -3.40 2.05">
+      <geom name="clock_case" type="box" pos="0.32 0.06 0" size="0.42 0.05 0.16"
+            material="clock_case" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_a" type="box" pos="0.000 0 0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_b" type="box" pos="0.056 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_c" type="box" pos="0.056 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_d" type="box" pos="0.000 0 -0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_e" type="box" pos="-0.056 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_f" type="box" pos="-0.056 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d0_g" type="box" pos="0.000 0 0.000" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_a" type="box" pos="0.135 0 0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_b" type="box" pos="0.191 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_c" type="box" pos="0.191 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_d" type="box" pos="0.135 0 -0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_e" type="box" pos="0.079 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_f" type="box" pos="0.079 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d1_g" type="box" pos="0.135 0 0.000" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_a" type="box" pos="0.330 0 0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_b" type="box" pos="0.386 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_c" type="box" pos="0.386 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_d" type="box" pos="0.330 0 -0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_e" type="box" pos="0.274 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_f" type="box" pos="0.274 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d2_g" type="box" pos="0.330 0 0.000" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_a" type="box" pos="0.465 0 0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_b" type="box" pos="0.521 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_c" type="box" pos="0.521 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_d" type="box" pos="0.465 0 -0.105" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_e" type="box" pos="0.409 0 -0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_f" type="box" pos="0.409 0 0.053" size="0.009 0.006 0.045" material="seg_off" contype="0" conaffinity="0"/>
+      <geom name="clock_d3_g" type="box" pos="0.465 0 0.000" size="0.052 0.006 0.009" material="seg_off" contype="0" conaffinity="0"/>
+      <!-- The colon between hours and minutes. Always lit; a blinking one would be read as
+           a fault in a still image. -->
+      <geom name="clock_colon_top" type="box" pos="0.322 0 0.035" size="0.009 0.006 0.009"
+            material="seg_on" contype="0" conaffinity="0"/>
+      <geom name="clock_colon_bot" type="box" pos="0.322 0 -0.035" size="0.009 0.006 0.009"
+            material="seg_on" contype="0" conaffinity="0"/>
+
+      <!--
+        Speed, as a row of five pips: one lit is slow, five is fast. A number would need more
+        digits and would be read less quickly than a bar, and the question a viewer has is
+        "is this running, and roughly how fast", not "what is the exact multiplier".
+      -->
+      <geom name="speed_1" type="box" pos="0.10 0 -0.205" size="0.022 0.006 0.012"
+            material="speed_off" contype="0" conaffinity="0"/>
+      <geom name="speed_2" type="box" pos="0.16 0 -0.205" size="0.022 0.006 0.012"
+            material="speed_off" contype="0" conaffinity="0"/>
+      <geom name="speed_3" type="box" pos="0.22 0 -0.205" size="0.022 0.006 0.012"
+            material="speed_off" contype="0" conaffinity="0"/>
+      <geom name="speed_4" type="box" pos="0.28 0 -0.205" size="0.022 0.006 0.012"
+            material="speed_off" contype="0" conaffinity="0"/>
+      <geom name="speed_5" type="box" pos="0.34 0 -0.205" size="0.022 0.006 0.012"
+            material="speed_off" contype="0" conaffinity="0"/>
+    </body>
 
     <!--
       ===== the person =====
