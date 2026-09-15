@@ -27,6 +27,7 @@ import mujoco
 
 from ..sim.household import (
     BATHROOM_CONCERN_MINUTES,
+    MINUTES_PER_DAY,
     STILL_IN_BED_BY_MINUTE,
     PLACES,
     STILL_CONCERN_MINUTES,
@@ -91,6 +92,7 @@ class WatchingSkills:
         self._elapsed_wall = 0.0
         self._elapsed_sim = 0.0
         self._last_tick: float | None = None
+        self._day_index = 0
         self.sensors.show_time(self.minute, speed_pips=self.speed_pips)
 
     # -- the day runs whether or not anyone is asking ------------------------------
@@ -137,6 +139,7 @@ class WatchingSkills:
                 # reads a free joint that does not exist here.
                 mujoco.mj_step(self.sim.model, self.sim.data)
 
+            self._roll_over_at_midnight()
             reading = self.sensors.read(self.minute)
             for room in ("bedroom", "bathroom", "hallway", "living", "kitchen"):
                 self.sensors.show_sensor(room, room == reading.room)
@@ -160,6 +163,26 @@ class WatchingSkills:
             # range this spans is four orders of magnitude and a linear bar would sit at 5.
             self.speed_pips = max(1, min(5, int(math.log10(max(ratio, 1.0)) + 1)))
         return said
+
+    def _roll_over_at_midnight(self) -> None:
+        """Start each day with a clean slate.
+
+        Every "first of the day" here was really a first of the *run*: `_seen_rooms`,
+        `_warned_bathroom`, `_warned_still` and the `got_up` event were set once and never
+        cleared. So from day two the house went silent -- it had already said everything it
+        knew how to say, and a watching system that stops watching after a day is worse than
+        none, because the quiet reads as "nothing wrong".
+        """
+        day = int(self.minute // MINUTES_PER_DAY)
+        if day == self._day_index:
+            return
+        self._day_index = day
+        self._seen_rooms.clear()
+        self._warned_bathroom = False
+        self._warned_still = False
+        # `events` is the diary `today` reads back, so it is emptied with the rest. Anything
+        # worth keeping across days has already been said into the thread.
+        self.events.clear()
 
     def _notice(self, reading) -> str | None:  # noqa: ANN001
         """Decide whether this reading is worth a word in the diary.

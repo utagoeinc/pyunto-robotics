@@ -35,6 +35,8 @@ LYING_PITCH = -0.4
 # Kept for the height test on the bed sensor, which still asks how low the body is.
 LYING_Z = 0.90
 
+MINUTES_PER_DAY = 24 * 60
+
 # How long in the bathroom before it is worth remarking on. Twenty minutes is long for a visit
 # and short enough that a fall would not go unnoticed for an hour. Real systems use something
 # in this range for the same reason.
@@ -289,15 +291,27 @@ class Day:
             (720, "kitchen"),
             (760, "sofa"),
             (900, "bathroom"),   # and stays there
-        ])
+        ], repeats=False)
 
     @classmethod
     def did_not_get_up(cls) -> Day:
         """Still in bed at midday. The quietest emergency there is."""
-        return cls([(0, "bed")])
+        return cls([(0, "bed")], repeats=False)
+
+    # A routine repeats. Without wrapping, `minute` runs past the end of the schedule and
+    # every entry matches, so `place_at` returns the last one forever: from day two she lay
+    # in bed and never moved again. In a system built to notice exactly that, a bug that
+    # fakes it is worse than a crash.
+    #
+    # The two unusual days are deliberately NOT wrapped -- see `repeats`. A long bathroom
+    # visit that quietly resolves itself at midnight, or a morning she does not get up that
+    # she then gets up from, would each unsay the thing the day exists to say.
+    repeats: bool = True
 
     def place_at(self, minute: float) -> str:
         """Where the person is meant to be at this minute."""
+        if self.repeats:
+            minute %= MINUTES_PER_DAY
         place = self.schedule[0][1] if self.schedule else "bed"
         for when, where in self.schedule:
             if minute >= when:

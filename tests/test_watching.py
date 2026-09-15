@@ -187,3 +187,55 @@ def test_the_speed_shown_is_measured_not_declared():
         assert skills.speed_pips >= 4, skills.speed_pips
     finally:
         robot.close()
+
+
+@pytest.mark.slow
+def test_she_still_has_a_life_on_the_second_day():
+    """The routine repeats. It did not, and she lay in bed from day two onward.
+
+    `place_at` took an absolute minute against a schedule covering one day, so once the clock
+    passed midnight every entry matched and it returned the last one -- "bed" -- forever. In a
+    system whose whole purpose is noticing that someone has stopped moving, a bug that fakes
+    it is the worst one available.
+    """
+    robot, skills = flat()
+    try:
+        skills.advance(24 * 60)          # through to day two
+        rooms = set()
+        for _ in range(24 * 60):
+            skills.advance(1)
+            rooms.add(skills.sensors.read(skills.minute).room)
+        assert rooms - {"bedroom"}, f"she never left the bedroom on day two: {rooms}"
+        assert "kitchen" in rooms, f"no meals on day two: {rooms}"
+    finally:
+        robot.close()
+
+
+@pytest.mark.slow
+def test_the_house_keeps_speaking_on_the_second_day():
+    """Every "first of the day" was really a first of the run.
+
+    `_seen_rooms`, the warning flags and the `got_up` event were set once and never cleared,
+    so from day two the house said nothing at all -- and silence from a watching system reads
+    as "nothing is wrong", which is the most dangerous thing it could get wrong.
+    """
+    robot, skills = flat()
+    try:
+        day_one = skills.advance(24 * 60)
+        day_two = skills.advance(24 * 60)
+        assert day_one, "nothing was said on day one"
+        assert day_two, "the house went silent on day two"
+        assert any("she is up" in line for line in day_two), day_two
+    finally:
+        robot.close()
+
+
+@pytest.mark.slow
+def test_an_unusual_day_does_not_quietly_resolve_itself():
+    """A long bathroom visit must not end because midnight came round."""
+    robot, skills = flat(day=Day.long_bathroom())
+    try:
+        skills.advance(26 * 60)          # well past midnight
+        assert skills.sensors.read(skills.minute).room == "bathroom"
+    finally:
+        robot.close()
