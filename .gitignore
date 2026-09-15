@@ -1,4 +1,10 @@
 # Secrets — never commit
+#
+# .robot-data holds identity.json: this robot's X25519 private key, which is what member
+# apps seal space keys to. Committing it would hand anyone who clones the repo the ability
+# to impersonate this robot and read every diary it belongs to. (Same reason pyunto-agent
+# excludes .agent-data.)
+.robot-data/
 .env
 
 # Python
