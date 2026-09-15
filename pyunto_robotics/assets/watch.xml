@@ -49,15 +49,20 @@
     <material name="person_body" rgba="0.88 0.42 0.30 1" specular="0.15"/>
     <material name="person_head" rgba="0.90 0.76 0.65 1" specular="0.15"/>
     <material name="person_hair" rgba="0.88 0.88 0.86 1" specular="0.10"/>
-    <material name="person_legs" rgba="0.38 0.40 0.48 1" specular="0.10"/>
+    <!--
+      Dark green, not blue-grey. The legs were (0.38,0.40,0.48) and the bed (0.55,0.60,0.68)
+      -- near enough the same colour that someone lying down appeared to have no legs at all,
+      which is a poor look for a demonstration about watching a person.
+    -->
+    <material name="person_legs" rgba="0.24 0.32 0.22 1" specular="0.10"/>
 
     <!--
       Sensor volumes, translucent. They are drawn because a demonstration of watching should
       show what is being watched; an invisible sensor teaches nobody anything. Each lights up
       in the viewer when it fires (the skill swaps the material).
     -->
-    <material name="pir_idle" rgba="0.35 0.65 0.90 0.13"/>
-    <material name="pir_fired" rgba="1.00 0.72 0.15 0.40" emission="0.45"/>
+    <material name="pir_idle" rgba="0.35 0.62 0.88 0.30"/>
+    <material name="pir_fired" rgba="1.00 0.70 0.10 0.85" emission="0.6"/>
     <material name="lamp_off" rgba="0.35 0.35 0.36 1" specular="0.2"/>
     <material name="lamp_on" rgba="1.0 0.93 0.62 1" emission="0.95" specular="0.4"/>
   </asset>
@@ -121,16 +126,27 @@
       person's centre is inside these boxes, which is what a PIR sensor's cone amounts to and
       is far more robust than counting contacts with furniture.
     -->
-    <geom name="pir_bedroom" type="box" pos="-1.5 1.4 0.9" size="1.4 2.0 0.9" material="pir_idle"
-          contype="0" conaffinity="0"/>
-    <geom name="pir_bathroom" type="box" pos="2.4 2.6 0.9" size="1.2 0.9 0.9" material="pir_idle"
-          contype="0" conaffinity="0"/>
-    <geom name="pir_living" type="box" pos="4.3 -0.8 0.9" size="2.0 2.6 0.9" material="pir_idle"
-          contype="0" conaffinity="0"/>
-    <geom name="pir_kitchen" type="box" pos="7.9 0.4 0.9" size="1.1 3.0 0.9" material="pir_idle"
-          contype="0" conaffinity="0"/>
-    <geom name="pir_hallway" type="box" pos="1.2 -1.4 0.9" size="1.2 2.0 0.9" material="pir_idle"
-          contype="0" conaffinity="0"/>
+    <!--
+      Flat pads on the floor, not boxes filling the room.
+
+      As full-height volumes they were translucent sheets laid over the whole flat, and
+      looking down through five of them at once made the furniture and the person hard to
+      see -- the very thing the window is for. A pad lights up just as clearly and hides
+      nothing.
+
+      The sensors still read the room as a volume: the code tests the person's position
+      against `pir_*` half-sizes, and those are set below to the room rather than to the pad.
+    -->
+    <geom name="pir_bedroom" type="box" pos="-1.5 1.4 0.012" size="1.4 2.0 0.012"
+          material="pir_idle" contype="0" conaffinity="0"/>
+    <geom name="pir_bathroom" type="box" pos="2.4 2.6 0.012" size="1.2 0.9 0.012"
+          material="pir_idle" contype="0" conaffinity="0"/>
+    <geom name="pir_living" type="box" pos="4.3 -0.8 0.012" size="2.0 2.6 0.012"
+          material="pir_idle" contype="0" conaffinity="0"/>
+    <geom name="pir_kitchen" type="box" pos="7.9 0.4 0.012" size="1.1 3.0 0.012"
+          material="pir_idle" contype="0" conaffinity="0"/>
+    <geom name="pir_hallway" type="box" pos="1.2 -1.4 0.012" size="1.2 2.0 0.012"
+          material="pir_idle" contype="0" conaffinity="0"/>
 
     <!--
       ===== the person =====

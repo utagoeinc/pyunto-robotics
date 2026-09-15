@@ -113,7 +113,10 @@ class HouseholdSensors:
         for name, geom in self._volumes.items():
             centre = self.data.geom_xpos[geom]
             half = self.model.geom_size[geom]
-            if bool(np.all(np.abs(position - centre) <= half)):
+            # Footprint only. The markers are flat pads on the floor so they do not obscure
+            # the room from above, and testing their height would mean nobody is ever in
+            # range -- a PIR sensor covers a room's floor area, not a 12 mm slab of air.
+            if bool(np.all(np.abs(position[:2] - centre[:2]) <= half[:2])):
                 room = name
                 break
 
