@@ -88,6 +88,34 @@ Add `--no-photos` to report in words only.
 
 ---
 
+## Understanding what you wrote
+
+Out of the box the robots match keywords, which works for the phrasings somebody thought to
+list and fails for everything else. Told 「日が当たるところに移動して」 the matcher went looking
+for a landmark named "日が当たるところに移動して", because the sentence says "move to" rather
+than "search for" and only the latter was in the table. Every such failure needs another
+pattern, and there is no end to them.
+
+A local language model reads the sentence instead:
+
+```bash
+python scripts/download_model.py          # Gemma 4 E2B, about 5.5 GB, once
+pyunto-robotics demo --robot solar --llm
+```
+
+```
+「そろそろ電気が足りないかも」  ->  find_sun -> goto(park)
+```
+
+No keyword list contains that. The model runs on your machine, so the diary is not sent
+anywhere to be understood.
+
+Apple Silicon only, which is why `--llm` is a flag rather than the default. Everywhere else
+the keyword matcher is still there, and a model that fails to load falls back to it rather
+than stopping the robot.
+
+---
+
 ## Bringing your own robot
 
 The SDK is not four robots; it is a way to attach *any* robot to a diary. One class, one method:
