@@ -7,6 +7,10 @@
 .robot-data/
 .env
 
+# MuJoCo writes this wherever it is run from, and appends to it on every launch. A tracked
+# copy is a file that changes on every developer's machine for no reason anyone cares about.
+MUJOCO_LOG.TXT
+
 # Python
 .venv/
 __pycache__/
