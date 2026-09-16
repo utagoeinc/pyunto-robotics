@@ -5,15 +5,10 @@ Message a robot from the Pyunto mobile app, and watch it act.
 [**Pyunto for iPhone and iPad**](https://apps.apple.com/app/id6755097890) ·
 [**Pyunto for Android**](https://play.google.com/store/apps/details?id=com.pyunto.app)
 
-```bash
-pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
-pyunto-robotics showqr
-```
-
-Scan the square that appears with the Pyunto app. A window opens on a robot parked in a
-carport with a solar panel on its back; write "go and find some sunlight, and bring back
-power" in the diary on your phone, and it drives out, finds sunlight by measuring what the panel
-receives, charges, comes home, and turns the house lights on with what it collected.
+Install it, scan a square with the app, and a window opens on a robot parked in a carport with
+a solar panel on its back. Write "go and find some sunlight, and bring back power" in the diary
+on your phone, and it drives out, finds sunlight by measuring what the panel receives, charges,
+comes home, and turns the house lights on with what it collected.
 
 The robot runs on **your** computer. Pyunto never sees the room, the camera, or anything the
 robot does — the diary is end-to-end encrypted, and decryption happens on your machine.
@@ -305,11 +300,8 @@ it automatically, so the command above works as typed.
 
 ### Installing
 
-Neither package is published to PyPI yet, so both come from git:
-
-```bash
-pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
-```
+Neither package is published to PyPI yet, so both come from git — that is the line in
+[Quick start](#quick-start), and it brings `pyunto-agent` with it.
 
 The `[llm]` extra is what lets the robot read sentences rather than match commands, and it
 installs nothing at all off Apple silicon, so the same line is safe everywhere. Drop it if you
