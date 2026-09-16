@@ -78,7 +78,7 @@ def _understanding(command_mode: bool) -> bool:
     except ImportError:
         print("note    : the local model is not installed, so this robot is matching commands")
         print("          instead of reading sentences. To let it read what you write:")
-        print("              python scripts/download_model.py")
+        print("              python -m pyunto_robotics.download_model")
         return False
     return True
 

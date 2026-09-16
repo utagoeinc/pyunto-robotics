@@ -3,7 +3,7 @@
 Message a robot from the Pyunto diary app, and watch it act.
 
 ```bash
-pip install pyunto-robotics
+pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
 pyunto-robotics showqr
 ```
 
@@ -22,10 +22,13 @@ robot does — the diary is end-to-end encrypted, and decryption happens on your
 Three commands, and the only thing to remember is the first one.
 
 ```bash
-pip install pyunto-robotics
-python scripts/download_model.py     # so the robot reads what you write (once, ~5.5 GB)
-pyunto-robotics showqr               # a square appears in the terminal
+pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
+python -m pyunto_robotics.download_model   # so the robot reads what you write (~5.5 GB, once)
+pyunto-robotics showqr                     # a square appears in the terminal
 ```
+
+Not on PyPI yet, so the install comes from git — one command either way. It brings
+`pyunto-agent` with it.
 
 Scan that square with the Pyunto app. The app asks which diary to let the robot into and shows
 who runs it; when you approve, **the robot opens by itself** — no second command, nothing to
@@ -86,7 +89,7 @@ phrasings somebody thought to write down, and every miss needs another pattern, 
 language the product ships in. There is no end to that table.
 
 The model runs on your machine, so the diary is never sent anywhere to be understood. This is
-the default and needs no flag — run `python scripts/download_model.py` once.
+the default and needs no flag — run `python -m pyunto_robotics.download_model` once.
 
 It needs Apple silicon. Everywhere else, and until that download has run, the robot matches
 commands instead and says so in one line at startup rather than refusing to open.
@@ -212,20 +215,36 @@ After `pip install acme-robot`, `pyunto-robotics demo --robot acme` works with n
 ## Requirements
 
 - macOS on Apple silicon (Windows and Linux are not verified yet)
-- Python 3.11 or newer
+- Python 3.11 or newer — but not 3.13+ if you want the language model, which `mlx-vlm` does
+  not build for yet
 - The Pyunto app, and a premium space to invite the robot into
 
 The simulator window is owned by `mjpython` on macOS; `pyunto-robotics` re-executes itself under
 it automatically, so the command above works as typed.
 
-Optional extras:
+### Installing
+
+Neither package is published to PyPI yet, so both come from git:
 
 ```bash
-pip install 'pyunto-robotics[llm]'   # plan with a local language model (Apple silicon)
+pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
 ```
 
-Without it, instructions are understood by rule matching in English and Japanese, which covers
-the examples above and needs no model download.
+The `[llm]` extra is what lets the robot read sentences rather than match commands, and it
+installs nothing at all off Apple silicon, so the same line is safe everywhere. Drop it if you
+only ever want [command mode](#command-mode):
+
+```bash
+pip install 'pyunto-robotics @ git+https://github.com/utagoeinc/pyunto-robotics'
+```
+
+To work on the SDK itself, clone it and install in place:
+
+```bash
+git clone https://github.com/utagoeinc/pyunto-robotics
+cd pyunto-robotics
+python3 -m venv .venv && .venv/bin/pip install -e '.[llm,dev]'
+```
 
 ---
 

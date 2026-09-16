@@ -9,7 +9,11 @@ dependencies = [
     # Pyunto transport, E2EE identity and the message bridge. Deliberately a dependency rather
     # than a copy: an earlier vendored copy went stale and could not read spaces created after
     # August 2026. requests / socketio / cryptography / dotenv all arrive through this.
-    "pyunto-agent>=0.1",
+    #
+    # Fetched from git because neither package is on PyPI yet. A bare "pyunto-agent>=0.1" is
+    # unresolvable -- pip cannot find it anywhere -- so every install failed here, including
+    # `pip install git+...` of this repo. When both are published, this becomes a version.
+    "pyunto-agent @ git+https://github.com/utagoeinc/pyunto-agent@main",
     # Simulation
     "mujoco>=3.11.0",
     "numpy>=2.0",
@@ -47,6 +51,12 @@ pyunto-robotics = "pyunto_robotics.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# Required for the git dependency above. Hatch refuses direct references unless asked,
+# which is the right default -- a URL in a dependency list cannot be resolved by a version
+# solver -- but it is what we need until both packages are on PyPI.
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["pyunto_robotics"]
