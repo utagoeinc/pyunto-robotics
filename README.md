@@ -296,14 +296,42 @@ The full contract, including the optional `RobotBody` interface for reusing our 
 door-opening skills on your own machine, is documented in
 [`pyunto_robotics/api.py`](pyunto_robotics/api.py).
 
-To ship your robot as a package others can install, declare an entry point:
+### Shipping it as a package
+
+The above is enough to run your own robot. If you want *other people* to install it and have
+`pyunto-robotics` find it on its own, declare an entry point in your package's
+`pyproject.toml`:
 
 ```toml
+# In YOUR package's pyproject.toml, not this one.
 [project.entry-points."pyunto_robotics.robots"]
-acme = "acme_robot:setup"
+warehouse-agv = "mycompany.agv:setup"
 ```
 
-After `pip install acme-robot`, `pyunto-robotics demo --robot acme` works with no change here.
+Three parts:
+
+| | |
+|---|---|
+| `warehouse-agv` | what `--robot` will be called |
+| `mycompany.agv` | the module it lives in |
+| `setup` | a `RobotSetup`, or anything callable that returns one |
+
+Then, on any machine where both are installed:
+
+```bash
+pip install mycompany-agv
+pyunto-robotics robots              # warehouse-agv is in the list
+pyunto-robotics demo --robot warehouse-agv
+```
+
+Nothing in this repository changes. `pyunto-robotics` asks Python which packages have declared
+themselves under `pyunto_robotics.robots` and registers whatever it finds, so your robot sits
+alongside the bundled six. A plugin that fails to load is logged and skipped rather than
+taking the others down with it.
+
+`RobotSetup` is the small record that says what your robot is called, which scene to open (or
+none, for real hardware), and which skills to use — see
+[`pyunto_robotics/registry.py`](pyunto_robotics/registry.py).
 
 ---
 
