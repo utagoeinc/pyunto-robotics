@@ -321,7 +321,6 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_demo(
             robot_name=robot_name,
-            pair=None,
             use_llm=_understanding(args.command_mode),
             view=not args.no_window,
             speed=args.speed,
@@ -334,7 +333,6 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_demo(
             robot_name=args.robot,
-            pair=None,
             use_llm=_understanding(args.command_mode or bool(args.commands)),
             commands=args.commands,
             view=args.view,

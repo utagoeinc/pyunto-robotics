@@ -7,10 +7,11 @@ is handled for you.
 
 Run it:
 
-    pip install pyunto-robotics
-    python examples/my_robot.py --pair K3F9QZ      # code from the Pyunto app
+    pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
+    python examples/my_robot.py
 
-Then write "go to the door" in that diary from your phone.
+A QR code appears. Scan it with the Pyunto app, choose a diary, and the robot starts
+listening -- then write "go to the door" in that diary from your phone.
 
 Swap the bodies of these methods for calls into your own control stack -- ROS, a vendor SDK, a
 serial link, another simulator -- and the diary is talking to your machine instead of ours.
@@ -22,6 +23,7 @@ import argparse
 import sys
 
 from pyunto_agent.bridge import Bridge
+from pyunto_agent.pairing import encode_payload, pairing_payload, render_qr, wait_for_scan
 
 from pyunto_robotics.api import SkillResult
 from pyunto_robotics.backend import RobotBackend
@@ -60,18 +62,35 @@ class MyRobot:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--pair", help="pairing code from the Pyunto app")
-    args = ap.parse_args()
+    argparse.ArgumentParser(description=__doc__.split("\n")[0]).parse_args()
 
     connection = connect(display_name="My Robot")
     print(f"robot: {connection.identity.display_name} ({connection.user_id})")
 
-    space_id = None
-    if args.pair:
-        space_id = connection.client.join(args.pair)
-        print(f"joined space {space_id}")
-        print("Open that space in the Pyunto app once so the robot is given the key.")
+    # Pairing is a square somebody scans. Drawing it and waiting is the whole handshake:
+    # scanning IS the approval, so there is nothing else to type at either end.
+    payload = pairing_payload(
+        user_id=connection.user_id,
+        display_name=connection.identity.display_name,
+        public_key=connection.identity_store.public_key_b64,
+        operator="",
+        runtime="self_hosted",
+    )
+    print()
+    print(render_qr(encode_payload(payload)) or encode_payload(payload))
+    print()
+    print(f"Scan this in the Pyunto app to let {connection.identity.display_name} into a diary.")
+    print("waiting for the scan… (Ctrl-C to stop)")
+    try:
+        space_id = wait_for_scan(connection.client)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        return 0
+    if space_id is None:
+        print("Nobody scanned it. Run this again when you are ready.")
+        return 1
+    print("paired ✓")
+    print("Open that space in the Pyunto app once so the robot is given the key.")
 
     # A robot is a Bridge backend whose "reply" is "do it, then report".
     # RobotBackend expects anything with `.execute(text) -> something with .reply()`, which is

@@ -38,21 +38,6 @@ GREETING = (
 )
 
 
-def _already_paired(connection: Connection) -> str | None:
-    """The shared space this robot is already in, if any.
-
-    Pairing codes are consumed on use. Restarting a robot -- which happens constantly during
-    a demo -- therefore presents a spent code, and the honest answer to "this code is used
-    up" is usually "because you already did this".
-    """
-    try:
-        spaces = connection.client.list_spaces()
-    except Exception:  # noqa: BLE001
-        return None
-    shared = [s for s in spaces if not (s.get("is_self") or s.get("isSelf"))]
-    return str(shared[0].get("uuid")) if shared else None
-
-
 def _wait_for_key(connection: Connection, space_id: str, timeout: float = 300.0) -> bool:
     """Wait until a member's app has sealed the space key for this robot.
 
@@ -77,7 +62,6 @@ def _wait_for_key(connection: Connection, space_id: str, timeout: float = 300.0)
 
 def run_demo(
     robot_name: str = "solar",
-    pair: str | None = None,
     use_llm: bool = False,
     commands: str | None = None,
     view: bool = True,
@@ -106,40 +90,16 @@ def run_demo(
     print(f"done ({connection.identity.display_name})")
 
     space_id: str | None = None
-    if pair:
-        print(f"pairing : joining with code {pair}…", end=" ", flush=True)
-        try:
-            # The client logs a failed join at ERROR. Here a failure is usually just "you
-            # already did this", so a red ERROR line is a false alarm; we decide below what
-            # this actually means and say so.
-            client_log = logging.getLogger("pyunto_agent.client")
-            previous_level = client_log.level
-            client_log.setLevel(logging.CRITICAL)
-            try:
-                space_id = connection.client.join(pair)
-            finally:
-                client_log.setLevel(previous_level)
-            print("joined")
-        except Exception as e:  # noqa: BLE001 - a wrong code is a user error, not a crash
-            # A pairing code is single-use, so the second run of the same robot always fails
-            # here -- and it fails with "invalid or expired", which sends the person back to
-            # the app to make a code they did not need. If the robot is already in a shared
-            # space, that is what the code was for: carry on.
-            space_id = _already_paired(connection)
-            if space_id is None:
-                print(f"\nERROR: could not join with that code ({e}).")
-                print("        Codes expire after 10 minutes — make a new one in the app.")
-                return 1
-            print("already a member (that code was already used)")
+    spaces = [
+        s for s in connection.client.list_spaces()
+        if not (s.get("is_self") or s.get("isSelf"))
+    ]
+    if spaces:
+        space_id = str(spaces[0].get("uuid"))
+        print(f"pairing : already a member of \"{spaces[0].get('name')}\"")
     else:
-        spaces = [s for s in connection.client.list_spaces() if not (s.get("is_self") or s.get("isSelf"))]
-        if spaces:
-            space_id = str(spaces[0].get("uuid"))
-            print(f"pairing : already a member of \"{spaces[0].get('name')}\"")
-        else:
-            print("pairing : not in any shared space yet.")
-            print("          In the Pyunto app open a premium space, choose \"Invite a robot\",")
-            print("          then run:  pyunto-robotics showqr")
+        print("pairing : not in any shared space yet.")
+        print("          Run `pyunto-robotics showqr` and scan the square with the app.")
 
     # A robot without a scene has no body to simulate.
     #
