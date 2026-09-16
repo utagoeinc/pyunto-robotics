@@ -251,6 +251,12 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print("paired ✓")
         _print_what_to_try(args.robot)
+        # Both of these belong to opening a robot, and `showqr` opens one now. Importing
+        # inside the `demo` branch left this path calling a name that did not exist, and
+        # skipping the re-exec would have opened no window on macOS even once it did.
+        _reexec_under_mjpython_if_needed(not args.no_window)
+        from .demo import run_demo
+
         return run_demo(
             robot_name=args.robot,
             pair=None,
