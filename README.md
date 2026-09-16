@@ -292,8 +292,8 @@ handling, planning and replies; you write what your machine does. It works for r
 for another simulator (Newton, Isaac, Gazebo), or for a robot that is only an HTTP API.
 
 A runnable version is in [`examples/my_robot.py`](examples/my_robot.py) — about forty lines.
-The full contract, including the optional `RobotBody` interface for reusing our navigation and
-door-opening skills on your own machine, is documented in
+The full contract, including the optional `RobotBody` interface for driving your own machine
+with our mapless navigation, is documented in
 [`pyunto_robotics/api.py`](pyunto_robotics/api.py).
 
 ### Shipping it as a package

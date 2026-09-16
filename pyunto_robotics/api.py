@@ -10,15 +10,15 @@ There are two ways in, and you almost certainly want the first.
    handling, planning and replies for free; you write what your robot does when told to do
    something. This works for any robot at all, because we never touch your machine.
 
-2. Implement `RobotBody` as well, if you want to reuse *our* skills (door opening, mapless
-   navigation, patrol routes) on your own hardware. Narrower and more demanding, because our
-   skills assume a mobile base with a camera.
+2. Implement `RobotBody` as well, if you want to reuse *our* skills -- mapless navigation
+   above all: driving to a landmark found by looking, with no map. Narrower and more
+   demanding, because those skills assume a mobile base with a camera.
 
 A worked example of (1) is in `examples/my_robot.py` -- about forty lines.
 
 Design notes worth knowing before you implement:
 
-* **Failing is normal and is reported, not raised.** "I could not find the door" is a perfectly
+* **Failing is normal and is reported, not raised.** "I could not find the crate" is a perfectly
   good answer to send a person; a traceback is not. Return `SkillResult(ok=False, message=...)`.
 * **The message is read by a human**, in a diary, on a phone. Write sentences, not status codes.
 * **You are called on the main thread**, one message at a time, and you may block for as long
@@ -59,7 +59,7 @@ __all__ = [
 class RobotSkills(Protocol):
     """What your robot can do. The main way to attach a robot.
 
-    One method. It is called once per step of a plan; a message like "go to the door and open
+    One method. It is called once per step of a plan; a message like "fetch the crate and take
     it" becomes two calls. Unknown actions should return a failure rather than raise.
 
     An optional `actions` attribute -- a sequence of the verbs you handle -- is used when the
@@ -89,7 +89,7 @@ class RobotSkills(Protocol):
 
         Args:
             action: the verb, e.g. "goto", "open", "describe".
-            argument: what it acts on, e.g. "door", "sample". May be None for verbs like "home".
+            argument: what it acts on, e.g. "crate", "sample". May be None for verbs like "home".
             where: a spatial qualifier the speaker used, e.g. "right", "far". May be None.
             expect: how many of something the speaker said there were, when they said it.
 
