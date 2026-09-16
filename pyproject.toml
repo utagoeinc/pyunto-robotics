@@ -13,7 +13,11 @@ dependencies = [
     # Fetched from git because neither package is on PyPI yet. A bare "pyunto-agent>=0.1" is
     # unresolvable -- pip cannot find it anywhere -- so every install failed here, including
     # `pip install git+...` of this repo. When both are published, this becomes a version.
-    "pyunto-agent @ git+https://github.com/utagoeinc/pyunto-agent@main",
+    # The [qr] extra is not optional here. `showqr` is the documented first step -- the whole
+    # flow is "scan this square" -- and without qrcode it prints a JSON blob instead, which
+    # cannot be scanned by anything. An extra is right for the agent, where pairing is one
+    # feature among several; for the robot SDK it is the way in.
+    "pyunto-agent[qr] @ git+https://github.com/utagoeinc/pyunto-agent@main",
     # Simulation
     "mujoco>=3.11.0",
     "numpy>=2.0",

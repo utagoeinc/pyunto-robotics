@@ -184,8 +184,15 @@ def main(argv: list[str] | None = None) -> int:
         if qr:
             print(qr)
         else:
-            print("(install the 'qr' extra to draw this as a scannable square:")
-            print("     pip install 'pyunto-agent[qr]')")
+            # An install from before qrcode became a hard dependency. Say how to repair it
+            # in one line, and print the payload underneath so the session is not wasted --
+            # the app cannot scan it, but it proves the robot got this far.
+            print("The QR code needs `qrcode`, which this environment does not have:")
+            print()
+            print("    pip install qrcode")
+            print()
+            print("Then run `pyunto-robotics showqr` again. The raw pairing payload is")
+            print("below; it is what the square would encode, and nothing in it is secret.")
             print()
             print(text)
         print()
