@@ -40,29 +40,24 @@ log = logging.getLogger(__name__)
 # somewhere convenient for the robot. Each entry says where to park, where to aim, and what
 # to call the place in a message.
 #
-# Measure through the REAL path -- drive there, then sweep -- never by teleporting and
-# aiming. Teleporting sets yaw to zero and skips the body turn, and every viewpoint measured
-# that way scored well and then failed in use: `_aim_at` turns the body, which moves the robot
-# off the very spot being measured. That mismatch cost most of the time spent on this scene.
-#
-#   key: (stand_x, stand_y, aim_x, aim_y, aim_z, name_ja)
-# The standing positions are MEASURED, not chosen by eye: the robot was teleported over a
-# grid, aimed through its real pan/tilt head at each place, and the spot that saw the most cat
-# was kept. Measuring through the actual head matters -- an earlier pass used a free camera
-# placed at the cat's head, which flattered every viewpoint and produced numbers the robot
-# could not reproduce.
+# The standing positions are MEASURED, not chosen by eye: the robot was driven to each point
+# of a grid, aimed through its real pan/tilt head, and the spot that saw the most cat was kept.
+# Measure through the real path -- drive there, then sweep -- never by teleporting and aiming.
+# Teleporting sets yaw to zero and skips the body turn, and every viewpoint measured that way
+# scored well and then failed in use: `_aim_at` turns the body, which moves the robot off the
+# very spot being measured.
 #
 # The first set was picked off the plan (stand a metre away, facing it) and every one failed:
 # from close and square on, the sill slab, the cradle rim and the shelf edge each hide exactly
 # the surface the cat is lying on. Standing back and to one side is what works.
 #
-#   key: (stand_x, stand_y, aim_x, aim_y, aim_z, name_ja)
+#   key: (stand_x, stand_y, aim_x, aim_y, aim_z, name)
 HAUNTS: dict[str, tuple[float, float, float, float, float, str]] = {
-    "sill":   ( 2.20, -2.20,  1.60, -2.45, 0.76, "窓辺の日なた"),
-    "tree":   ( 2.60, -1.40,  3.07, -1.90, 1.12, "キャットタワー"),
-    "shelf":  (-0.20,  1.80,  0.20,  2.37, 1.72, "本棚の上"),
-    "sofa":   ( 0.60, -0.60, -1.03,  0.40, 0.14, "ソファの下"),
-    "bowls":  ( 4.40,  0.60,  4.40, -0.60, 0.10, "ごはんのところ"),
+    "sill":   ( 2.20, -2.20,  1.60, -2.45, 0.76, "the sunny windowsill"),
+    "tree":   ( 2.60, -1.40,  3.07, -1.90, 1.12, "the cat tree"),
+    "shelf":  (-0.20,  1.80,  0.20,  2.37, 1.72, "the top of the bookshelf"),
+    "sofa":   ( 0.60, -0.60, -1.03,  0.40, 0.14, "under the sofa"),
+    "bowls":  ( 4.40,  0.60,  4.40, -0.60, 0.10, "her food and water"),
 }
 
 
@@ -179,16 +174,16 @@ class PetWatchSkills:
     def pan(self, argument: str | None = None) -> SkillResult:
         """Turn the camera left or right, in degrees or by word."""
         delta = self._degrees(argument, default=30.0)
-        if argument and any(w in str(argument) for w in ("左", "left")):
+        if argument and any(w in str(argument) for w in ("left",)):
             delta = abs(delta)
-        elif argument and any(w in str(argument) for w in ("右", "right")):
+        elif argument and any(w in str(argument) for w in ("right",)):
             delta = -abs(delta)
         self._pan += math.radians(delta)
         self._apply_head()
-        side = "左" if delta > 0 else "右"
+        side = "left" if delta > 0 else "right"
         return SkillResult(
             True,
-            f"カメラを{side}に{abs(delta):.0f}度向けました。",
+            f"I turned the camera {abs(delta):.0f} degrees to the {side}.",
             {"pan_deg": round(math.degrees(self._pan), 1)},
         )
 
@@ -199,13 +194,13 @@ class PetWatchSkills:
         +y and the camera looks along +x. Converted here so no caller has to know that.
         """
         degrees = self._degrees(argument, default=20.0)
-        up = bool(argument) and any(w in str(argument) for w in ("上", "up"))
+        up = bool(argument) and any(w in str(argument) for w in ("up",))
         self._tilt += -math.radians(degrees) if up else math.radians(degrees)
         self._apply_head()
-        where = "上" if up else "下"
+        where = "up" if up else "down"
         return SkillResult(
             True,
-            f"カメラを{where}に{degrees:.0f}度向けました。",
+            f"I tilted the camera {degrees:.0f} degrees {where}.",
             {"tilt_deg": round(math.degrees(self._tilt), 1)},
         )
 
@@ -402,7 +397,7 @@ class PetWatchSkills:
                 self._last_seen = key
                 return SkillResult(
                     True,
-                    f"🐱 {name}にいました。カメラを向けています。",
+                    f"🐱 She is {name}. I have the camera on her.",
                     {"where": key, "where_ja": name, "frame_fraction": round(fraction, 4),
                      "tried": tried},
                 )
@@ -411,15 +406,15 @@ class PetWatchSkills:
             # any of her usual places" would send them home.
             return SkillResult(
                 False,
-                "カメラが動かなくなりました。猫ちゃんがいないのではなく、"
-                "私が見られなくなっています。",
+                "My camera has stopped working. It is not that she is missing — "
+                "it is that I cannot see.",
                 {"where": None, "camera_failed": True},
             )
         return SkillResult(
             True,
-            "見つけられませんでした。"
-            + "、".join(tried)
-            + "を見ましたが、どこにもいません。別の場所を指定してください。",
+            "I could not find her. I looked at "
+            + ", ".join(tried)
+            + ", and she is in none of them. Tell me somewhere else to look.",
             {"where": None, "tried": tried},
             fatal=False,
         )
@@ -430,17 +425,17 @@ class PetWatchSkills:
         if key is None:
             return SkillResult(
                 False,
-                "どこへ行けばいいか分かりませんでした。"
-                + "、".join(h[5] for h in HAUNTS.values())
-                + "、ドックのいずれかを指定してください。",
+                "I did not understand where to go. Try one of: "
+                + ", ".join(h[5] for h in HAUNTS.values())
+                + ", or the dock.",
             )
         if key == "home":
             return self.home()
         sx, sy, ax, ay, az, name = HAUNTS[key]
         if not self._drive_to(sx, sy):
-            return SkillResult(False, f"{name}まで行けませんでした。何かに阻まれています。")
+            return SkillResult(False, f"I could not get to {name}. Something is in the way.")
         self._aim_at(ax, ay, az)
-        return SkillResult(True, f"{name}に来て、カメラを向けました。", {"where": key})
+        return SkillResult(True, f"I am at {name}, with the camera pointed at it.", {"where": key})
 
     def home(self, _argument: str | None = None) -> SkillResult:
         """Go back to the dock."""
@@ -449,7 +444,7 @@ class PetWatchSkills:
         self._apply_head()
         return SkillResult(
             arrived,
-            "ドックに戻りました。" if arrived else "ドックに戻れませんでした。",
+            "I am back on the dock." if arrived else "I could not get back to the dock.",
             {"docked": arrived},
         )
 
@@ -472,11 +467,11 @@ class PetWatchSkills:
                 empty.append(name)
         lines = []
         if seen:
-            lines.append("🐱 " + "、".join(seen) + "にいました。")
+            lines.append("🐱 She is " + ", ".join(seen) + ".")
         if empty:
-            lines.append("（" + "、".join(empty) + "は空でした）")
+            lines.append("(nothing at " + ", ".join(empty) + ")")
         if not seen:
-            lines.append("どこにも見当たりませんでした。")
+            lines.append("I could not see her anywhere.")
         return SkillResult(True, "\n".join(lines),
                            {"seen": seen, "empty": empty})
 
@@ -484,11 +479,11 @@ class PetWatchSkills:
         """Is she in view right now, without moving?"""
         fraction = self._cat_in_frame()
         if fraction >= SEEN_FRACTION:
-            return SkillResult(True, "🐱 いまカメラに写っています。",
+            return SkillResult(True, "🐱 She is in view right now.",
                                {"visible": True, "frame_fraction": round(fraction, 4)})
         return SkillResult(
             True,
-            "いまは写っていません。「探して」と言っていただければ見に行きます。",
+            "Not at the moment. Say \"find her\" and I will go and look.",
             {"visible": False},
             fatal=False,
         )
@@ -500,8 +495,8 @@ class PetWatchSkills:
         photograph with no caption is the thing owners complain about in pet cameras.
         """
         fraction = self._cat_in_frame()
-        caption = ("🐱 写っています。" if fraction >= SEEN_FRACTION
-                   else "いまの視界です（猫は写っていません）。")
+        caption = ("🐱 She is in this one." if fraction >= SEEN_FRACTION
+                   else "This is what I can see (no cat in it).")
         return SkillResult(True, caption,
                            {"image": "head_cam", "visible": fraction >= SEEN_FRACTION})
 
@@ -509,14 +504,14 @@ class PetWatchSkills:
         """Aim at a named place without driving to it."""
         key = self._place_in(where or argument)
         if key is None or key == "home":
-            return SkillResult(False, "どこを見ればいいか分かりませんでした。")
+            return SkillResult(False, "I did not understand where to look.")
         _sx, _sy, ax, ay, az, name = HAUNTS[key]
         fraction = self._sweep_for_cat(ax, ay, az)
         if fraction >= SEEN_FRACTION:
             self._last_seen = key
-            return SkillResult(True, f"🐱 {name}に向けました。写っています。",
+            return SkillResult(True, f"🐱 Camera on {name} — she is there.",
                                {"where": key, "visible": True})
-        return SkillResult(True, f"{name}に向けましたが、いません。",
+        return SkillResult(True, f"Camera on {name}, but she is not there.",
                            {"where": key, "visible": False}, fatal=False)
 
     @staticmethod
@@ -529,12 +524,12 @@ class PetWatchSkills:
             if key in lowered:
                 return key
         for key, words in (
-            ("sofa", ("ソファ", "そふぁ", "sofa", "couch")),
-            ("sill", ("窓", "まど", "日なた", "ひなた", "window", "sill", "sun")),
-            ("tree", ("タワー", "キャットタワー", "tower", "cat tree", "tree")),
-            ("shelf", ("本棚", "棚", "ほんだな", "shelf", "bookshelf")),
-            ("bowls", ("ごはん", "ご飯", "えさ", "餌", "水", "food", "bowl", "water")),
-            ("home", ("ドック", "どっく", "dock", "home", "戻", "帰")),
+            ("sofa", ("sofa", "couch", "settee")),
+            ("sill", ("windowsill", "window", "sill", "sun", "sunny")),
+            ("tree", ("cat tree", "tower", "tree", "post")),
+            ("shelf", ("bookshelf", "shelf", "bookcase")),
+            ("bowls", ("bowl", "bowls", "food", "water", "dish", "feeding")),
+            ("home", ("dock", "home", "back", "charger")),
         ):
             if any(w in lowered or w in str(text) for w in words):
                 return key
@@ -559,10 +554,10 @@ class PetWatchSkills:
             "go": lambda: self.go(argument, where),
             "home": lambda: self.home(argument),
             "check": lambda: self.check(argument),
-            "report": lambda: SkillResult(True, argument or "はい。"),
+            "report": lambda: SkillResult(True, argument or "All right."),
         }
         handler = handlers.get(action)
         if handler is None:
-            return SkillResult(False, f"'{action}' はできません。")
+            return SkillResult(False, f"I cannot '{action}'.")
         log.info("skill: %s(%s)", action, argument or "")
         return handler()

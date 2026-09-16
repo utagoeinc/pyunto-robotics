@@ -2,16 +2,16 @@
 """Fetch the language model the robots use to understand what you wrote.
 
 Without it the robots match keywords, which works for the phrasings somebody thought to list
-and fails for everything else. Asked 「日が当たるところに移動して」 the keyword matcher went
-looking for a landmark called "日が当たるところに移動して", because the phrase says "move to"
-rather than "search for" and only the latter was in the table. Every such failure needs a new
-pattern, and there is no end to them.
+and fails for everything else. Asked to "move somewhere sunny" the keyword matcher went
+looking for a landmark called "somewhere sunny", because the phrase says "move to" rather than
+"search for" and only the latter was in the table. Every such failure needs a new pattern, and
+there is no end to them -- least of all across languages.
 
-With the model, the robot reads the sentence. 「そろそろ電気が足りないかも」 -- "I think we're
-running low on power" -- becomes an errand to go and fetch some, and no list contains that.
+With the model, the robot reads the sentence. "I think we're running low on power" becomes an
+errand to go and fetch some, and no list contains that.
 
-    python scripts/download_model.py          # about 5.5 GB, once
-    pyunto-robotics demo --robot solar --llm  # then use it
+    python scripts/download_model.py     # about 5.5 GB, once
+    pyunto-robotics demo                 # the model is used by default
 
 Runs on Apple Silicon. On other hardware the robots keep using the keyword matcher, which is
 why `--llm` is a flag rather than the default.

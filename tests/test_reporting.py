@@ -46,7 +46,7 @@ class FakePlanner:
     """Understands "door"; understands nothing else."""
 
     def plan(self, text: str) -> FakePlan:
-        if "door" in text or "ドア" in text:
+        if "door" in text:
             return FakePlan([FakeStep("goto", "door"), FakeStep("open", "door")])
         return FakePlan([])
 

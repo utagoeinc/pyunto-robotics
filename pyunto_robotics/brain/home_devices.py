@@ -144,7 +144,7 @@ class HomeSkills:
         if wanted is None:
             return SkillResult(
                 False,
-                "I did not catch a temperature. Try 「エアコンを24度にして」.",
+                "I did not catch a temperature. Try \"set the aircon to 24 degrees\".",
                 {},
             )
         if not MIN_TEMP_C <= wanted <= MAX_TEMP_C:
@@ -426,7 +426,7 @@ class HomeSkills:
 
 
 def _number_in(text: str | None) -> float | None:
-    """The first number in a phrase, or None. Handles 「24度」 as well as "24"."""
+    """The first number in a phrase, or None. Handles "24 degrees" as well as "24"."""
     if not text:
         return None
     digits = ""
@@ -447,9 +447,9 @@ def _room_in(text: str | None) -> str | None:
         return None
     lowered = str(text).lower()
     for english, japanese in (
-        ("living room", "リビング"),
-        ("bedroom", "寝室"),
-        ("kitchen", "キッチン"),
+        ("living room", "lounge"),
+        ("bedroom", "bed room"),
+        ("kitchen", "galley"),
     ):
         if english in lowered or japanese in str(text):
             return english

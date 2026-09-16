@@ -27,14 +27,15 @@ def _solar() -> RobotSetup:
         default_keyframe="carport",
         keyframe_help="carport (at home, in shade), street (out on the road), park (in the sun)",
         examples=(
-            "日光が当たる場所まで移動して、電力を取得してきて",
+            "go and find some sunlight, and bring back power",
             "go and fetch some power",
         ),
         greeting=(
-            "🔆 カーポートにいます。日の当たる場所を探して充電し、"
-            "戻って家に電気を届けます。\n"
+            "🔆 I am parked in the carport. I can go and find sunlight, charge there, come "
+            "home, and put the power into the house.\n"
             "  • {example_a}\n  • {example_b}\n"
-            "出発前にどう理解したかをお伝えし、道中の様子と充電の進み具合を報告します。"
+            "I will say how I understood you before I set off, and report where I am and how "
+            "the charging is going as I work."
         ),
         # The park is 20 m from the carport, so this robot needs the far field too.
         max_depth=45.0,
@@ -61,12 +62,13 @@ def _mars() -> RobotSetup:
         gait=SkidDrive,
         default_keyframe="lander",
         keyframe_help="lander (beside the lander), channel (out on the channel floor)",
-        examples=("サンプルまで行って", "drive to the beacon"),
+        examples=("drive to the sample", "drive to the beacon"),
         greeting=(
-            "🛻 火星の地表にいます。カメラと距離センサーで周りが見えています。\n"
+            "🛻 I am on the surface of Mars, and I can see around me with a camera and a "
+            "depth sensor.\n"
             "  • {example_a}\n  • {example_b}\n"
-            "行き先を伝えてください。出発前にどう理解したかをお伝えし、"
-            "走りながら経過を報告して、着いたら写真を送ります。"
+            "Tell me where to go. I will say how I understood you before I set off, report "
+            "as I drive, and send a photograph when I arrive."
         ),
         camera=Camera(distance=9.0, elevation=-22, azimuth=135),
         # 60 m, not the indoor 12. The beacon is 19 m off and the lander 21 m, and at 12 both
@@ -92,12 +94,12 @@ def _orchard() -> RobotSetup:
         gait=TrotGait,
         default_keyframe="shed",
         keyframe_help="shed (at the packing shed), lane (halfway up the row)",
-        examples=("リンゴのコンテナを取ってきて", "fetch the apples"),
+        examples=("fetch the crate of apples", "fetch the apples"),
         greeting=(
-            "🐕 果樹園にいます。四脚で畝の間を歩き、荷物を運べます。\n"
+            "🐕 I am in the orchard. I walk the rows on four legs and can carry things.\n"
             "  • {example_a}\n  • {example_b}\n"
-            "運ぶものと行き先を伝えてください。歩きながら経過を報告し、"
-            "着いたら写真を送ります。"
+            "Tell me what to carry and where to take it. I will report as I walk, and send a "
+            "photograph when I get there."
         ),
         camera=Camera(distance=8.0, elevation=-20, azimuth=110),
         # The crates are 16 m up the lane from the shed.
@@ -120,11 +122,12 @@ def _hotel() -> RobotSetup:
         skills=lambda robot, grounder: HotelSkills(robot, grounder),
         default_keyframe="corridor",
         keyframe_help="corridor (ground floor, by the rooms), in_lift (standing in the car)",
-        examples=("両方のフロアを掃除して", "clean both floors"),
+        examples=("clean the rooms on both floors", "clean both floors"),
         greeting=(
-            "🧹 ホテルにいます。客室を掃除し、リフトで階を移動できます。\n"
+            "🧹 I am in the hotel. I clean the guest rooms and ride the lift between "
+            "floors.\n"
             "  • {example_a}\n  • {example_b}\n"
-            "作業前にどう理解したかをお伝えし、部屋ごとに進み具合を報告します。"
+            "I will say how I understood you before I start, and report room by room."
         ),
         camera=Camera(distance=9.0, elevation=-18, azimuth=150),
         max_depth=30.0,
@@ -145,20 +148,22 @@ def _watch() -> RobotSetup:
     from ..brain.watching import WatchingSkills
 
     return RobotSetup(
-        name="スマートハウス",
+        name="Smart house",
         scene="watch.xml",
         domain=DOMAINS["watch"],
         skills=lambda robot, grounder: WatchingSkills(robot, grounder),
         default_keyframe="asleep",
         keyframe_help="asleep (in bed, start of the day), up (out of bed)",
-        examples=("母の様子はどう？", "how is she today?"),
+        examples=("how is she doing?", "how is she today?"),
         greeting=(
-            "🏠 この家のスマートハウスです。各部屋の人感センサー（床）と温湿度計、"
-            "玄関の鍵、ドアフォンがつながっています。\n"
+            "🏠 I am the smart house here. I have motion sensors in the floor of every room, "
+            "a thermometer and hygrometer, the front door lock, and the doorphone.\n"
             "  • {example_a}\n  • {example_b}\n"
-            "  • 誰か来た？\n  • 湿度は？\n  • エアコンをつけて\n"
-            "室内にカメラはありません。映像はドアフォン（外向き）だけです。\n"
-            "気になることがあれば、聞かれなくてもこちらからお伝えします。"
+            "  • has anyone been to the door?\n  • how humid is it?\n"
+            "  • turn the air conditioning on\n"
+            "There are no cameras inside the flat. The only picture is the doorphone, and it "
+            "faces the street.\n"
+            "If something concerns me, I will tell you without being asked."
         ),
         camera=Camera(distance=11.0, elevation=-55, azimuth=90),
     )
@@ -189,13 +194,13 @@ def _pet() -> RobotSetup:
         ),
         default_keyframe="dock",
         keyframe_help="dock (cat under the sofa), sill, tree, shelf (cat in each place)",
-        examples=("猫はどこにいる？", "where is the cat?"),
+        examples=("where is the cat?", "find the cat"),
         greeting=(
-            "🐱 お留守番中の見守りカメラです。部屋を回って、カメラを上下左右に向けて"
-            "猫ちゃんを探せます。\n"
+            "🐱 I am the camera looking after the flat while you are out. I can drive around "
+            "and aim my camera up, down and sideways to find the cat.\n"
             "  • {example_a}\n  • {example_b}\n"
-            "  • 見回って\n  • 写真を送って\n  • カメラを上に向けて\n"
-            "見つからないときは、見つからなかったとお伝えします。"
+            "  • look around\n  • send me a photo\n  • look up\n"
+            "If I cannot find her, I will tell you that rather than guess."
         ),
         # Indoors: nothing is more than about 9 m away.
         max_depth=12.0,

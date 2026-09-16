@@ -140,12 +140,12 @@ def test_the_battery_reports_what_actually_went_in():
 
 
 def test_the_instruction_reaches_the_errand():
-    """「電力を取得してきて」 has to become fetch_power, not a bare goto."""
+    """"Fetch some power" has to become fetch_power, not a bare goto."""
     from pyunto_robotics.brain.domains import DOMAINS
 
     domain = DOMAINS["solar"]
-    for text in ("日光が当たる場所まで移動して、電力を取得してきて",
-                 "電力を取得してきて", "go and fetch some power", "充電してきて"):
+    for text in ("go and find some sunlight, and bring back power",
+                 "fetch some power", "go and fetch some power", "go and charge"):
         assert domain.verb(text) == "fetch_power", text
 
 

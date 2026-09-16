@@ -133,7 +133,7 @@ def test_a_broken_camera_is_not_reported_as_an_empty_flat():
         result = skills.find()
         assert not result.ok
         assert result.data.get("camera_failed")
-        assert "カメラ" in result.message
+        assert "camera" in result.message.lower()
     finally:
         skills.close()
         robot.close()

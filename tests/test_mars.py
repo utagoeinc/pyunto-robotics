@@ -112,9 +112,9 @@ def test_instructions_reach_the_right_action():
     from pyunto_robotics.brain.domains import DOMAINS
 
     domain = DOMAINS["mars"]
-    assert domain.verb("サンプルまで行って") == "goto"
-    assert domain.object_in("サンプルまで行って") == "cache"
+    assert domain.verb("drive to the sample") == "goto"
+    assert domain.object_in("drive to the sample") == "cache"
     assert domain.verb("drive to the beacon") == "goto"
     assert domain.object_in("drive to the beacon") == "beacon"
-    assert domain.verb("着陸機に戻って") == "home"
-    assert domain.verb("傾きは？") == "attitude"
+    assert domain.verb("go back to the lander") == "home"
+    assert domain.verb("how steep is it") == "attitude"

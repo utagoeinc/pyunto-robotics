@@ -99,9 +99,8 @@ def test_instructions_reach_the_right_action():
     from pyunto_robotics.brain.domains import DOMAINS
 
     domain = DOMAINS["hotel"]
-    assert domain.verb("両方のフロアを掃除して") == "clean"
     assert domain.verb("clean both floors") == "clean"
-    assert domain.verb("この廊下を掃除して") == "clean_floor"
-    assert domain.verb("エレベータに乗って") == "board"
-    assert domain.verb("上の階へ") == "ride"
-    assert domain.verb("何階にいる？") == "floor"
+    assert domain.verb("clean the corridor") == "clean_floor"
+    assert domain.verb("get in the lift") == "board"
+    assert domain.verb("go up a floor") == "ride"
+    assert domain.verb("which floor are you on") == "floor"

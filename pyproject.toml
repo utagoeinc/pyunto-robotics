@@ -58,7 +58,7 @@ artifacts = ["pyunto_robotics/assets/**"]
 exclude = ["pyunto_robotics/assets/asimov/**", "pyunto_robotics/assets/meshes/**"]
 
 [tool.hatch.build.targets.sdist]
-include = ["pyunto_robotics", "examples", "README.md", "README.ja.md"]
+include = ["pyunto_robotics", "examples", "README.md"]
 
 [tool.ruff]
 line-length = 100

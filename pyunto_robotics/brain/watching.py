@@ -77,9 +77,9 @@ TICKS_PER_SECOND = 10.0
 # without being surveillance. Whether she answers is not scripted: it depends on where she
 # actually is when the bell goes, which is what makes "14:20, no answer" worth reading.
 DOOR_CALLS = (
-    (615, "宅配便"),          # 10:15
-    (860, "郵便配達"),        # 14:20
-    (1125, "隣の田中さん"),   # 18:45
+    (615, "a parcel delivery"),   # 10:15
+    (860, "the postman"),         # 14:20
+    (1125, "the neighbour"),      # 18:45
 )
 
 
@@ -197,7 +197,7 @@ class WatchingSkills:
 
         Answered is decided by where she is, not by a script: if she is in bed or the bathroom
         when the bell goes, nobody comes. That is the point of keeping the log -- a family
-        member seeing "14:20 郵便配達 — no answer" learns something real, and learns it
+        member seeing "14:20 the postman — no answer" learns something real, and learns it
         without anyone watching her.
         """
         minute_of_day = self.minute % MINUTES_PER_DAY
@@ -413,11 +413,12 @@ class WatchingSkills:
         # Only quote a rate once one has actually been timed. Before that `speed_pips` is
         # its default, and stating it would be inventing a measurement.
         if self._elapsed_wall > 0.005:
-            rate = {1: "ほぼ実時間", 2: "実時間の数十倍", 3: "実時間の約100倍",
-                    4: "実時間の約1000倍", 5: "1日が数秒"}.get(self.speed_pips, "")
-            text = f"いまこの家は {_clock(self.minute)} です（{rate}で進んでいます）。"
+            rate = {1: "about real time", 2: "tens of times real time",
+                    3: "about 100x real time", 4: "about 1000x real time",
+                    5: "a day in seconds"}.get(self.speed_pips, "")
+            text = f"It is {_clock(self.minute)} in the flat, running at {rate}."
         else:
-            text = f"いまこの家は {_clock(self.minute)} です（まだ動き始めたところです）。"
+            text = f"It is {_clock(self.minute)} in the flat. It has only just started."
         log.info("skill: time -> %s", _clock(self.minute))
         return SkillResult(True, text, {"minute": int(self.minute),
                                         "clock": _clock(self.minute),

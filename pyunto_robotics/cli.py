@@ -50,7 +50,7 @@ def _llm_wanted(asked: bool) -> bool:
     """Whether to read the sentence with the local model, saying why when it cannot.
 
     Understanding is on by default. Keyword tables only match the phrasings somebody thought
-    to write down -- told 「日が当たるところに移動して」 the matcher went looking for a landmark
+    to write down -- told "move somewhere sunny" the matcher went looking for a landmark
     of that name -- and every miss needs another pattern, in every language the product ships
     in. That is not a table anybody can finish.
 

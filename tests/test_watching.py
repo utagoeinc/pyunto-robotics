@@ -138,7 +138,7 @@ def test_the_devices_still_work():
     try:
         assert skills.run("lock").ok
         assert skills.run("lock_status").data["locked"] is True
-        assert skills.run("set_temperature", "24度").data["target_c"] == 24.0
+        assert skills.run("set_temperature", "24 degrees").data["target_c"] == 24.0
     finally:
         robot.close()
 
@@ -147,12 +147,12 @@ def test_instructions_reach_the_right_action():
     from pyunto_robotics.brain.domains import DOMAINS
 
     domain = DOMAINS["watch"]
-    assert domain.verb("母の様子はどう？") == "check"
+    assert domain.verb("how is she doing?") == "check"
     assert domain.verb("how is she") == "check"
-    assert domain.verb("今日は何してた？") == "today"
-    assert domain.verb("2時間見ていて") == "watch"
-    assert domain.verb("エアコンをつけて") == "aircon_on"
-    assert domain.verb("鍵はかかってる？") == "lock_status"
+    assert domain.verb("what happened today") == "today"
+    assert domain.verb("watch for 2 hours") == "watch"
+    assert domain.verb("turn the aircon on") == "aircon_on"
+    assert domain.verb("is the door locked") == "lock_status"
 
 
 @pytest.mark.slow

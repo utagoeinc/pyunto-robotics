@@ -1,6 +1,6 @@
 """Turning a sentence into a plan.
 
-Someone messages "オフィスのドアを開けて" and this decides that means
+Someone messages "open the office door" and this decides that means
 [open(door), report(...)]. Two implementations of the same interface:
 
   RulePlanner  Pattern matching over verbs and objects, in English and Japanese. Instant, no
@@ -37,7 +37,7 @@ ACTIONS = (
 def _which_arm(text: str) -> str:
     """Left or right, from the words. Right when unsaid, which is what a person would do."""
     lowered = text.lower()
-    if "左" in text or "left" in lowered:
+    if "left" in lowered:
         return "l"
     return "r"
 
@@ -54,7 +54,7 @@ class Step:
     action: str
     argument: str | None = None
     where: str | None = None  # "left" | "right" | "middle" | "nearest" | "far"
-    # How many of the object the user said were visible. 「三つ見えるドアのうち、右の」 tells the
+    # How many of the object the user said were visible. "the right one of the three doors" tells the
     # robot both which door to pick and how many it should be picking from -- and the second
     # half is worth acting on, because "leftmost of three" and "leftmost of one" name different
     # doors. Without it the robot happily resolves a qualifier against whatever it can see.
@@ -89,80 +89,73 @@ class Plan:
 
 # Objects the robot can be sent to, with the words people use for them.
 _OBJECTS: dict[str, tuple[str, ...]] = {
-    "door": ("door", "doorway", "entrance", "exit", "ドア", "扉", "入口", "出口"),
-    "whiteboard": ("whiteboard", "board", "ホワイトボード"),
-    "desk": ("desk", "机", "デスク"),
-    "table": ("table", "テーブル"),
-    "monitor": ("monitor", "screen", "display", "モニタ", "モニター", "画面"),
-    "plant": ("plant", "植物", "観葉植物"),
-    "fridge": ("fridge", "refrigerator", "冷蔵庫"),
+    'door': ('door', 'doorway', 'entrance', 'exit'),
+    'whiteboard': ('whiteboard', 'board'),
+    'desk': ('desk',),
+    'table': ('table',),
+    'monitor': ('monitor', 'screen', 'display'),
+    'plant': ('plant',),
+    'fridge': ('fridge', 'refrigerator'),
 }
 
 # Verb patterns, matched in order, so more specific phrasings must come first.
-# "look around" / 「周りを見て」 has to beat "look at" / 「見て」, and "open" has to beat "go"
+# "look around" has to beat "look at", and "open" has to beat "go"
 # in "go open the door", or the robot does the wrong thing for a perfectly clear instruction.
 _VERBS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    # Waving before raising: 「手を振って」 would otherwise be read as "raise", since both
-    # sentences name a hand and only the second verb tells them apart.
-    ("wave", ("wave", "手を振って", "手をふって", "振って", "ふって", "手を振る")),
-    ("raise_arm", ("raise your", "put your hand up", "lift your", "hold up your",
-                   "挙げて", "上げて", "あげて", "掲げて")),
-    ("lower_arm", ("lower your", "put your hand down", "put your arm down",
-                   "下ろして", "おろして", "下げて")),
-    ("open", ("open", "push open", "開けて", "開けろ", "あけて", "開いて")),
-    ("home", ("go back to where you started", "back to the start", "元の位置に戻って",
-              "最初の位置に戻って", "スタート地点に戻って")),
-    ("leave", ("leave the room", "come back out", "go back out", "exit the room",
-               "廊下に出て", "部屋を出て", "出て来て", "戻って")),
-    ("look_around", ("look around", "explore", "scan", "見回して", "周りを見て",
-                     "まわりを見て", "あたりを見て", "探索")),
-    ("describe", ("what do you see", "describe", "what can you see", "何が見える",
-                  "何が見えますか", "見えるもの")),
-    ("where", ("where are you", "your position", "どこにいる", "現在地", "どこですか")),
-    ("point_at", ("point at", "point to", "指さして", "指して")),
-    ("face", ("face", "look at", "turn to", "turn toward", "向いて", "見て")),
-    ("goto", ("go to", "walk to", "goto", "move to", "head to", "approach", "come to",
-              "行って", "移動して", "近づいて", "向かって")),
+    ('wave', ('wave',)),
+    ('raise_arm', ('raise your', 'put your hand up', 'lift your', 'hold up your')),
+    ('lower_arm', ('lower your', 'put your hand down', 'put your arm down')),
+    ('open', ('open', 'push open')),
+    ('home', ('go back to where you started', 'back to the start')),
+    ('leave', ('leave the room', 'come back out', 'go back out', 'exit the room')),
+    ('look_around', ('look around', 'explore', 'scan')),
+    ('describe', ('what do you see', 'describe', 'what can you see')),
+    ('where', ('where are you', 'your position')),
+    ('point_at', ('point at', 'point to')),
+    ('face', ('face', 'look at', 'turn to', 'turn toward')),
+    ('goto', ('go to', 'walk to', 'goto', 'move to', 'head to', 'approach', 'come to')),
 )
 
 # Spatial qualifiers that pick between several instances of the same object.
 _QUALIFIERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("left", ("leftmost", "left-hand", "on the left", "to the left", "left",
-              "一番左", "左端", "左側", "左の", "左")),
-    ("right", ("rightmost", "right-hand", "on the right", "to the right", "right",
-               "一番右", "右端", "右側", "右の", "右")),
-    ("middle", ("middle", "centre", "center", "in the middle", "central",
-                "真ん中", "中央", "まんなか", "中程")),
-    ("far", ("furthest", "farthest", "far", "at the end", "一番奥", "奥の", "奥")),
-    ("nearest", ("nearest", "closest", "this one", "一番近い", "手前の", "手前")),
+    ('left', ('leftmost', 'left-hand', 'on the left', 'to the left', 'left')),
+    ('right', ('rightmost', 'right-hand', 'on the right', 'to the right', 'right')),
+    ('middle', ('middle', 'centre', 'center', 'in the middle', 'central')),
+    ('far', ('furthest', 'farthest', 'far', 'at the end')),
+    ('nearest', ('nearest', 'closest', 'this one')),
 )
 
 # Counts a user might state, in the forms they actually write them.
 _COUNTS: dict[str, int] = {
-    "1": 1, "one": 1, "一": 1, "一つ": 1, "1つ": 1, "ひとつ": 1,
-    "2": 2, "two": 2, "二": 2, "二つ": 2, "2つ": 2, "ふたつ": 2,
-    "3": 3, "three": 3, "三": 3, "三つ": 3, "3つ": 3, "みっつ": 3,
-    "4": 4, "four": 4, "四": 4, "四つ": 4, "4つ": 4, "よっつ": 4,
-    "5": 5, "five": 5, "五": 5, "五つ": 5, "5つ": 5, "いつつ": 5,
+    '1': 1,
+    'one': 1,
+    '2': 2,
+    'two': 2,
+    '3': 3,
+    'three': 3,
+    '4': 4,
+    'four': 4,
+    '5': 5,
+    'five': 5,
 }
 
 
 def stated_count(message: str) -> int | None:
     """How many of the thing the user said were there, if they said.
 
-    「三つ見えるドアのうち」 is not decoration: it tells the robot how many doors it should be
+    "of the three doors" is not decoration: it tells the robot how many doors it should be
     choosing between, which is what makes "the leftmost" mean a particular door rather than
     the leftmost of however many happen to be in frame.
     """
     text = message.lower()
-    # Longest first so 「三つ」 beats 「三」 and "three" beats "3" inside "3つ".
+    # Longest first, so "three" beats "3" where both appear.
     for word in sorted(_COUNTS, key=len, reverse=True):
         if word in text:
             return _COUNTS[word]
     return None
 
 
-_GREETINGS = ("hello", "hi", "hey", "こんにちは", "はじめまして", "やあ", "おはよう", "こんばんは")
+_GREETINGS = ("hello", "hi", "hey", "good morning", "good evening", "hiya")
 
 # Words to drop when salvaging an unrecognised target from an instruction.
 _FILLER = frozenset(
@@ -189,51 +182,27 @@ def _unknown_target(text: str) -> str | None:
 # Words that join one action to the next. Their presence means the instruction has more parts
 # than a single verb-object match can represent.
 _SEQUENCERS = (
-    "その後", "そのあと", "それから", "次に", "つぎに", "今度は", "こんどは", "してから",
-    "then", "after that", "afterwards", "next,", "and then",
+    "then", "after that", "afterwards", "next,", "and then", "and also", "followed by",
 )
-
-# Japanese chains actions by putting verbs in the て-form and separating them with 「、」, with
-# no conjunction at all:
-#
-#     洗濯機を開けて、洗濯物を取り出して、カゴに入れて、テーブルまで運んで
-#
-# That is four instructions and not one of the words in _SEQUENCERS appears. A real request
-# written exactly like this produced a single-step plan and the robot opened the washer and
-# stopped -- with no warning, because the warning also keyed off _SEQUENCERS.
-#
-# So a comma followed by more text counts as a chain in its own right. Two or more て-form
-# clauses do too, which catches 「開けて出して」 written without commas.
-_TE_FORM_ENDINGS = ("て、", "で、", "てから", "でから")
 
 
 def looks_multi_step(message: str) -> bool:
     """True when an instruction chains several actions together.
 
     RulePlanner can only ever produce one step, so on a chained instruction it silently
-    returns the wrong one -- 「右のドアを開けて…今度は一番左の部屋に」 came out as
-    open(left door), having dropped the first half. Callers use this to warn that --llm is
-    needed rather than letting the robot confidently do the wrong thing.
+    returns the wrong one -- "open the right-hand door, then go to the far left room" came
+    out as open(right door), having dropped the second half. Callers use this to say the
+    model is needed rather than letting the robot confidently do the wrong thing.
 
-    Detects three shapes of chain:
-
-      * an explicit conjunction -- 「その後」, "and then";
-      * Japanese て-form clauses joined by 「、」, which is how the language chains actions
-        with no conjunction at all;
-      * several imperative clauses separated by commas in either language.
-
-    The second one was missing, and it is the ordinary way to write a sequence in Japanese.
-    A real six-part request -- 「洗濯機を開けて、洗濯物を取り出して、カゴに入れて、テーブル
-    まで運んで」 -- contained none of the conjunctions, so the robot opened the washer, stopped,
-    and reported success, and the warning that would have suggested --llm never fired either.
+    Detects two shapes of chain: an explicit conjunction ("and then"), and several clauses
+    separated by commas. Both are blunt, which is the point -- this only decides whether to
+    warn, and the model does the actual reading.
     """
     text = message.lower()
     if any(word in text for word in _SEQUENCERS):
         return True
-    if any(ending in message for ending in _TE_FORM_ENDINGS):
-        return True
     # Two or more comma-separated clauses with real content in each.
-    clauses = [c for c in re.split(r"[、,]", message) if len(c.strip()) > 2]
+    clauses = [c for c in re.split(r",", message) if len(c.strip()) > 2]
     return len(clauses) >= 2
 
 
@@ -290,7 +259,7 @@ class RulePlanner:
             reply=(
                 "I can walk to things, look around, describe what I see, open doors, "
                 "and raise or wave a hand. "
-                "Try: \"open the door\" / 「オフィスのドアを開けて」"
+                'Try: "open the door" or "walk to the whiteboard"'
             ),
         )
 
@@ -305,8 +274,8 @@ class RulePlanner:
     def _qualifier(text: str) -> str | None:
         """Pull out a spatial qualifier, longest phrase first.
 
-        Ordering matters: "on the left" has to beat the bare "left" inside it, and 「一番左」
-        has to beat 「左」, or the match is right but for the wrong reason.
+        Ordering matters: "on the left" has to beat the bare "left" inside it, or the match
+        is right but for the wrong reason.
         """
         best: tuple[int, str] | None = None
         for name, phrases in _QUALIFIERS:
@@ -353,7 +322,7 @@ Each step may also carry "where" to pick between identical objects. Use it whene
 says which one they mean:
   "left" | "right" | "middle" | "nearest" | "far"
 
-If the user says how many there are -- 「三つ見えるドアのうち」, "of the three doors" -- put that
+If the user says how many there are -- "of the three doors" -- put that
 number in "expect". It tells the robot how many it should be choosing between.
 
 Rules:

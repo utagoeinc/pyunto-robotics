@@ -8,8 +8,8 @@ pyunto-robotics showqr
 ```
 
 Scan the square that appears with the Pyunto app. A window opens on a robot parked in a
-carport with a solar panel on its back; write 「日光が当たる場所まで移動して、電力を取得してきて」
-in the diary on your phone, and it drives out, finds sunlight by measuring what the panel
+carport with a solar panel on its back; write "go and find some sunlight, and bring back
+power" in the diary on your phone, and it drives out, finds sunlight by measuring what the panel
 receives, charges, comes home, and turns the house lights on with what it collected.
 
 The robot runs on **your** computer. Pyunto never sees the room, the camera, or anything the
@@ -41,7 +41,7 @@ listening — message the robot from the Pyunto app. Ctrl-C to stop.
 Then write in the diary, in your own words:
 
 ```
-日光が当たる場所まで移動して、電力を取得してきて
+go and find some sunlight, and bring back power
 ```
 
 The robot says how it understood you, drives out, finds the sun by measuring, charges, comes
@@ -74,9 +74,9 @@ pyunto-robotics whoami                  # this robot's account and its spaces
 You do not have to learn any commands. A local language model reads the entry:
 
 ```
-「そろそろ電気が足りないかも」        ->  find_sun -> goto(park)
-「猫はどこ？」                      ->  find
-「母の様子はどう？」                 ->  check
+"I think we're running low on power"  ->  find_sun -> goto(park)
+"have you seen the cat anywhere?"    ->  find
+"is mum up yet?"                     ->  check
 ```
 
 None of those are in any keyword list. The model runs on your machine, so the diary is never
@@ -94,12 +94,12 @@ A robot that accepts an instruction, goes quiet, and posts one sentence a minute
 indistinguishable from a robot that has crashed. So it narrates, in the same thread the
 instruction arrived in.
 
-Write 「猫はどこにいる？」 and the diary fills in as it happens:
+Write "where is the cat?" and the diary fills in as it happens:
 
 ```
-🤖 Understood: “猫はどこにいる？”
+🤖 Understood: “where is the cat?”
    I will: find
-✅ find — 🐱 窓辺の日なたにいました。カメラを向けています。
+✅ find — 🐱 She is the sunny windowsill. I have the camera on her.
 [a photograph from the robot's own camera]
 ```
 
@@ -124,10 +124,10 @@ list above, not a shrug. A few that people try first:
 
 | You write | The robot does |
 |---|---|
-| 「猫はどこ？」 (`pet`) | drives the flat, aims the camera at each of her places, reports where she is |
-| 「カメラを上に向けて」 (`pet`) | tilts the lens up without moving the robot |
-| 「母の様子はどう？」 (`watch`) | reads the sensors and says where she is and whether she is up |
-| 「誰か来た？」 (`watch`) | the day's doorphone callers, and whether she answered |
+| "where is the cat?" (`pet`) | drives the flat, aims the camera at each of her places, reports where she is |
+| "look up" (`pet`) | tilts the lens up without moving the robot |
+| "how is she doing?" (`watch`) | reads the sensors and says where she is and whether she is up |
+| "has anyone been to the door?" (`watch`) | the day's doorphone callers, and whether she answered |
 
 Add `--no-photos` to report in words only.
 
