@@ -46,29 +46,38 @@ def _reexec_under_mjpython_if_needed(wants_window: bool) -> None:
     os.execv(str(launcher), [str(launcher), "-m", "pyunto_robotics.cli", *sys.argv[1:]])
 
 
-def _llm_wanted(asked: bool) -> bool:
-    """Whether to read the sentence with the local model, saying why when it cannot.
+def _understanding(command_mode: bool) -> bool:
+    """Whether the robot reads sentences, or matches a fixed list of commands.
 
-    Understanding is on by default. Keyword tables only match the phrasings somebody thought
-    to write down -- told "move somewhere sunny" the matcher went looking for a landmark
-    of that name -- and every miss needs another pattern, in every language the product ships
-    in. That is not a table anybody can finish.
+    Reading is the default, and not as a convenience. A keyword table only matches the
+    phrasings somebody thought to write down -- told "move somewhere sunny" the matcher went
+    looking for a landmark of that name -- and every miss needs another pattern, in every
+    language the product ships in. That table has no end, which is the whole reason a robot
+    you can simply write to is worth building.
 
-    The model reads the sentence instead, and it runs on this machine, so nothing is sent
-    anywhere to be understood. When it is not available this says so in one line and carries
-    on with keywords rather than refusing to start: a robot that will not open because a
-    5 GB download is missing is worse than one that understands less.
+    Command mode is the deliberate opposite, for a site that WANTS a closed vocabulary:
+    equipment with a fixed command set, an operator who types the same six instructions all
+    day, a safety case that will not accept a model deciding what was meant. It is a choice
+    about the deployment, not a fallback, and `--command-mode` is how a customer asks for it.
+
+    The model also runs on this machine, so nothing is sent anywhere to be understood.
+
+    When it cannot run at all, this says so in one line and matches keywords anyway rather
+    than refusing to start -- a robot that will not open because a 5.5 GB download is missing
+    is worse than one that understands less.
     """
-    if not asked:
+    if command_mode:
+        print("planner : command mode — matching the command list, not reading sentences.")
         return False
     if sys.platform != "darwin":
-        print("note    : the local model needs Apple silicon; matching keywords instead.")
+        print("note    : the local model needs Apple silicon, so this robot is matching")
+        print("          commands instead of reading sentences. See `--command-mode`.")
         return False
     try:
         import mlx_vlm  # noqa: F401, PLC0415
     except ImportError:
-        print("note    : the local model is not installed, so keywords are being matched.")
-        print("          To let it read sentences instead of matching words:")
+        print("note    : the local model is not installed, so this robot is matching commands")
+        print("          instead of reading sentences. To let it read what you write:")
         print("              python scripts/download_model.py")
         return False
     return True
@@ -86,10 +95,11 @@ def main(argv: list[str] | None = None) -> int:
     # robot finding something by measurement rather than following a script. The old default
     # was "office", a humanoid that no longer exists -- so a bare `demo` raised KeyError.
     p_demo.add_argument("--robot", default="solar", help="which machine (see `robots`)")
-    # On by default. See `_llm_wanted`: a keyword table cannot be finished, least of all in
-    # every language, and the fallback when the model is missing is the table anyway.
-    p_demo.add_argument("--no-llm", action="store_true",
-                        help="match keywords instead of reading the sentence with the local model")
+    # Reading sentences is the default and needs no flag. See `_understanding`.
+    p_demo.add_argument("--command-mode", action="store_true",
+                        help="match a fixed command list instead of reading what you wrote")
+    p_demo.add_argument("--commands", metavar="FILE",
+                        help="a JSON command list for this site; implies --command-mode")
     p_demo.add_argument("--no-window", dest="view", action="store_false", help="run headless")
     p_demo.add_argument("--speed", type=float, default=1.0, help="playback speed (1.0 = real time)")
     p_demo.add_argument("--no-photos", dest="send_images", action="store_false",
@@ -110,8 +120,8 @@ def main(argv: list[str] | None = None) -> int:
     p_qr.add_argument("--robot", default="solar", help="which machine to open once paired")
     p_qr.add_argument("--no-run", action="store_true",
                       help="draw the square and exit, instead of opening the robot once paired")
-    p_qr.add_argument("--no-llm", action="store_true",
-                      help="match keywords instead of reading the sentence with the local model")
+    p_qr.add_argument("--command-mode", action="store_true",
+                      help="match a fixed command list instead of reading what you wrote")
     p_qr.add_argument("--no-window", action="store_true")
     p_qr.add_argument("--speed", type=float, default=1.0)
     p_qr.add_argument("--no-photos", action="store_true")
@@ -214,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_demo(
             robot_name=args.robot,
             pair=None,
-            use_llm=_llm_wanted(not args.no_llm),
+            use_llm=_understanding(args.command_mode),
             view=not args.no_window,
             speed=args.speed,
             send_images=not args.no_photos,
@@ -227,7 +237,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_demo(
             robot_name=args.robot,
             pair=args.pair,
-            use_llm=_llm_wanted(not args.no_llm),
+            use_llm=_understanding(args.command_mode or bool(args.commands)),
+            commands=args.commands,
             view=args.view,
             speed=args.speed,
             send_images=args.send_images,

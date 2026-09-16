@@ -16,6 +16,8 @@ import time
 from pyunto_agent.auth import AuthError
 from pyunto_agent.bridge import Bridge
 
+from dataclasses import replace
+
 from . import registry
 from .agent import RobotAgent
 from .backend import RobotBackend
@@ -77,11 +79,22 @@ def run_demo(
     robot_name: str = "office",
     pair: str | None = None,
     use_llm: bool = False,
+    commands: str | None = None,
     view: bool = True,
     speed: float = 1.0,
     send_images: bool = True,
 ) -> int:
     setup = registry.get(robot_name)
+    if commands:
+        # A site's own command list replaces the built-in phrasings for the actions it names.
+        # Loaded here rather than inside the planner so a bad file fails before a window opens
+        # and before anybody is invited into a diary.
+        try:
+            setup = replace(setup, domain=setup.domain.with_commands(commands))
+        except (OSError, ValueError) as e:
+            print(f"ERROR: {e}")
+            return 1
+        print(f"commands: {commands}")
     print(f"Pyunto Robot SDK\nrobot   : {setup.name}")
 
     print("account : creating a robot account…", end=" ", flush=True)

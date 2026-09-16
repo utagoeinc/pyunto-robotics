@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "A site's own command list, for --command-mode. Only the actions named here are",
+    "overridden; everything else keeps the robot's built-in phrasings, so a customer",
+    "changes the two words their equipment spells differently and inherits the rest.",
+    "",
+    "Matching is case-insensitive and by substring, so write codes the way the equipment",
+    "documents them. Put longer phrases first: the first action whose pattern appears in",
+    "the message wins.",
+    "",
+    "    pyunto-robotics demo --robot pet --commands examples/commands.example.json"
+  ],
+
+  "verbs": {
+    "find":   ["FIND-TGT", "locate the animal", "target search"],
+    "photo":  ["CAM-SNAP", "capture", "still image"],
+    "patrol": ["PATROL-ALL", "sweep the area"],
+    "home":   ["RTB", "return to base"]
+  },
+
+  "objects": {
+    "sill":  ["POS-03", "windowsill"],
+    "shelf": ["POS-07", "high shelf"]
+  }
+}

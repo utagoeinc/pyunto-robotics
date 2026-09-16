@@ -23,7 +23,7 @@ Three commands, and the only thing to remember is the first one.
 
 ```bash
 pip install pyunto-robotics
-python scripts/download_model.py     # so it reads sentences, not keywords (once, ~5.5 GB)
+python scripts/download_model.py     # so the robot reads what you write (once, ~5.5 GB)
 pyunto-robotics showqr               # a square appears in the terminal
 ```
 
@@ -71,20 +71,59 @@ pyunto-robotics whoami                  # this robot's account and its spaces
 
 ## Writing in your own words
 
-You do not have to learn any commands. A local language model reads the entry:
+There are no commands to learn. Write what you mean, and a local language model reads it:
 
 ```
-"I think we're running low on power"  ->  find_sun -> goto(park)
-"have you seen the cat anywhere?"    ->  find
-"is mum up yet?"                     ->  check
+"I think we're running low on power"           ->  find_sun -> goto(park)
+"have you seen the cat anywhere?"              ->  patrol
+"point the camera upwards a bit"               ->  tilt
+"it feels stuffy in there"                     ->  temperature
+"the guests have checked out, sort the rooms"  ->  clean
 ```
 
-None of those are in any keyword list. The model runs on your machine, so the diary is never
-sent anywhere to be understood.
+None of those are in any list, and that is the point: a keyword table only matches the
+phrasings somebody thought to write down, and every miss needs another pattern, in every
+language the product ships in. There is no end to that table.
 
-It needs Apple silicon. Everywhere else — and until `download_model.py` has run — the robot
-matches keywords instead and says so in one line at startup, rather than refusing to open.
-Add `--no-llm` to force that.
+The model runs on your machine, so the diary is never sent anywhere to be understood. This is
+the default and needs no flag — run `python scripts/download_model.py` once.
+
+It needs Apple silicon. Everywhere else, and until that download has run, the robot matches
+commands instead and says so in one line at startup rather than refusing to open.
+
+---
+
+## Command mode
+
+Some sites want the opposite: a closed vocabulary. Equipment with its own command set, an
+operator who types the same six instructions all day, a safety case that will not accept a
+model deciding what was meant.
+
+```bash
+pyunto-robotics demo --robot pet --commands mysite.json
+```
+
+```json
+{
+  "verbs": {
+    "find":  ["FIND-TGT", "locate the animal"],
+    "photo": ["CAM-SNAP"],
+    "home":  ["RTB", "return to base"]
+  },
+  "objects": {
+    "sill": ["POS-03"]
+  }
+}
+```
+
+Only the actions you name are overridden — everything else keeps its built-in phrasings, so
+you change the two verbs your equipment spells differently and inherit the rest. Matching is
+case-insensitive, so write codes the way your manual writes them. An action the robot does
+not have is refused at startup, naming what it does have, rather than becoming a command that
+can never fire.
+
+`--command-mode` on its own uses the built-in lists without the model. A runnable example is
+in [`examples/commands.example.json`](examples/commands.example.json).
 
 ---
 

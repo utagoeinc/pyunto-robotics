@@ -17,7 +17,8 @@ objects, and a prompt. Adding a fourth robot means adding one of these, not anot
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 from .planner import (
     Plan,
@@ -93,18 +94,66 @@ class Domain:
         body = self.prompt if "{message}" in self.prompt else self.prompt + _OUTPUT_FORMAT
         return body.format(message=message)
 
+    def with_commands(self, path: str | Path) -> Domain:
+        """This domain, with its command list replaced by one from a file.
+
+        Command mode exists for sites that want a closed vocabulary, and a closed vocabulary
+        is site-specific: a customer's equipment has its own words, an operator has their own
+        six phrases, and neither belongs in this package. So the list is data a customer can
+        supply rather than a table they would have to fork the SDK to change.
+
+        The file is JSON, and says only what to match:
+
+            {
+              "verbs": {
+                "find":  ["where is", "locate", "FIND-TGT"],
+                "photo": ["photo", "image", "CAM-SNAP"]
+              },
+              "objects": {
+                "sill": ["windowsill", "POS-03"]
+              }
+            }
+
+        Actions not named here keep the built-in phrasings, so a customer overrides the two
+        verbs their equipment words differently and inherits the rest. Actions that do not
+        exist on the robot are rejected rather than silently ignored -- a command that can
+        never fire is a fault in the file, and finding it at startup beats finding it when
+        somebody types the word.
+        """
+        import json
+
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        known = {action for action, _ in self.verbs}
+        unknown = set(data.get("verbs", {})) - known
+        if unknown:
+            raise ValueError(
+                f"{path}: no such action on this robot: {', '.join(sorted(unknown))}. "
+                f"This robot does: {', '.join(sorted(known))}"
+            )
+        overrides = {a: tuple(words) for a, words in data.get("verbs", {}).items()}
+        verbs = tuple((a, overrides.get(a, words)) for a, words in self.verbs)
+        objects = dict(self.objects)
+        objects.update({k: tuple(v) for k, v in data.get("objects", {}).items()})
+        return replace(self, verbs=verbs, objects=objects)
+
     def verb(self, text: str) -> str | None:
+        # Case-insensitive on both sides. Callers lower the message, but a site's command
+        # list is written the way the equipment documents it -- "FIND-TGT", not "find-tgt" --
+        # and a code that never matches because of its case is the most annoying kind of
+        # silent failure.
+        lowered = text.lower()
         for action, patterns in self.verbs:
-            if any(pattern in text for pattern in patterns):
+            if any(pattern.lower() in lowered for pattern in patterns):
                 return action
         return None
 
     def object_in(self, text: str) -> str | None:
         """Longest match wins, so "blue towel" beats "towel"."""
+        lowered = text.lower()
         best: tuple[int, str] | None = None
         for name, words in self.objects.items():
             for word in words:
-                if word in text and (best is None or len(word) > best[0]):
+                if word.lower() in lowered and (best is None or len(word) > best[0]):
                     best = (len(word), name)
         return best[1] if best else None
 
