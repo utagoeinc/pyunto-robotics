@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     p_demo = sub.add_parser("demo", help="open a robot and answer messages from the app")
     # The solar errand robot: the demonstration the SDK leads with, and the one that shows a
     # robot finding something by measurement rather than following a script. The old default
-    # was "office", a humanoid that no longer exists -- so a bare `demo` raised KeyError.
+    # was "office", a robot that no longer exists -- so a bare `demo` raised KeyError.
     p_demo.add_argument("--robot", default="solar", help="which machine (see `robots`)")
     # Reading sentences is the default and needs no flag. See `_understanding`.
     p_demo.add_argument("--command-mode", action="store_true",

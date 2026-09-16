@@ -241,7 +241,7 @@ DETOUR_ENABLED = False
 DETOUR_TRIGGER_M = 0.75  # clearance below which a straight approach is judged blocked
 DETOUR_CLEAR_M = 1.6  # clearance above which the route ahead counts as open again
 DETOUR_MIN_STEPS = 40  # commit for at least this long, or it oscillates in and out
-# Long enough to get round a wall and back on course. Crossing the office to the far door with
+# Long enough to get round a wall and back on course. Crossing a flat to the far wall with
 # a door standing open on the way takes several detours, and at 320 the budget ran out mid-way.
 DETOUR_MAX_STEPS = 500
 
@@ -549,7 +549,7 @@ class MaplessNavigator:
         """Pick a detection to chase and measure it.
 
         Scoring on distance alone is unstable when several identical targets are equidistant:
-        the office has three doors 3.8-3.9 m away, and "nearest" flip-flopped between the
+        a corridor may have three doors 3.8-3.9 m away, and "nearest" flip-flopped between the
         left and right one every frame, so the robot just oscillated. Bearing is part of the
         score, which both settles that and matches what "the door" usually means -- the one
         being looked at, not one 44 degrees off to the side.
@@ -764,7 +764,7 @@ class MaplessNavigator:
         ("the door on the right").
 
         The step budget has to cover detours, not just the straight-line walk: reaching a door
-        on the far side of the office means following a wall around, which took ~1400 steps
+        on the far side of a building means following a wall around, which took ~1400 steps
         where the direct approach took 350. At the old 900 the robot ran out of budget
         mid-detour and reported the target lost after having correctly found it.
         """
@@ -985,7 +985,7 @@ class MaplessNavigator:
                         # approaching a washing machine the clearance IS the machine, measured
                         # at 0.18 m, so the head locked forward for the whole approach and the
                         # robot walked the last metre and a half blind. The log filled with
-                        # hundreds of "lost sight of washer" lines while the washer sat a
+                        # hundreds of "lost sight of it" lines while the target sat a
                         # head-turn away.
                         #
                         # The head is now only forced forward when the target is behind the
@@ -1139,7 +1139,7 @@ class MaplessNavigator:
 
                 # Keep the head on the target while the body steers wherever it needs to.
                 # This is the whole reason the neck exists: without it, avoiding a wall swings
-                # the cameras off the door, and with three identical doors in the office the
+                # the cameras off the door, and with three identical doors in a corridor the
                 # robot re-acquires whichever is nearest. Measured the head holding a target
                 # 51 degrees off the body's heading, well past the 37 degrees a fixed forward
                 # camera can reach.
@@ -1346,7 +1346,7 @@ class MaplessNavigator:
                     # it names the door we chose, and a position does not stop being right just
                     # because the robot walked round a wall. (The qualifier alone would --
                     # "the rightmost door" means something different from the far side of the
-                    # office -- which is why this used to discard it and end up at whichever
+                    # corridor -- which is why this used to discard it and end up at whichever
                     # door was nearest.)
                     state = NavState.SEARCH
                     searched = 0

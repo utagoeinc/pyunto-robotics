@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 # How long a step must run before a "still working" note is worth sending. Below this the
 # note arrives after the step has already finished and just adds noise; a person waiting on a
-# walk across an office, which takes tens of seconds, wants to know it started.
+# walk across a room, which takes tens of seconds, wants to know it started.
 SLOW_STEP_SECONDS = 6.0
 
 

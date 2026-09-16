@@ -338,6 +338,4 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[llm,dev]'
 
 ## Licence
 
-The Pyunto robots, scenes and SDK code are ours. MuJoCo (Apache-2.0) is a dependency. The
-optional Asimov-1 model fetched by `scripts/fetch_asimov.py` is third-party (CERN-OHL-S-2.0)
-and is not distributed with this package.
+The Pyunto robots, scenes and SDK code are ours. MuJoCo (Apache-2.0) is a dependency.

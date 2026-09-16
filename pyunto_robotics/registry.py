@@ -45,7 +45,7 @@ class RobotSetup:
     # confidently to a point short of the real one.
     max_depth: float = 12.0
     # Builds the planner. `None` means "build a Domain planner from `domain`", which is what
-    # the newer robots do. The office humanoid predates Domain and brings its own planner.
+    # every robot here does. The seam is kept for a customer whose robot needs its own.
     planner: Callable[[bool], object] | None = None
     # What this machine says when it joins the space, in its own voice.
     #

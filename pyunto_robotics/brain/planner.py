@@ -1,21 +1,13 @@
-"""Turning a sentence into a plan.
+"""Turning a sentence into a plan — the shared machinery.
 
-Someone messages "open the office door" and this decides that means
-[open(door), report(...)]. Two implementations of the same interface:
+`Step`, `Plan` and `parse_plan` are used by every robot, through the per-robot planners in
+brain/domains.py. What differs between machines is vocabulary, and vocabulary is data; what
+does not differ lives here.
 
-  RulePlanner  Pattern matching over verbs and objects, in English and Japanese. Instant, no
-               weights, no failure modes. It handles the phrasings a demo actually receives.
-
-  LLMPlanner   Gemma 4 E2B running locally via MLX. Open-vocabulary: it copes with phrasings
-               nobody enumerated, at the cost of a model load and ~1 s per plan.
-
-LLMPlanner falls back to RulePlanner when the model is missing or returns something
-unparseable, so a bad generation degrades to a worse plan rather than no plan at all.
-
-On the model choice: Gemma 4 E2B is multimodal and small enough to be plausible on a real
-robot, which is the point of picking it. Use the 8-bit build - Gemma 4's per-layer embeddings
-quantise badly at 4-bit and the community weights are reported to produce garbage. There is
-128 GB here, so 8-bit costs nothing worth saving.
+`RulePlanner` is the general fallback: pattern matching over verbs and objects, instant, no
+weights, no failure modes. Each robot's `Domain` overrides its vocabulary, and `DomainRulePlanner`
+borrows its qualifier parsing ("the leftmost door", "the far crate"), which is the same problem
+whatever the robot is.
 """
 
 from __future__ import annotations
@@ -47,7 +39,7 @@ class Step:
     """One action in a plan.
 
     `where` carries a spatial qualifier -- "the door on the RIGHT" -- which matters whenever
-    several instances of the same object are in view. The office has three identical doors, so
+    several instances of the same object are in view. A corridor may have three identical doors, so
     dropping it would silently send the robot to whichever one happened to score best.
     """
 
@@ -179,33 +171,6 @@ def _unknown_target(text: str) -> str | None:
     return " ".join(remainder) if remainder else None
 
 
-# Words that join one action to the next. Their presence means the instruction has more parts
-# than a single verb-object match can represent.
-_SEQUENCERS = (
-    "then", "after that", "afterwards", "next,", "and then", "and also", "followed by",
-)
-
-
-def looks_multi_step(message: str) -> bool:
-    """True when an instruction chains several actions together.
-
-    RulePlanner can only ever produce one step, so on a chained instruction it silently
-    returns the wrong one -- "open the right-hand door, then go to the far left room" came
-    out as open(right door), having dropped the second half. Callers use this to say the
-    model is needed rather than letting the robot confidently do the wrong thing.
-
-    Detects two shapes of chain: an explicit conjunction ("and then"), and several clauses
-    separated by commas. Both are blunt, which is the point -- this only decides whether to
-    warn, and the model does the actual reading.
-    """
-    text = message.lower()
-    if any(word in text for word in _SEQUENCERS):
-        return True
-    # Two or more comma-separated clauses with real content in each.
-    clauses = [c for c in re.split(r",", message) if len(c.strip()) > 2]
-    return len(clauses) >= 2
-
-
 class RulePlanner:
     """Plans by matching verbs and objects. No model, no latency, no surprises.
 
@@ -232,7 +197,7 @@ class RulePlanner:
         expect = stated_count(message) if where else None
 
         if verb == "open":
-            # "open" with no object named is unambiguous in this office: it means a door.
+            # "open" with no object named is unambiguous in a corridor: it means a door.
             return Plan([Step("open", obj or "door", where, expect)])
         if verb in ("goto", "face", "point_at"):
             if obj is None:
@@ -298,63 +263,6 @@ class RulePlanner:
 # LLM planning
 # --------------------------------------------------------------------------------------
 
-_PLANNER_PROMPT = """You control a humanoid robot in an office. A corridor runs along the \
-south side. Off it, behind three doors, are three rooms: the workspace (left), the meeting \
-room (middle), and the pantry (right).
-
-Available actions:
-  goto <object>      walk to something (door, whiteboard, desk, table, monitor, plant, fridge)
-  face <object>      turn to look at something
-  open <object>      walk to a door, push it open, and go through
-  leave              come back out of the room the robot is in, into the corridor
-  close              pull the nearest door shut
-  home               walk back to where the robot was standing when it was given the task
-  point_at <object>  point at something
-  look_around        turn in place and report what is visible
-  describe           say what is currently in view
-  where              report which room the robot is in
-  report <text>      say something to the user
-  raise_arm <l|r>    put one arm up and hold it there
-  wave <l|r>         raise one arm, swing it a few times, and lower it
-  lower_arm <l|r>    put the arm back at the robot's side
-
-Each step may also carry "where" to pick between identical objects. Use it whenever the user
-says which one they mean:
-  "left" | "right" | "middle" | "nearest" | "far"
-
-If the user says how many there are -- "of the three doors" -- put that
-number in "expect". It tells the robot how many it should be choosing between.
-
-Rules:
-- Only ever use the object names listed above. There is no "corridor" or "room" object; a room
-  is entered by opening its door, so "go into the left room" is {{"action": "open",
-  "argument": "door", "where": "left"}}.
-- "open" already walks there and goes through, so never follow it with a goto for the same door.
-- From inside a room no other door is visible, so ALWAYS use "leave" before opening a
-  different door.
-- "left" and "right" are judged from where the user is describing, which is where the robot
-  started. After leaving a room it is beside one doorway and can only see that one, so ALWAYS
-  use "home" before a second qualified door. "go into the right room, then the left room" is:
-  open right -> leave -> home -> open left.
-- Break a multi-part instruction into one step per action, in the order the user said them.
-
-The user said: "{message}"
-
-Reply with ONLY a JSON array of steps, no other text. Examples:
-
-"open the right door"
-[{{"action": "open", "argument": "door", "where": "right"}}]
-
-"of the three doors you can see, open the right one"  (note the count)
-[{{"action": "open", "argument": "door", "where": "right", "expect": 3}}]
-
-"open the right door, then go into the leftmost room"
-[{{"action": "open", "argument": "door", "where": "right"}}, {{"action": "leave"}}, \
-{{"action": "home"}}, {{"action": "open", "argument": "door", "where": "left"}}]
-
-If the request is just conversation, reply with:
-[{{"action": "report", "argument": "<your reply>"}}]"""
-
 
 _CHECK_PROMPT = """You are a robot standing in front of one of several doors.
 
@@ -366,111 +274,13 @@ You were told to go to the {where} door. The door you are facing is the one near
 Is the door you are facing the {where} one? Answer with a single word, yes or no."""
 
 
-class LLMPlanner:
-    """Plans with a local Gemma 4 model, falling back to rules when it cannot."""
-
-    def __init__(
-        self,
-        model_id: str = "lmstudio-community/gemma-4-E2B-it-MLX-8bit",
-        max_tokens: int = 200,
-        fallback: RulePlanner | None = None,
-    ):
-        self.model_id = model_id
-        self.max_tokens = max_tokens
-        self.fallback = fallback or RulePlanner()
-        self._model = None
-        self._tokenizer = None
-        self._config = None
-
-    def _load(self) -> None:
-        """Load the model through mlx_vlm, not mlx_lm.
-
-        Gemma 4 E2B is multimodal, so its weights live under `language_model.*` and mlx_lm's
-        text-only loader rejects every tensor. mlx_vlm understands the layout, and using it
-        also leaves the door open to handing the planner a camera frame later.
-        """
-        if self._model is not None:
-            return
-        try:
-            from mlx_vlm import load  # noqa: PLC0415 - optional heavy dependency
-            from mlx_vlm.utils import load_config  # noqa: PLC0415
-        except ImportError as e:  # pragma: no cover
-            raise RuntimeError(
-                "mlx-vlm is not installed. Install the extra: uv pip install -e '.[llm]'"
-            ) from e
-        log.info("loading planner model %s (first run downloads weights)", self.model_id)
-        self._model, self._tokenizer = load(self.model_id)
-        self._config = load_config(self.model_id)
-
-    def check_choice(self, where: str, bearings_deg: list[float]) -> bool | None:
-        """Ask the model whether the door being faced is the one that was asked for.
-
-        Called at a standstill, once, before the robot commits to opening something -- which is
-        the moment a second opinion is worth its latency. The geometry is already decided by
-        the time this runs; what the model adds is a check on the reasoning, in the same terms
-        the instruction used.
-
-        Returns None if the model cannot be reached or does not answer clearly, which leaves
-        the caller's own geometric test in charge.
-        """
-        if len(bearings_deg) < 2:
-            return None
-        try:
-            self._load()
-            from mlx_vlm import generate  # noqa: PLC0415
-            from mlx_vlm.prompt_utils import apply_chat_template  # noqa: PLC0415
-
-            listing = ", ".join(f"{b:+.0f} degrees" for b in sorted(bearings_deg, reverse=True))
-            prompt = apply_chat_template(
-                self._tokenizer, self._config,
-                _CHECK_PROMPT.format(where=where, bearings=listing),
-                num_images=0,
-            )
-            reply = generate(
-                self._model, self._tokenizer, prompt, [], max_tokens=12, verbose=False,
-            )
-            text = (reply if isinstance(reply, str) else getattr(reply, "text", "")).strip()
-            lowered = text.lower()
-            if "yes" in lowered:
-                return True
-            if "no" in lowered:
-                return False
-            log.info("check produced no clear answer (%r)", text[:40])
-        except Exception as e:  # noqa: BLE001 - a check failure must not stop the robot
-            log.info("could not check the choice with the model (%s)", e)
-        return None
-
-    def plan(self, message: str) -> Plan:
-        try:
-            self._load()
-            from mlx_vlm import generate  # noqa: PLC0415
-            from mlx_vlm.prompt_utils import apply_chat_template  # noqa: PLC0415
-
-            prompt = apply_chat_template(
-                self._tokenizer, self._config, _PLANNER_PROMPT.format(message=message),
-                num_images=0,
-            )
-            reply = generate(
-                self._model, self._tokenizer, prompt, [],
-                max_tokens=self.max_tokens, verbose=False,
-            )
-            text = reply if isinstance(reply, str) else getattr(reply, "text", str(reply))
-            steps = parse_plan(text)
-            if steps:
-                return Plan(steps)
-            log.warning("planner model produced no usable steps; falling back to rules")
-        except Exception as e:  # noqa: BLE001 - a planner failure must not stop the robot
-            log.warning("planner model unavailable (%s); falling back to rules", e)
-        return self.fallback.plan(message)
-
-
 def parse_plan(text: str, allowed: tuple[str, ...] = ACTIONS) -> list[Step]:
     """Extract steps from a model reply.
 
     Locates the JSON array by bracket matching rather than parsing the whole reply, because
     models routinely wrap it in prose or a code fence.
 
-    `allowed` is the vocabulary the plan is checked against. It defaults to the office robot's
+    `allowed` is the vocabulary the plan is checked against. It defaults to the general
     verbs so existing callers are unaffected; the other robots pass their own, because a plan
     naming an action their skills do not have is a misunderstanding worth dropping rather than
     a step worth attempting. See brain/domains.py.

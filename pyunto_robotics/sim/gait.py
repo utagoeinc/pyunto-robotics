@@ -73,7 +73,7 @@ class KinematicGait:
     Arms are left alone: whoever is doing manipulation owns those joints.
 
     The amplitudes are modest on purpose. Raising them to 0.9/1.6 lifts the feet 9-12 cm
-    instead of 3, which looks far more like walking -- and rocks the body enough that Asimov
+    instead of 3, which looks far more like walking -- and rocks the body enough that a taller humanoid
     stopped fitting through a 1.1 m doorway, taking the errand from 4/4 to 0/4 with 63% of
     control steps in contact. Legs that look right are worth less than a robot that gets
     through the door.
@@ -123,7 +123,7 @@ class KinematicGait:
                 self._act[name] = i
         # Which way each leg joint bends, read off the model rather than assumed.
         #
-        # STANCE is written for pyunto_h1, whose knee flexes positive (range 0..2.2). Asimov 1
+        # STANCE is written for pyunto_h1, whose knee flexes positive (range 0..2.2). a mirrored-leg humanoid
         # flexes the other way (-1.5..0), so the same numbers land outside the limit and the
         # servo holds a straight leg through the whole gait cycle -- the robot slid along on a
         # frozen pose. A joint that cannot reach the stance value in the sign STANCE assumes,
@@ -137,7 +137,7 @@ class KinematicGait:
             if low == high:  # unlimited
                 continue
             # Which way this joint bends, from where its travel lies rather than from whether
-            # a particular value fits. Asimov's legs are mirrored -- right knee [-1.5, 0],
+            # a particular value fits. some humanoids have mirrored legs -- right knee [-1.5, 0],
             # left knee [0, 1.5] -- so a stance of +0.5 is inside the left one's range and
             # outside the right's. Testing only for "does it fit" therefore flipped the right
             # knee and left the left alone, and the two legs drove in phase instead of
@@ -159,7 +159,7 @@ class KinematicGait:
         """Nudge a stance target inward if the swing around it would hit the joint's limit.
 
         A stance sitting on a limit has travel in one direction only, and half the cycle is
-        clipped away. Asimov's left knee stops at 0 and its stance lands there, so that leg
+        clipped away. such a model's left knee stops at 0 and its stance lands there, so that leg
         lifted 0.055 m where the right, whose stance sits mid-range, lifted 0.123 m -- one
         straight leg and one bent one, which is not a walk.
         """
@@ -179,7 +179,7 @@ class KinematicGait:
         lo, hi = model.actuator_ctrlrange[idx]
         # Clip to the JOINT's limit too, not just the actuator's. A command outside the joint
         # range is not refused, it is simply not reached, and the half of the cycle that lies
-        # outside is silently flattened: Asimov's left knee runs [0, 1.5] and the swing took
+        # outside is silently flattened: such a model's left knee runs [0, 1.5] and the swing took
         # the command to -0.14, so that leg lifted 0.046 m where the right lifted 0.094 and
         # the robot walked with one straight leg. Clipping here makes the loss visible to the
         # caller instead of leaving it to the physics.
@@ -211,7 +211,7 @@ class KinematicGait:
         # Right leg leads, left leg trails by pi.
         #
         # The half-cycle offset is the gait's own, and must survive whatever sign convention
-        # the model uses: on a mirrored pair of legs -- Asimov's right knee runs [-1.5, 0] and
+        # the model uses: on a mirrored pair of legs -- such a model's right knee runs [-1.5, 0] and
         # its left [0, 1.5] -- flipping each side independently negates the left leg twice,
         # once for the mirror and once for the phase, and the two legs drive together.
         # Measured a hip correlation of +0.88 that way, against -0.94 on a robot that walks.
@@ -231,7 +231,7 @@ class KinematicGait:
         # Knee lifts only while the leg is swinging forward (positive half of the cycle).
         # A knee lifts by FLEXING, and which way that is depends on the joint, not on the
         # gait's convention -- so each knee takes its own sign here rather than sharing the
-        # right one's. Sharing it drove Asimov's left knee from its stance at +0.50 down to 0,
+        # right one's. Sharing it drove such a model's left knee from its stance at +0.50 down to 0,
         # its own limit, straightening the leg on the half-cycle it was meant to lift:
         # measured that foot rising 0.058 m against the right's 0.124.
         self._set(model, data, "knee_r",
@@ -354,7 +354,7 @@ class DynamicGait:
                 knee flexion the ground clearance, ankle pitch keeps the sole flat so it
                 lands on the whole foot rather than a toe or a heel.
 
-    Signs come from the model. Asimov's legs are mirrored -- right knee [-1.5, 0], left knee
+    Signs come from the model. some humanoids have mirrored legs -- right knee [-1.5, 0], left knee
     [0, 1.5] -- so every target is expressed as "flex" or "extend" and turned into a number
     per joint from its own range.
 

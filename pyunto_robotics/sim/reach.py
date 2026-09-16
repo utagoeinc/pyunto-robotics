@@ -1,9 +1,9 @@
 """Putting a hand where you want it.
 
-The office robot never needed this: a door handle is at a known height and a fixed
-(shoulder_pitch, elbow) pair puts the gripper on it. Laundry is different -- a towel corner is
-wherever it has fallen, the drum is a cavity the hand has to enter, and the fold target moves
-as the sheet does. So the arm has to be aimed at a world POINT, not at a remembered pose.
+A fixed pose is enough for a fixed target: a door handle is at a known height, and a stored
+(shoulder_pitch, elbow) pair puts the gripper on it. It is not enough for anything that moves
+-- something dropped on the floor, a cavity the hand has to enter -- because then the arm has
+to be aimed at a world POINT rather than at a remembered pose.
 
 This is damped least-squares IK on MuJoCo's own Jacobian, run on a scratch copy of the state so
 the search never disturbs the live simulation. It is deliberately small: the arm is a 4-DoF

@@ -76,7 +76,7 @@ def _wait_for_key(connection: Connection, space_id: str, timeout: float = 300.0)
 
 
 def run_demo(
-    robot_name: str = "office",
+    robot_name: str = "solar",
     pair: str | None = None,
     use_llm: bool = False,
     commands: str | None = None,

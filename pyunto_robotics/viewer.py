@@ -108,7 +108,7 @@ def open_viewer(robot, speed: float = 1.0, camera: Camera | None = None) -> View
     viewer.sync()
 
     handle = ViewerHandle(viewer, robot.control_dt, speed)
-    # Redraw during long actions too, not just while idle: a walk across the office is one
+    # Redraw during long actions too, not just while idle: a walk across a room is one
     # blocking call, and a window that only updates between messages looks frozen.
     robot.on_step = handle.pace
     return handle

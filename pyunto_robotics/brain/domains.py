@@ -1,9 +1,9 @@
 """Turning a sentence into a plan, for each robot.
 
-The office planner in brain/planner.py is written around one robot in one building: its verbs
-are `open`/`leave`/`home`, its nouns are doors and whiteboards, and its LLM prompt describes a
-corridor with three rooms. None of that transfers to a robot folding laundry or driving on the
-Moon.
+The general planner in brain/planner.py is written around one robot in one building: its verbs
+are `open`/`leave`/`home`, its nouns are doors and whiteboards, and its prompt describes a
+corridor with three rooms. None of that transfers to a rover on Mars or a camera looking for a
+cat.
 
 So each domain gets a Domain: its own verbs, its own words for things, and its own prompt. The
 machinery underneath is shared -- the same rule matcher, the same JSON extraction, the same
@@ -36,7 +36,6 @@ _GREETINGS = (
 )
 
 
-
 # What every domain prompt has to end with, and none of them did.
 #
 # The model was answering correctly -- asked to move somewhere sunny it replied
@@ -67,7 +66,7 @@ class Domain:
 
     name: str
     # Verb patterns, matched in order, so the more specific phrasing must come first --
-    # "put it in the basket" has to beat "put it down", and "open the washer" has to beat "open".
+    # "look around" has to beat "look at", and "clean this floor" has to beat "clean".
     verbs: tuple[tuple[str, tuple[str, ...]], ...]
     # Object words, mapped onto the name a skill expects.
     objects: dict[str, tuple[str, ...]] = field(default_factory=dict)
@@ -148,7 +147,7 @@ class Domain:
         return None
 
     def object_in(self, text: str) -> str | None:
-        """Longest match wins, so "blue towel" beats "towel"."""
+        """Longest match wins, so "cat tree" beats "tree"."""
         lowered = text.lower()
         best: tuple[int, str] | None = None
         for name, words in self.objects.items():
@@ -161,7 +160,7 @@ class Domain:
 class DomainRulePlanner:
     """Plans by matching a domain's verbs and objects. No model, no latency, no surprises.
 
-    One step per message, exactly like the office RulePlanner -- and with the same caveat: a
+    One step per message, exactly like the general RulePlanner -- and with the same caveat: a
     chained instruction is beyond it by construction, so callers should warn and suggest --llm.
     """
 
@@ -203,7 +202,7 @@ class DomainRulePlanner:
 class DomainLLMPlanner:
     """Plans with a local Gemma 4 model against a domain's prompt, falling back to rules.
 
-    Shares the office LLMPlanner's design and its reasons: load through mlx_vlm rather than
+    Shares the general LLMPlanner's design and its reasons: load through mlx_vlm rather than
     mlx_lm because Gemma 4 is multimodal, use the 8-bit build because the per-layer embeddings
     quantise badly at 4-bit, and never let a model failure stop the robot -- a bad generation
     degrades to a worse plan, not to no plan.
@@ -278,12 +277,12 @@ class DomainLLMPlanner:
         handles the other case: the robot knows exactly where things are, and the PLAN has been
         overtaken by events.
 
-        The case it was written for: carrying the basket to the washer puts the basket exactly
-        where the robot needed to stand to reach into the drum. Nothing is broken and nothing
-        is lost -- the plan was simply written before the basket moved, and the fix is to do
-        the remaining steps in a different order or from a different place. A planner that only
-        ever sees the original sentence cannot work that out; one that is told what the robot
-        can see and what just went wrong usually can.
+        The shape of case it is for: the robot parks where it needs to stand, and the thing it
+        came for is now behind it -- or a door it meant to use is the one it is holding open.
+        Nothing is broken and nothing is lost; the plan was simply written before the world
+        moved, and the fix is to do the remaining steps in a different order or from a
+        different place. A planner that only ever sees the original sentence cannot work that
+        out; one that is told what the robot can see and what just went wrong usually can.
         """
         try:
             self._load()
@@ -313,7 +312,7 @@ class DomainLLMPlanner:
             return None
 
 
-_REPLAN_PROMPT = """A household robot was carrying out an errand and one step failed.
+_REPLAN_PROMPT = """A robot was carrying out an errand and one step failed.
 
 Available actions:
 {actions}
@@ -337,255 +336,11 @@ Work out what it should do NOW to finish the errand. The failure is usually not 
 often something has moved, or the robot is standing in the wrong place, and doing the same
 steps in a different order or after repositioning will work.
 
-Reply with ONLY a JSON array of the remaining steps, no other text. For example:
-[{{"action": "open_washer"}}, {{"action": "take_out"}}]
+Reply with ONLY a JSON array of the remaining steps, no other text, using ONLY the actions
+listed above. For example:
+[{{"action": "goto", "argument": "shed"}}, {{"action": "deliver"}}]
 
 If the errand genuinely cannot be finished, reply with an empty array: []"""
-
-
-# ======================================================================================
-# The home / laundry domain
-# ======================================================================================
-
-HOME = Domain(
-    name="home",
-    verbs=(
-        ("close_washer", (
-            "close the washer", "close the washing machine", "close the door", "shut the"
-        )),
-        ("open_washer", ("open the washer", "open the washing machine", "open the drum")),
-        ("bring_basket", (
-            "bring the basket", "fetch the basket", "get the basket", "carry the basket",
-            "move the basket", "basket to the washer"
-        )),
-        ("take_out", (
-            "take out", "take it out", "get the towel", "take the towel", "unload",
-            "pull it out"
-        )),
-        ("to_basket", ("in the basket", "into the basket", "to the basket", "in the hamper")),
-        ("to_counter", (
-            "on the counter", "onto the counter", "to the counter", "on the washstand",
-            "on the vanity"
-        )),
-        ("fold", ("fold", "folding")),
-        ("describe", ("what do you see", "describe", "what can you see")),
-        ("where", ("where are you", "your position")),
-        ("home", ("go back to where you started", "back to the start")),
-    ),
-    objects={
-        "blue": ("blue towel", "the blue one"),
-        "pink": ("pink towel", "the pink one"),
-        "towel": ("towel", "laundry", "washing"),
-    },
-    intransitive=frozenset(
-        {"open_washer", "close_washer", "to_basket", "describe", "where", "home"}
-    ),
-    help_text=(
-        "I can open the washing machine, take the laundry out, put it in the basket or on "
-        'the counter, and fold it. Try: "take the towel out of the washer and fold it"'
-    ),
-    prompt="""You control a small humanoid robot in a home laundry room. There is a front-\
-loading washing machine with a towel inside, a laundry basket on a stand, and a washstand \
-counter with room to lay laundry out flat.
-
-Available actions:
-  open_washer        open the washing machine door
-  close_washer       push the washing machine door shut again
-  take_out <towel>   take a towel out of the drum and hold it
-  to_basket          put whatever is being held into the laundry basket
-  to_counter <towel> put a towel down on the washstand counter
-  fold <towel>       fold a towel that is lying on the counter
-  bring_basket <where>  pick the laundry basket up and carry it somewhere
-                     (washer, counter -- defaults to the washer)
-  describe           say what is currently in view
-  where              report where in the room the robot is
-  home               go back to where the robot started
-  report <text>      say something to the user
-
-The towels can be named "blue" or "pink". Leave the argument out if the user did not say.
-
-Rules:
-- The washing machine has to be opened before anything can be taken out of it.
-- A towel has to be ON THE COUNTER before it can be folded -- folding needs a flat surface.
-  So "take the towel out and fold it" is: open_washer -> take_out -> to_counter -> fold.
-- But ONLY fetch a towel when the user actually asks for it to be fetched. If they just say
-  "fold the towel" and say nothing about the washing machine, the towel is already out and
-  the whole plan is: fold. Do not add open_washer or take_out to a bare folding request --
-  the robot would walk to the washer and rummage in an empty drum while the towel sits on
-  the counter in front of it. Saying WHERE the towel is ("the towel on the counter") is the
-  same bare request: it is already on the counter, so the
-  plan is still just: fold. Only the washing machine being named means fetching.
-- The robot has ONE pair of hands and can hold one towel at a time. Put a towel down before
-  picking anything else up.
-- close_washer needs BOTH HANDS, so it cannot be done while carrying laundry. If the user asks
-  to shut the door after taking the washing out, put the laundry down first and close the door
-  after: take_out -> to_basket -> close_washer, or take_out -> to_counter -> close_washer.
-- The counter IS the table laundry is folded on. "carry it to the folding table" is to_counter.
-- The basket CAN be carried now. "bring the basket to the washer" is bring_basket with
-  argument "washer"; it is a real errand, not a refusal.
-- bring_basket needs BOTH HANDS, like close_washer, so it cannot be done while holding a
-  towel. Fetch the basket BEFORE taking the laundry out, which is also the sensible order.
-- Only use the action names listed above.
-- Break a multi-part instruction into one step per action, in the order the user said them.
-  Several clauses joined by commas are several actions, not one.
-
-The user said: "{message}"
-
-Reply with ONLY a JSON array of steps, no other text. Examples:
-
-"open the washing machine"
-[{{"action": "open_washer"}}]
-
-"take the towel out and put it in the basket"
-[{{"action": "open_washer"}}, {{"action": "take_out"}}, {{"action": "to_basket"}}]
-
-"take the blue towel out of the washer and fold it"
-[{{"action": "open_washer"}}, {{"action": "take_out", "argument": "blue"}}, \
-{{"action": "to_counter", "argument": "blue"}}, {{"action": "fold", "argument": "blue"}}]
-
-"fold the towel"
-  (nothing was said about the washing machine, so the towel is already out: just fold it)
-[{{"action": "fold"}}]
-
-"please fold the towel on the counter"
-  (the towel is on the counter already; naming the counter is not a request to fetch it)
-[{{"action": "fold"}}]
-
-"bring the basket to the washer, open the door, put the laundry in the basket, shut the door"
-  (fetch the basket FIRST -- carrying it needs both hands, as does shutting the door)
-[{{"action": "bring_basket", "argument": "washer"}}, {{"action": "open_washer"}}, \
-{{"action": "take_out"}}, {{"action": "to_basket"}}, {{"action": "close_washer"}}]
-
-"open the washer, take the laundry out, shut the door, and carry it to the folding table"
-  (the door is shut AFTER the laundry is put down, because closing needs both hands)
-[{{"action": "open_washer"}}, {{"action": "take_out"}}, {{"action": "to_counter"}}, \
-{{"action": "close_washer"}}]
-
-If the request is just conversation, reply with:
-[{{"action": "report", "argument": "<your reply>"}}]""",
-)
-
-
-# ======================================================================================
-# The outdoor patrol domain
-# ======================================================================================
-
-PATROL = Domain(
-    name="patrol",
-    verbs=(
-        ("patrol", (
-            "patrol", "walk the route", "go round the building", "do a lap",
-            "walk around the building", "circuit"
-        )),
-        ("climb", ("climb", "go up the steps", "up the stairs", "go up to the entrance")),
-        ("goto", ("go to", "walk to", "head to", "move to", "waypoint", "corner")),
-        ("look_around", ("look around", "scan", "have a look")),
-        ("describe", ("what do you see", "describe", "what can you see")),
-        ("where", ("where are you", "your position")),
-        ("home", ("go back to where you started", "back to the start", "come back")),
-    ),
-    intransitive=frozenset({"patrol", "climb", "look_around", "describe", "where", "home"}),
-    help_text=(
-        "I can patrol around the building, go to a numbered corner, climb the steps to the "
-        'entrance, and tell you what I can see. Try: "walk once around the building"'
-    ),
-    prompt="""You control a four-legged patrol robot outdoors, at a building on a small site. \
-There is a lawn, trees, hedges, bollards, and a flight of three steps up to the building \
-entrance. Four numbered waypoints mark the corners of the patrol route around the building.
-
-Available actions:
-  patrol [n]      walk the whole route round the building, n laps (default 1)
-  goto <n>        go to numbered waypoint n (1 to 4)
-  climb           climb the steps to the building entrance
-  look_around     turn on the spot and report what is visible
-  describe        say what is currently in view
-  where           report which side of the building the robot is on
-  home            go back to where the robot started
-  report <text>   say something to the user
-
-Rules:
-- Only use the action names listed above. There is no action for opening anything: this robot
-  has no arms.
-- "go round the building" or "do a lap" is `patrol`, not four `goto` steps.
-- Break a multi-part instruction into one step per action, in the order the user said them.
-
-The user said: "{message}"
-
-Reply with ONLY a JSON array of steps, no other text. Examples:
-
-"patrol around the building"
-[{{"action": "patrol"}}]
-
-"go to corner 2, then climb the steps"
-[{{"action": "goto", "argument": "2"}}, {{"action": "climb"}}]
-
-"walk the route twice and tell me what you saw"
-[{{"action": "patrol", "argument": "2"}}, {{"action": "describe"}}]
-
-If the request is just conversation, reply with:
-[{{"action": "report", "argument": "<your reply>"}}]""",
-)
-
-
-# ======================================================================================
-# The lunar domain
-# ======================================================================================
-
-LUNAR = Domain(
-    name="lunar",
-    verbs=(
-        ("survey", ("survey", "look around", "scan the area", "have a look round")),
-        ("attitude", ("how steep", "are you tilted", "attitude", "your tilt")),
-        ("home", ("go back to the lander", "return to base", "come back", "back to the lander")),
-        ("goto", ("go to", "drive to", "head to", "head for", "make for", "approach")),
-        ("describe", ("what do you see", "describe", "what can you see")),
-        ("where", ("where are you", "your position")),
-    ),
-    objects={
-        "lander": ("lander", "base"),
-        "ice": ("ice", "water", "deposit"),
-        "beacon": ("beacon", "marker", "mast"),
-        "crater": ("crater", "rim"),
-    },
-    intransitive=frozenset({"survey", "attitude", "describe", "where", "home"}),
-    help_text=(
-        "I can drive to the lander, the ice deposit, the beacon or the crater rim, survey the "
-        'area, and report how steeply I am tilted. Try: "drive to the crater rim"'
-    ),
-    prompt="""You control a six-wheeled rover on the lunar south pole. The surface is cratered \
-regolith. There is a lander (the rover's base), an ice deposit, a survey beacon, and the rim \
-of a large crater. The Sun is low, so much of the surface is in deep shadow.
-
-Available actions:
-  goto <target>   drive to a target: lander, ice, beacon, or crater
-  survey          turn a full circle and report what is visible and where the shadows are
-  describe        say what is currently in view
-  where           report where the rover is relative to the named places
-  attitude        report how steeply the rover is pitched and rolled
-  home            drive back to the lander
-  report <text>   say something to the user
-
-Rules:
-- Only use the action names and target names listed above.
-- Driving is slow and the terrain can stop the rover, so do not chain more than a few drives.
-- Break a multi-part instruction into one step per action, in the order the user said them.
-
-The user said: "{message}"
-
-Reply with ONLY a JSON array of steps, no other text. Examples:
-
-"drive to the beacon"
-[{{"action": "goto", "argument": "beacon"}}]
-
-"go to the ice and tell me what you see"
-[{{"action": "goto", "argument": "ice"}}, {{"action": "describe"}}]
-
-"have a look round, then come back to the lander"
-[{{"action": "survey"}}, {{"action": "home"}}]
-
-If the request is just conversation, reply with:
-[{{"action": "report", "argument": "<your reply>"}}]""",
-)
 
 
 SOLAR = Domain(
@@ -776,59 +531,6 @@ Rules:
 )
 
 
-HOUSE = Domain(
-    name="house",
-    verbs=(
-        ("lock_status", ("is the door locked", "is it locked", "did i lock", "door locked")),
-        ("status", ("everything alright", "how is the house", "house status", "all okay")),
-        ("temperature", (
-            "how warm", "how cold", "what is the temperature", "temperature", "how hot"
-        )),
-        ("set_temperature", ("set the aircon", "set it to", "set to", "degrees")),
-        ("warmer", ("warmer", "warm it up", "turn up the heat", "too cold")),
-        ("cooler", ("cooler", "cool it down", "turn it down", "too hot", "too warm")),
-        ("aircon_off", ("turn the aircon off", "aircon off", "turn off the air")),
-        ("aircon_on", ("turn the aircon on", "aircon on", "turn on the air", "air conditioning")),
-        ("lights_off", ("lights off", "turn the lights off", "turn off the light")),
-        ("lights_on", ("lights on", "turn the lights on", "turn on the light")),
-        ("unlock", ("unlock", "open the door")),
-        ("lock", ("lock up", "lock the door", "lock")),
-    ),
-    objects={
-        "living room": ("living room", "lounge"),
-        "bedroom": ("bedroom",),
-        "kitchen": ("kitchen",),
-    },
-    intransitive=frozenset({
-        "lock", "unlock", "lock_status", "status", "temperature", "warmer", "cooler",
-        "aircon_on", "aircon_off", "lights_on", "lights_off",
-    }),
-    help_text=(
-        "I look after the house: the air conditioning, the lights, the front door lock and "
-        'the thermometers. Try: "set the living room aircon to 24 degrees"'
-    ),
-    prompt="""You control the devices in a house: air conditioning, lights and a thermometer \
-in each of three rooms (living room, bedroom, kitchen), and the lock on the front door.
-
-Available actions:
-  temperature       report how warm a room is
-  set_temperature   set the air conditioning to a given temperature
-  warmer / cooler   nudge the air conditioning up or down
-  aircon_on / aircon_off
-  lights_on / lights_off
-  lock / unlock     the front door
-  lock_status       report whether the front door is locked
-  status            report the whole house at once
-  report <text>     say something to the user
-
-Rules:
-- Only use the action names listed above.
-- Put the room in `where` when the user names one.
-- Asking whether the door is locked is `lock_status`, not `lock`.
-""" + _OUTPUT_FORMAT,
-)
-
-
 WATCH = Domain(
     name="watch",
     verbs=(
@@ -962,6 +664,6 @@ Rules:
 
 
 DOMAINS: dict[str, Domain] = {
-    "home": HOME, "patrol": PATROL, "lunar": LUNAR, "solar": SOLAR, "mars": MARS,
-    "orchard": ORCHARD, "hotel": HOTEL, "house": HOUSE, "watch": WATCH, "pet": PET,
+    "solar": SOLAR, "watch": WATCH, "pet": PET,
+    "mars": MARS, "orchard": ORCHARD, "hotel": HOTEL,
 }

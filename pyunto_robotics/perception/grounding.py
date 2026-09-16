@@ -1,6 +1,6 @@
 """Finding a named thing in an image.
 
-The robot is told "open the office door" and has to work out which pixels are the door. Two
+The robot is told "drive to the sample" and has to work out which pixels are the sample. Two
 implementations of the same interface:
 
   ColorGrounder  Finds objects by their appearance in the scene. Fast, deterministic, and has
@@ -61,37 +61,19 @@ class Grounder(Protocol):
 # Colour-based grounding
 # --------------------------------------------------------------------------------------
 
-# Objects in the office are deliberately colour-coded, so hue is a reliable cue here.
+# Landmarks in these scenes are deliberately colour-coded, so hue is a reliable cue here.
 # These RGB values were sampled from rendered frames, not taken from the material definitions --
 # lighting shifts everything, so the material's nominal colour is not what the camera sees.
 #
-# Note the whiteboard and the fridge: near-white and near-grey are close to the office walls
-# and floor, so they are weak targets for this grounder. That is a real limitation of matching
-# on colour, and the reason VLMGrounder exists.
+# Anything near-white or near-grey is a weak target for this grounder, being close to walls
+# and floors. That is a real limitation of matching on colour, and the reason VLMGrounder
+# exists.
 _PALETTE: dict[str, tuple[tuple[int, int, int], int]] = {
-    "door": ((205, 145, 60), 55),        # orange frame; overlaps the leaf under office light
-    "door_panel": ((190, 135, 86), 40),  # the wooden leaf itself
-    "whiteboard": ((250, 250, 244), 8),  # tight: office walls render near (255,255,248)
-    "monitor": ((26, 31, 41), 22),
-    "plant": ((51, 128, 64), 40),
-    "table": ((89, 76, 66), 30),
-    "desk": ((140, 102, 71), 30),
-    "fridge": ((178, 184, 191), 15),
-
-    # --- residential street (assets/delivery.xml) ---
-    # Front doors are the landmarks here, and each is a different colour because that is how
-    # a person gives the address: "the house with the red door". The four are far apart in
-    # RGB and far from the roofs, hedges and grass, so a door is never confused for scenery.
-    # Tolerances are tight (30) because the doors differ from each other, not from the walls,
-    # and a loose match would let red bleed into the brick-coloured roofs.
-    # Measured from a rendered frame, not copied from the material's rgba: emission, the
-    # sun angle and MuJoCo's tone mapping all move the final pixel, and a palette written
-    # from the XML matched nothing. If a door is retinted, re-measure rather than guess.
-    "red door": ((255, 56, 48), 45),
-    "blue door": ((48, 141, 255), 45),
-    "green door": ((36, 214, 84), 45),
-    "yellow door": ((249, 250, 26), 45),
-    "postbox": ((191, 64, 51), 26),
+    # --- solar errand (assets/solar.xml) ---
+    "tree": ((46, 115, 51), 38),
+    "hedge": ((56, 107, 56), 30),
+    "building": ((204, 199, 189), 22),
+    "window": ((89, 140, 178), 35),
 
     # --- Mars (assets/mars.xml) ---
     # Measured from rendered frames. Tolerances are tight because the ground here is itself a
@@ -108,92 +90,30 @@ _PALETTE: dict[str, tuple[tuple[int, int, int], int]] = {
     "crates": ((250, 74, 62), 45),
     "shed": ((46, 117, 255), 45),
 
-    # --- home / laundry scene (assets/home.xml) ---
-    # The washer is white against a white wall, which colour matching cannot see at all -- so
-    # the cue is its blue trim ring, exactly as the office doors are found by their orange
-    # frames rather than by the leaf.
-    "washer": ((51, 115, 204), 45),
-    "basket": ((242, 184, 56), 45),
-    "counter": ((184, 140, 97), 35),
-    "towel_blue": ((89, 168, 224), 45),
-    "towel_pink": ((245, 184, 199), 35),
-
-    # --- outdoor patrol scene (assets/campus.xml) ---
-    # Foliage and hedges are both green and deliberately separate entries: a canopy is 3 m up
-    # and a landmark, a hedge is at knee height and an obstacle, and telling them apart from
-    # colour alone needs the two greens to be distinguishable.
-    "tree": ((46, 115, 51), 38),
-    "hedge": ((56, 107, 56), 30),
-    "entrance": ((229, 115, 38), 45),
-    "bollard": ((217, 77, 38), 40),
-    "building": ((204, 199, 189), 22),
-    "window": ((89, 140, 178), 35),
-
+    # --- hotel (assets/hotel.xml) ---
+    "door": ((205, 145, 60), 55),
+    "lift": ((237, 66, 158), 45),
 }
 
 # What a user might say, mapped to what the scene calls it.
 _SYNONYMS: dict[str, str] = {
     'door': 'door',
     'doorway': 'door',
-    'entrance': 'entrance',
-    'exit': 'door',
-    'whiteboard': 'whiteboard',
-    'board': 'whiteboard',
-    'monitor': 'monitor',
-    'screen': 'monitor',
-    'display': 'monitor',
-    'plant': 'plant',
-    'table': 'table',
-    'meeting table': 'table',
-    'desk': 'desk',
-    'fridge': 'fridge',
-    'refrigerator': 'fridge',
-    'red door': 'red door',
-    'red house': 'red door',
-    'blue door': 'blue door',
-    'blue house': 'blue door',
-    'green door': 'green door',
-    'green house': 'green door',
-    'yellow door': 'yellow door',
-    'yellow house': 'yellow door',
-    'postbox': 'postbox',
-    'post box': 'postbox',
-    'mailbox': 'postbox',
+    'lift': 'lift',
+    'elevator': 'lift',
+    'tree': 'tree',
+    'hedge': 'hedge',
+    'building': 'building',
+    'house': 'building',
+    'window': 'window',
     'cache': 'cache',
-    'sample cache': 'cache',
     'sample': 'cache',
     'beacon': 'beacon',
-    'marker': 'beacon',
-    'crates': 'crates',
-    'crate': 'crates',
-    'apples': 'crates',
-    'fruit': 'crates',
-    'shed': 'shed',
-    'packing shed': 'shed',
-    'barn': 'shed',
     'lander': 'lander',
-    'base': 'lander',
-    'washer': 'washer',
-    'washing machine': 'washer',
-    'drum': 'washer',
-    'basket': 'basket',
-    'laundry basket': 'basket',
-    'counter': 'counter',
-    'vanity': 'counter',
-    'washstand': 'counter',
-    'towel': 'towel_blue',
-    'blue towel': 'towel_blue',
-    'pink towel': 'towel_pink',
-    'tree': 'tree',
-    'trees': 'tree',
-    'hedge': 'hedge',
-    'bush': 'hedge',
-    'bollard': 'bollard',
-    'post': 'bollard',
-    'building': 'building',
-    'window': 'window',
-    'panel': 'panel',
-    'solar panel': 'panel',
+    'crate': 'crates',
+    'crates': 'crates',
+    'apples': 'crates',
+    'shed': 'shed',
 }
 
 
@@ -210,7 +130,7 @@ def _canonical(description: str) -> str | None:
 
 
 class ColorGrounder:
-    """Locates objects by their known colour in the simulated office.
+    """Locates objects by their known colour in the simulated scenes.
 
     This is not a perception research contribution; it is a dependable stand-in that lets the
     navigation loop be built and tested without a model in the way. It also stays useful as a
@@ -242,7 +162,7 @@ class ColorGrounder:
     def _blobs(self, mask: np.ndarray, label: str, width: int, height: int) -> list[Detection]:
         """Split a mask into connected components via a column-run scan.
 
-        Deliberately dependency-free: scipy.ndimage.label would do this, but the office has a
+        Deliberately dependency-free: scipy.ndimage.label would do this, but these scenes have a
         handful of large, well-separated blobs and this keeps the install lean.
         """
         cols = mask.any(axis=0)
@@ -294,7 +214,7 @@ class ColorGrounder:
 # --------------------------------------------------------------------------------------
 
 _GROUNDING_PROMPT = (
-    "Look at this image from a robot's camera in an office.\n"
+    "Look at this image from a robot's camera.\n"
     'Find: "{description}".\n\n'
     "Reply with ONLY a JSON array, no other text. Each entry:\n"
     '  {{"label": "<what it is>", "x": <0-1>, "y": <0-1>, "confidence": <0-1>}}\n'

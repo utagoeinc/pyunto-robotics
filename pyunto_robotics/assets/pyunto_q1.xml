@@ -5,7 +5,7 @@
   0.75 m long, 0.35 m tall at the hip, 22 kg, with a sensor head on a short mast. Not a
   copy of any vendor model -- every number here is chosen for this simulation.
 
-  Why a quadruped at all, when the office robot already walks: the patrol route is outdoors
+  Why a quadruped at all, when the humanoid already walks: an orchard row is outdoors
   and includes steps. A biped on a kinematic gait handles a flat floor fine and has nothing
   sensible to do with a 0.16 m rise, whereas a quadruped's four contact points make stairs a
   question of foot placement rather than balance.
@@ -40,7 +40,7 @@
         <!--
           Stiff, because a leg that sags under the body's weight puts the foot somewhere other
           than where the gait asked for -- the same failure that cost 0.19 m of accuracy on
-          Momo's arm before her shoulder gain went up.
+          a humanoid arm before its shoulder gain went up.
         -->
         <joint damping="1.5" armature="0.015"/>
         <position kp="220" dampratio="1" forcerange="-90 90"/>

@@ -54,7 +54,7 @@ class Robot:
 
     def __init__(
         self,
-        scene: str | Path = "office.xml",
+        scene: str | Path = "solar.xml",
         gait: Gait | None = None,
         keyframe: str | None = "start",
         cam_width: int = 424,
@@ -124,7 +124,7 @@ class Robot:
             self.data.ctrl[idx] = self.data.qpos[self.model.jnt_qposadr[joint]]
 
         mujoco.mj_forward(self.model, self.data)
-        # Then put the arms where a standing robot holds them. The keyframe leaves Asimov's
+        # Then put the arms where a standing robot holds them. The keyframe leaves some models'
         # shoulders at 0.01 rad, and on that shoulder zero is not "hanging down" but "swung
         # back": measured the hand 0.4 m behind the body, and it stayed there for 2499 of the
         # door skill's 3001 steps because nothing else ever commanded the arm. Whoever looked
@@ -201,9 +201,9 @@ class Robot:
 
         Everything that measures the robot -- how wide it is, which contacts are its own --
         needs to tell its bodies from the room's. Asking for "torso" answered that for
-        pyunto_h1 and returned -1 for Asimov 1, whose root link is the pelvis, and a root of
+        pyunto_h1 and returned -1 for models whose root link is the pelvis, and a root of
         -1 quietly matches the world body: measured half_width coming out at 1.307 m, which
-        is the office, not the robot. So try the names a humanoid might use for its trunk,
+        is the scenery, not the robot. So try the names a humanoid might use for its trunk,
         and fall back to whatever body owns the free joint that moves the whole robot.
         """
         for name in ("torso", "pelvis_link", "pelvis", "base_link", "base"):
@@ -274,7 +274,7 @@ class Robot:
                 continue
             # Own-body membership from the kinematic tree, not from a list of names. The name
             # list is still consulted below for the parts a caller might reason about, but it
-            # cannot decide what belongs to the robot: Asimov's links are elbow_link_collision
+            # cannot decide what belongs to the robot: other models' links are named differently
             # and the like, so a palm resting against its own elbow read as a wall and the
             # recoil fired on the first step of every errand, before the robot had moved.
             root = self._root_body()
@@ -370,7 +370,7 @@ class Robot:
     @property
     def head_yaw(self) -> float:
         """Where the head is pointing relative to the body, in radians. + is left."""
-        # Two spellings, because two models: pyunto_h1 calls it neck_yaw, Asimov 1 calls the
+        # Two spellings, because two models: pyunto_h1 calls it neck_yaw, some models call the
         # same axis neck_yaw_joint. The actuator is named neck_yaw in both, so only the joint
         # lookup needs to know.
         joint = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "neck_yaw")
@@ -401,7 +401,7 @@ class Robot:
 
         This is what lets the body walk one line while the eyes stay on another. Steering
         around a wall used to swing the cameras off the door being approached, and with three
-        identical doors in the office the robot would come back to whichever was nearest --
+        several identical doors, the robot would come back to whichever was nearest --
         so the body could not avoid anything without losing track of where it was going.
         """
         target = float(np.clip(bearing, -self.NECK_LIMIT_RAD, self.NECK_LIMIT_RAD))
@@ -477,7 +477,7 @@ class Robot:
 
         Skills need a hand at a door handle; what shoulder angle does that depends entirely on
         the robot. Pyunto H1 reaches a 0.90 m handle at shoulder_pitch -1.10 with the elbow
-        slightly bent; Asimov 1's shoulder pitches the other way and sits 0.55 m lower, so the
+        slightly bent; a mirrored model's shoulder pitches the other way and sits 0.55 m lower, so the
         same numbers leave its hand at 0.63 m, a quarter of a metre short and pointing at the
         floor. Rather than write a pose per robot into every skill, search this model's own
         arm once and cache what works.
@@ -496,7 +496,7 @@ class Robot:
             # what an onlooker sees as "it is pushing the door with the back of its arm".
             #
             # The first candidate is the pose pyunto_h1 was tuned with. The second is that pose
-            # in the loaded model's own sign, which is what Asimov needs -- its shoulder runs
+            # in the loaded model's own sign, which is what a mirrored model needs -- its shoulder runs
             # [-0.87, 3.14] where H1's runs [-3.1, 1.6], and the sweep it used to run picked
             # (+0.60, -1.80) every time.
             candidates = [(-1.10, -0.20)]
@@ -577,7 +577,7 @@ class Robot:
         """Command arm joint angles directly (radians). Unset joints keep their target.
 
         Shoulder pitch is written in pyunto_h1's sign, where negative swings the arm forward,
-        because every call site here was authored against that robot. Asimov's shoulder runs
+        because every call site here was authored against that robot. a mirrored model's shoulder runs
         the other way (range [-0.87, 3.14] against [-3.1, 1.6]), so the same numbers threw its
         arm backwards -- measured the hand 0.42 m behind the body while it walked to a door.
         Flip it to match whichever model is loaded. Callers that searched for a pose in the
@@ -607,7 +607,7 @@ class Robot:
             return 1.0
         low, high = self.model.jnt_range[self.model.actuator_trnid[index, 0]]
         # A shoulder with room to spare below zero reaches forward there; one whose travel is
-        # almost all positive, like Asimov's, reaches forward the other way.
+        # almost all positive, like a mirrored one's, reaches forward the other way.
         return 1.0 if low >= high or (low + high) < 0.0 else -1.0
 
     def grip(self, side: str = "r", closed: float = 1.0) -> None:
@@ -665,9 +665,9 @@ class Robot:
         """Drop whatever a hand is welded to.
 
         Deactivates every weld naming a palm, rather than a hard-coded list of door welds. The
-        office scene has three (`grasp_1..3`, one per door); the home scene has one per towel
-        per hand plus one for the washer door, and a fixed list would silently leave those
-        latched -- a robot that cannot let go of a towel is stuck for the rest of the errand.
+        a scene may define several (`grasp_1..3`, one per door) and another none at all,
+        and a fixed list would silently leave those
+        latched -- a robot that cannot let go of what it is holding is stuck for the rest of the errand.
         """
         palms = {
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"palm_{side}")
@@ -712,7 +712,7 @@ class Robot:
     def arm_home(self, side: str = "r") -> None:
         """Return the arm to its resting pose."""
         sign = -1.0 if side == "r" else 1.0
-        # -0.25 rests pyunto_h1's arm at its side; on Asimov the shoulder pitches the other
+        # -0.25 rests pyunto_h1's arm at its side; on a mirrored model the shoulder pitches the other
         # way (range [-0.87, 3.14] against [-3.1, 1.6]) and the same number swings the arm
         # BACKWARDS -- measured the hand 0.14 m behind the body where the other robot's sits
         # 0.24 m in front, so it spent the door skill reaching away from the door. Take the

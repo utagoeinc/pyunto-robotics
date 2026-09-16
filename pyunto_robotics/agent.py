@@ -143,7 +143,7 @@ class RobotAgent:
             # STOP AND THINK AGAIN before abandoning the errand.
             #
             # A step failing does not always mean the errand is impossible; more often the
-            # world has moved on from what the plan assumed. Carrying the basket to the washer
+            # world has moved on from what the plan assumed. Driving to a place that has moved
             # puts it exactly where the robot wanted to stand to reach into the drum, and the
             # original plan has no way to know that -- it was written before the basket moved.
             #

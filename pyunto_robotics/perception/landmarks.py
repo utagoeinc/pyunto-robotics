@@ -138,7 +138,7 @@ class LandmarkMap:
     Landmarks of the same label are expected to be co-linear, which is how phantoms get
     rejected. Doors in a building sit along walls, and a bad range estimate -- typically from
     seeing a leaf edge-on, which reads several metres too far -- lands well off that line.
-    Nothing about the office is assumed: the line is fitted to whatever has actually been seen.
+    Nothing about the room is assumed: the line is fitted to whatever has actually been seen.
     """
 
     def __init__(self, match_radius: float = MATCH_RADIUS_M):

@@ -75,7 +75,7 @@ class RobotSkills(Protocol):
                 return SkillResult(False, f"I do not know how to '{action}'.")
 
     The verbs you receive are the ones in your `Domain` (see `brain/domains.py`); if you do not
-    supply a domain, they come from the office humanoid's vocabulary.
+    supply a domain, they come from the general humanoid vocabulary in brain/planner.py.
     """
 
     def run(
@@ -89,7 +89,7 @@ class RobotSkills(Protocol):
 
         Args:
             action: the verb, e.g. "goto", "open", "describe".
-            argument: what it acts on, e.g. "door", "washer". May be None for verbs like "home".
+            argument: what it acts on, e.g. "door", "sample". May be None for verbs like "home".
             where: a spatial qualifier the speaker used, e.g. "right", "far". May be None.
             expect: how many of something the speaker said there were, when they said it.
 

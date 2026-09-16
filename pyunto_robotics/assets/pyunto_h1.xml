@@ -2,7 +2,7 @@
   Pyunto H1 - a humanoid built for this project (not a vendor model).
 
   Designed around what the demo actually needs:
-    * ~1.5 m tall, shoulders at ~1.15 m, so the hands reach a 0.90 m office door handle
+    * ~1.5 m tall, shoulders at ~1.15 m, so the hands reach a 0.90 m door handle
       with the arm comfortably bent rather than fully extended.
     * Shoulders use three ORTHOGONAL axes (pitch/roll/yaw). The MuJoCo sample humanoid uses
       skewed axes like axis="2 1 1", which look fine but make inverse kinematics painful.
@@ -88,7 +88,7 @@
             A neck that actually turns. The head used to be welded to the torso, which meant
             the robot could only look where it was walking: steering around a wall swung the
             cameras off the door it was heading for, it lost track of which door that was, and
-            with three identical doors in the office it would re-acquire whichever was nearest.
+            with three identical doors in a corridor it would re-acquire whichever was nearest.
 
             Turning the head separates the two. The body takes whatever line keeps it clear of
             the walls while the head stays pointed at the target, which is what a person does
