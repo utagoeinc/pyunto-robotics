@@ -76,8 +76,17 @@ def _understanding(command_mode: bool) -> bool:
         import mlx_vlm  # noqa: F401, PLC0415
     except ImportError:
         print("note    : the local model is not installed, so this robot is matching commands")
-        print("          instead of reading sentences. To let it read what you write:")
-        print("              python -m pyunto_robotics.download_model")
+        print("          instead of reading sentences.")
+        if sys.version_info >= (3, 13):
+            # Do not send somebody to a command that cannot help them. `download_model`
+            # refuses on 3.13+, so telling a 3.14 user to run it is an instruction to go and
+            # read an error message.
+            print(f"          mlx-vlm has no build for Python {sys.version_info.major}."
+                  f"{sys.version_info.minor}, so the model cannot be installed here --")
+            print("          build the environment on 3.11 or 3.12 to use it.")
+        else:
+            print("          To let it read what you write:")
+            print("              python -m pyunto_robotics.download_model")
         return False
     return True
 

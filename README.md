@@ -17,7 +17,15 @@ robot does — the diary is end-to-end encrypted, and decryption happens on your
 
 ## Quick start
 
-Three commands, and the only thing to remember is the first one.
+**Use Python 3.11 or 3.12.** `mlx-vlm`, which runs the language model, has no build for 3.13
+or newer — and on those versions the install below quietly skips it rather than failing, so
+the first sign of trouble is the second command refusing to run.
+
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
+```
+
+Then three commands, and the only one to remember is the first:
 
 ```bash
 pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'

@@ -39,9 +39,21 @@ def supported() -> tuple[bool, str]:
             f"{platform.machine()}. The robots will use keyword matching instead."
         )
     if sys.version_info >= (3, 13):
+        # Say what to do, not only what is wrong. Reaching this message means an environment
+        # has already been built on the wrong version -- pip installed the [llm] extra's
+        # markers as "nothing to do" and reported success -- so the fix is a new environment,
+        # and it is worth spelling out rather than leaving as an exercise.
         return False, (
-            f"mlx-vlm does not support Python {sys.version_info.major}."
-            f"{sys.version_info.minor} yet. Use 3.11 or 3.12 for the model."
+            f"mlx-vlm has no build for Python {sys.version_info.major}."
+            f"{sys.version_info.minor} yet, so the model cannot be installed here.\n"
+            "\n"
+            "Build the environment on 3.11 or 3.12 instead:\n"
+            "    python3.12 -m venv .venv && source .venv/bin/activate\n"
+            "    pip install 'pyunto-robotics[llm] @ "
+            "git+https://github.com/utagoeinc/pyunto-robotics'\n"
+            "\n"
+            "The robots still run here without it, matching commands instead of reading "
+            "sentences. See `--command-mode` in the README."
         )
     return True, ""
 
