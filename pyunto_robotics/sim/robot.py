@@ -88,9 +88,19 @@ class Robot:
         self.max_depth = float(max_depth)
         self._steps_per_control = max(1, round(self.control_dt / self.model.opt.timestep))
 
-        self._renderer = mujoco.Renderer(self.model, height=cam_height, width=cam_width)
-        self._depth_renderer = mujoco.Renderer(self.model, height=cam_height, width=cam_width)
-        self._depth_renderer.enable_depth_rendering()
+        # Renderers are built on FIRST USE, not here.
+        #
+        # The demo constructs a Robot and THEN opens the viewer, and on macOS
+        # `launch_passive` hands the GL context to the UI thread -- so a renderer made here
+        # belongs to a context somebody else then owns. The robot answered the first
+        # instruction, photographed it, and stalled on the second.
+        #
+        # Built lazily, they are created on the thread that actually renders. The same fault
+        # was found and fixed in the pet camera's segmentation renderer; this is the one every
+        # robot uses.
+        self._cam_size = (cam_height, cam_width)
+        self._renderer: mujoco.Renderer | None = None
+        self._depth_renderer: mujoco.Renderer | None = None
 
         self._act = {
             mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, i): i
@@ -135,8 +145,10 @@ class Robot:
         self.gait.reset(self.model, self.data)
 
     def close(self) -> None:
-        self._renderer.close()
-        self._depth_renderer.close()
+        for renderer in (self._renderer, self._depth_renderer):
+            if renderer is not None:
+                renderer.close()
+        self._renderer = self._depth_renderer = None
 
     def __enter__(self) -> Robot:
         return self
@@ -182,8 +194,18 @@ class Robot:
 
     # -- sensing ------------------------------------------------------------------
 
+    def _ensure_renderers(self) -> None:
+        """Create the camera renderers, once, on the thread that first needs them."""
+        if self._renderer is not None:
+            return
+        height, width = self._cam_size
+        self._renderer = mujoco.Renderer(self.model, height=height, width=width)
+        self._depth_renderer = mujoco.Renderer(self.model, height=height, width=width)
+        self._depth_renderer.enable_depth_rendering()
+
     def look(self, camera: str = "head_cam") -> Observation:
         """Capture one RGB-D frame from the robot's point of view."""
+        self._ensure_renderers()
         self._renderer.update_scene(self.data, camera=camera)
         rgb = self._renderer.render().copy()
 
@@ -442,6 +464,7 @@ class Robot:
     @property
     def camera_width(self) -> int:
         """Width of a rendered frame in pixels."""
+        self._ensure_renderers()
         return self._renderer.width
 
     def camera_fovy(self, camera: str = "head_cam") -> float:
@@ -457,6 +480,7 @@ class Robot:
         """(fx, cx, cy) in pixels, derived from the camera's vertical FOV."""
         cid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera)
         fovy_deg = float(self.model.cam_fovy[cid])
+        self._ensure_renderers()
         h = self._renderer.height
         w = self._renderer.width
         fy = (h / 2.0) / math.tan(math.radians(fovy_deg) / 2.0)

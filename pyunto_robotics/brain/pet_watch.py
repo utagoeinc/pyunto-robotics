@@ -53,11 +53,11 @@ log = logging.getLogger(__name__)
 #
 #   key: (stand_x, stand_y, aim_x, aim_y, aim_z, name)
 HAUNTS: dict[str, tuple[float, float, float, float, float, str]] = {
-    "sill":   ( 2.20, -2.20,  1.60, -2.45, 0.76, "the sunny windowsill"),
-    "tree":   ( 2.60, -1.40,  3.07, -1.90, 1.12, "the cat tree"),
-    "shelf":  (-0.20,  1.80,  0.20,  2.37, 1.72, "the top of the bookshelf"),
+    "sill":   ( 2.20, -2.20,  1.60, -2.45, 0.76, "on the sunny windowsill"),
+    "tree":   ( 2.60, -1.40,  3.07, -1.90, 1.12, "in the cat tree"),
+    "shelf":  (-0.20,  1.80,  0.20,  2.37, 1.72, "on top of the bookshelf"),
     "sofa":   ( 0.60, -0.60, -1.03,  0.40, 0.14, "under the sofa"),
-    "bowls":  ( 4.40,  0.60,  4.40, -0.60, 0.10, "her food and water"),
+    "bowls":  ( 4.40,  0.60,  4.40, -0.60, 0.10, "at her food and water"),
 }
 
 
@@ -433,9 +433,9 @@ class PetWatchSkills:
             return self.home()
         sx, sy, ax, ay, az, name = HAUNTS[key]
         if not self._drive_to(sx, sy):
-            return SkillResult(False, f"I could not get to {name}. Something is in the way.")
+            return SkillResult(False, f"I could not get {name}. Something is in the way.")
         self._aim_at(ax, ay, az)
-        return SkillResult(True, f"I am at {name}, with the camera pointed at it.", {"where": key})
+        return SkillResult(True, f"I am {name}, with the camera pointed at it.", {"where": key})
 
     def home(self, _argument: str | None = None) -> SkillResult:
         """Go back to the dock."""
@@ -509,9 +509,9 @@ class PetWatchSkills:
         fraction = self._sweep_for_cat(ax, ay, az)
         if fraction >= SEEN_FRACTION:
             self._last_seen = key
-            return SkillResult(True, f"🐱 Camera on {name} — she is there.",
+            return SkillResult(True, f"🐱 Camera {name} — she is there.",
                                {"where": key, "visible": True})
-        return SkillResult(True, f"Camera on {name}, but she is not there.",
+        return SkillResult(True, f"Camera {name}, but she is not there.",
                            {"where": key, "visible": False}, fatal=False)
 
     @staticmethod
