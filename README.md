@@ -298,12 +298,24 @@ door-opening skills on your own machine, is documented in
 
 ### Shipping it as a package
 
-The above is enough to run your own robot. If you want *other people* to install it and have
-`pyunto-robotics` find it on its own, declare an entry point in your package's
-`pyproject.toml`:
+The above is enough to run your own robot on your own machine. This part is only needed if
+you want to hand it to *other people* as something they can `pip install`, and have
+`pyunto-robotics` discover it without being told.
+
+Say your company is shipping a warehouse vehicle. You would lay the package out like this:
+
+```
+mycompany-agv/            ← your project, a separate repository from this one
+├── pyproject.toml        ← the file below
+└── mycompany/
+    └── agv.py            ← your robot: the class above, plus a `setup()` that describes it
+```
+
+`pyproject.toml` is the file every Python package has at its root. It tells `pip` the
+package's name, its dependencies, and — the part that matters here — what it offers to other
+packages. Add this to yours:
 
 ```toml
-# In YOUR package's pyproject.toml, not this one.
 [project.entry-points."pyunto_robotics.robots"]
 warehouse-agv = "mycompany.agv:setup"
 ```
@@ -316,7 +328,7 @@ Three parts:
 | `mycompany.agv` | the module it lives in |
 | `setup` | a `RobotSetup`, or anything callable that returns one |
 
-Then, on any machine where both are installed:
+Then, on any machine with both packages installed:
 
 ```bash
 pip install mycompany-agv
@@ -324,7 +336,7 @@ pyunto-robotics robots              # warehouse-agv is in the list
 pyunto-robotics demo --robot warehouse-agv
 ```
 
-Nothing in this repository changes. `pyunto-robotics` asks Python which packages have declared
+You never edit `pyunto-robotics` itself. It asks Python which installed packages have declared
 themselves under `pyunto_robotics.robots` and registers whatever it finds, so your robot sits
 alongside the bundled six. A plugin that fails to load is logged and skipped rather than
 taking the others down with it.
