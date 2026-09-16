@@ -37,15 +37,28 @@ Not on PyPI yet, so the install comes from git — one command either way. It br
 `pyunto-agent` with it.
 
 Scan that square with the Pyunto app. The app asks which diary to let the robot into and shows
-who runs it; when you approve, **the robot opens by itself** — no second command, nothing to
-copy back into the terminal.
+who runs it; when you approve, the terminal asks which robot to open and starts it — no second
+command, nothing to copy back.
 
 ```
 waiting for the scan… (Ctrl-C to stop)
-paired — opening the robot.
+paired ✓
+
+Which robot would you like to open?
+  1. solar    S1 (solar errand robot)
+             e.g. "go and find some sunlight, and bring back power"
+  2. hotel    H1 (hotel cleaner)
+  ...
+Number, or a name [1-6, Enter for 1]:
+
+Opening S1 (solar errand robot):
+    pyunto-robotics demo --robot solar
 
 listening — message the robot from the Pyunto app. Ctrl-C to stop.
 ```
+
+It names the command it is running, so opening the same robot again later is a matter of
+copying that line. `--robot solar` on `showqr` skips the question entirely.
 
 Then write in the diary, in your own words:
 

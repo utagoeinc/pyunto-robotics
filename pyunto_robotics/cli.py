@@ -45,25 +45,82 @@ def _reexec_under_mjpython_if_needed(wants_window: bool) -> None:
     os.execv(str(launcher), [str(launcher), "-m", "pyunto_robotics.cli", *sys.argv[1:]])
 
 
-def _print_what_to_try(robot_name: str) -> None:
-    """After pairing, say what to write and which other robots exist.
+#: Which robot to offer first, and to fall back to when nobody can be asked.
+DEFAULT_ROBOT = "solar"
 
-    Pairing succeeds and then the window opens, which is the moment somebody has no idea what
-    to type. The examples are read from the registry rather than written here, so they cannot
-    drift from what the robots actually answer.
+
+def _choose_robot(preselected: str | None) -> str | None:
+    """Ask which robot to open. Returns None if the person changed their mind.
+
+    `showqr` used to pick `solar` on its own and open it without saying so -- the terminal
+    printed a list of "other robots" that did not include the one actually running, and
+    nothing on screen connected the square that had just been scanned to a simulator window
+    appearing. Choosing is one keystroke, and it makes what happens next somebody's decision
+    rather than a surprise.
+
+    `--robot` still skips the question, for anyone scripting this or who already knows.
+    """
+    from . import registry
+
+    # Offer the errand robot first: it is the demonstration the SDK leads with, and the one
+    # that shows a robot finding something by measurement rather than following a script.
+    # `registry.names()` is alphabetical, which would have put the hotel cleaner first.
+    names = sorted(registry.names(), key=lambda k: (k != DEFAULT_ROBOT, k))
+    if preselected:
+        return preselected
+    if not sys.stdin.isatty():
+        # No one to ask -- a pipe, a CI job, a service. Take the first robot and say so
+        # rather than blocking on input nobody can give.
+        default = names[0]
+        print(f"not a terminal, so opening {default}. Use --robot to choose.")
+        return default
+
+    print()
+    print("Which robot would you like to open?")
+    for index, key in enumerate(names, start=1):
+        setup = registry.get(key)
+        example = (setup.examples or ("",))[0]
+        print(f"  {index}. {key:<8} {setup.name}")
+        if example:
+            print(f'{"":13}e.g. "{example}"')
+    print()
+
+    while True:
+        try:
+            answer = input(f"Number, or a name [1-{len(names)}, Enter for 1]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if not answer:
+            return names[0]
+        if answer.isdigit() and 1 <= int(answer) <= len(names):
+            return names[int(answer) - 1]
+        if answer in names:
+            return answer
+        print(f"  Not one of: {', '.join(names)}")
+
+
+def _print_what_to_try(robot_name: str) -> None:
+    """Say what is running, what to write, and how to open a different robot next time.
+
+    The examples are read from the registry rather than written here, so they cannot drift
+    from what the robots actually answer.
     """
     from . import registry
 
     setup = registry.get(robot_name)
     print()
-    print(f"Opening {setup.name}. Write one of these in the diary on your phone:")
+    print(f"Opening {setup.name}:")
+    print(f"    pyunto-robotics demo --robot {robot_name}")
+    print()
+    print("Write one of these in the diary on your phone:")
     for example in setup.examples or ("where are you?",):
         print(f'    "{example}"')
 
     others = [key for key in registry.names() if key != robot_name]
     if others:
         print()
-        print("Other robots, once you have stopped this one with Ctrl-C:")
+        print("Ctrl-C stops this one. To open a different robot afterwards:")
         for key in others:
             other = registry.get(key)
             example = (other.examples or ("",))[0]
@@ -128,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     # The solar errand robot: the demonstration the SDK leads with, and the one that shows a
     # robot finding something by measurement rather than following a script. The old default
     # was "office", a robot that no longer exists -- so a bare `demo` raised KeyError.
-    p_demo.add_argument("--robot", default="solar", help="which machine (see `robots`)")
+    p_demo.add_argument("--robot", default=DEFAULT_ROBOT, help="which machine (see `robots`)")
     # Reading sentences is the default and needs no flag. See `_understanding`.
     p_demo.add_argument("--command-mode", action="store_true",
                         help="match a fixed command list instead of reading what you wrote")
@@ -148,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
                       help="who runs this robot; shown to the person before they approve")
     p_qr.add_argument("--big", action="store_true",
                       help="draw the square larger; use it when a phone will not scan")
-    p_qr.add_argument("--robot", default="solar", help="which machine to open once paired")
+    p_qr.add_argument("--robot", help="skip the question and open this machine once paired")
     p_qr.add_argument("--no-run", action="store_true",
                       help="draw the square and exit, instead of opening the robot once paired")
     p_qr.add_argument("--command-mode", action="store_true",
@@ -250,7 +307,12 @@ def main(argv: list[str] | None = None) -> int:
             print("Nobody scanned it. Run this again when you are ready.")
             return 1
         print("paired ✓")
-        _print_what_to_try(args.robot)
+        robot_name = _choose_robot(args.robot)
+        if robot_name is None:
+            print("Nothing opened. The robot stays paired — run "
+                  "`pyunto-robotics demo --robot <name>` whenever you like.")
+            return 0
+        _print_what_to_try(robot_name)
         # Both of these belong to opening a robot, and `showqr` opens one now. Importing
         # inside the `demo` branch left this path calling a name that did not exist, and
         # skipping the re-exec would have opened no window on macOS even once it did.
@@ -258,7 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         from .demo import run_demo
 
         return run_demo(
-            robot_name=args.robot,
+            robot_name=robot_name,
             pair=None,
             use_llm=_understanding(args.command_mode),
             view=not args.no_window,
