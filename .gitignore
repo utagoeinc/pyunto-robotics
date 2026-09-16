@@ -26,13 +26,17 @@ models/
 *.pt
 *.onnx
 
-# Runtime artifacts
+# Runtime artifacts. The image rules are for camera frames and recordings a run drops in the
+# working directory -- not for documentation, which is why docs/ is excepted below. Without
+# that exception `git add` accepted the README's screenshots and silently staged nothing,
+# and the published page showed six broken images.
 out/
 output/
 logs/
 *.png
 *.jpg
 *.mp4
+!docs/images/*.png
 .token_cache.json
 
 # macOS

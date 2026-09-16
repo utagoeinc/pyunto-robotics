@@ -94,11 +94,27 @@ def test_every_example_in_the_readme_gallery_reaches_an_action():
     )
 
 
-def test_the_gallery_pictures_exist():
-    """The README shows a picture per robot. A broken image is the first thing a reader sees."""
+def test_the_gallery_pictures_are_committed():
+    """The README shows a picture per robot. A broken image is the first thing a reader sees.
+
+    Checks git, not the filesystem. The first version of this test asked whether the files
+    existed locally, which they did -- while `*.png` in .gitignore quietly kept every one of
+    them out of the repository, so `git add` staged nothing and the published README showed
+    six broken images. A documentation asset is only real once it is committed.
+    """
     import pathlib
     import re
+    import subprocess
 
     text = pathlib.Path("README.md").read_text(encoding="utf-8")
-    for path in re.findall(r"!\[[^\]]*\]\((docs/images/[^)]+)\)", text):
-        assert pathlib.Path(path).is_file(), f"README shows a missing image: {path}"
+    shown = re.findall(r"!\[[^\]]*\]\((docs/images/[^)]+)\)", text)
+    assert shown, "the README gallery shows no images at all"
+
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files", "docs/images"],
+            capture_output=True, text=True, check=True,
+        ).stdout.split()
+    )
+    missing = [p for p in shown if p not in tracked]
+    assert not missing, f"README shows images that are not committed: {missing}"
