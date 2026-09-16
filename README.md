@@ -212,21 +212,19 @@ A robot that accepts an instruction, goes quiet, and posts one sentence a minute
 indistinguishable from a robot that has crashed. So it narrates, in the same thread the
 instruction arrived in.
 
-Write "where is the cat?" and the diary fills in as it happens:
+This is a real thread, on a phone, after writing "move to the sunlight":
 
-```
-🤖 Understood: “where is the cat?”
-   I will: find
-✅ find — 🐱 She is the sunny windowsill. I have the camera on her.
-[a photograph from the robot's own camera]
-```
+<img src="docs/images/app-thread.png" alt="A Pyunto thread: the robot repeats what it
+understood, reports the step with its measurements, and posts a photograph from its own
+camera" width="380">
 
 Three things are worth noticing.
 
-The plan arrives **before the robot moves**, so a misunderstanding is caught in the two
-seconds before it walks off, not after. Each step reports **as it finishes**, with ⚠️ rather
-than ✅ when it did not work and a plain sentence saying why. And the picture at the end is
-the robot's own camera, so a claim that a door is open comes with the evidence.
+The plan arrives **before the robot moves**, so a misunderstanding is caught in the seconds
+before it drives off, not after. Each step reports **as it finishes**, with its measurements
+(`travelled 16.40 m, irradiance w m2 312`) and ⚠️ rather than ✅ when it did not work. And the
+pictures are the robot's own camera, so "I found sunlight 16 m from where I started" comes
+with the evidence.
 
 An instruction the robot cannot parse is answered too, rather than ignored:
 

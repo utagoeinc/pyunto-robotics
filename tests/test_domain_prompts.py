@@ -107,7 +107,9 @@ def test_the_gallery_pictures_are_committed():
     import subprocess
 
     text = pathlib.Path("README.md").read_text(encoding="utf-8")
+    # Both spellings: markdown for the gallery, an <img> tag where a width is needed.
     shown = re.findall(r"!\[[^\]]*\]\((docs/images/[^)]+)\)", text)
+    shown += re.findall(r'<img\s+src="(docs/images/[^"]+)"', text)
     assert shown, "the README gallery shows no images at all"
 
     tracked = set(
