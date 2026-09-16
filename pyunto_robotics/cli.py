@@ -1,10 +1,9 @@
 """`pyunto-robotics` on the command line.
 
-    pyunto-robotics demo --pair K3F9QZ     # the one-command demonstration
+    pyunto-robotics showqr                 # show a square to scan, then open the robot
+    pyunto-robotics demo                   # open the robot (already paired)
     pyunto-robotics robots                 # what machines are installed
     pyunto-robotics whoami                 # this robot's account and spaces
-    pyunto-robotics pair K3F9QZ            # join a space without opening a window
-    pyunto-robotics showqr                 # show a QR for someone to scan in the app
 
 On macOS a MuJoCo window must be owned by `mjpython`, not `python`. Rather than print an
 instruction and stop -- which turns a one-command demo into a two-command one -- this
@@ -90,7 +89,6 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p_demo = sub.add_parser("demo", help="open a robot and answer messages from the app")
-    p_demo.add_argument("--pair", help="pairing code shown by the Pyunto app")
     # The solar errand robot: the demonstration the SDK leads with, and the one that shows a
     # robot finding something by measurement rather than following a script. The old default
     # was "office", a humanoid that no longer exists -- so a bare `demo` raised KeyError.
@@ -107,9 +105,6 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("robots", help="list the installed machines")
     sub.add_parser("whoami", help="show this robot's account and the spaces it is in")
-    p_pair = sub.add_parser("pair", help="join a space with a pairing code, then exit")
-    p_pair.add_argument("code")
-
     p_qr = sub.add_parser(
         "showqr", help="show a QR code for someone to scan in the Pyunto app"
     )
@@ -153,21 +148,6 @@ def main(argv: list[str] | None = None) -> int:
             sid = str(space.get("uuid"))
             has = "yes" if connection.keys.has_key(sid) else "no"
             print(f"  - {space.get('name')}  {sid}  key={has}")
-        return 0
-
-    if args.cmd == "pair":
-        try:
-            connection = connect()
-            space_id = connection.client.join(args.code)
-        except AuthError as e:
-            print(f"ERROR: {e}")
-            return 2
-        except Exception as e:  # noqa: BLE001 - a stale code is a user error
-            print(f"ERROR: could not join with that code ({e}).")
-            print("       Codes expire after 10 minutes — make a new one in the app.")
-            return 1
-        print(f"joined space {space_id}.")
-        print("Open that space in the Pyunto app once so the robot is given the key.")
         return 0
 
     if args.cmd == "showqr":
@@ -236,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_demo(
             robot_name=args.robot,
-            pair=args.pair,
+            pair=None,
             use_llm=_understanding(args.command_mode or bool(args.commands)),
             commands=args.commands,
             view=args.view,

@@ -1,6 +1,6 @@
 """The one-command demonstration.
 
-    pyunto-robotics demo --pair K3F9QZ
+    pyunto-robotics showqr
 
 A person who has never seen this code should be able to run that line and, a few seconds
 later, watch a robot in a window do what they typed into a diary on their phone. Everything
@@ -139,7 +139,7 @@ def run_demo(
         else:
             print("pairing : not in any shared space yet.")
             print("          In the Pyunto app open a premium space, choose \"Invite a robot\",")
-            print("          then run:  pyunto-robotics demo --pair <code>")
+            print("          then run:  pyunto-robotics showqr")
 
     # A robot without a scene has no body to simulate.
     #

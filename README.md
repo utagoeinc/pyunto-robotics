@@ -53,14 +53,6 @@ home, and turns the house lights on — reporting each step in the same thread.
 Open that space in the app once after pairing. The diary is end-to-end encrypted, so a member
 has to hand the robot a key; the server cannot do it alone.
 
-### If you were given a six-character code instead
-
-Older builds of the app show a code rather than a square. That still works:
-
-```bash
-pyunto-robotics demo --pair K3F9QZ
-```
-
 ### Choosing a robot
 
 ```bash
@@ -69,6 +61,92 @@ pyunto-robotics showqr --robot pet      # pair and open a particular one
 pyunto-robotics demo --robot watch      # if already paired
 pyunto-robotics whoami                  # this robot's account and its spaces
 ```
+
+---
+
+## The robots
+
+Six machines and six worlds ship with the package. Every picture below is the scene as it
+opens, rendered from the simulator itself.
+
+### `solar` — fetches its own energy
+
+![The S1 parked under a carport, solar panel on its back](docs/images/solar.png)
+
+The demonstration the SDK leads with, and the only one where the robot finds something by
+measuring rather than by being told where it is. It drives out, reads what the panel is
+receiving as it goes, stops when the measurement says it is in sunlight, charges, comes home,
+and turns the house lights on with what it collected.
+
+> *"go and find some sunlight, and bring back power"*
+> *"I think we're running low on power"*
+> *"how much charge have you got?"*
+
+### `watch` — a house that watches, with no robot in it
+
+![A one-bedroom flat seen from above, an older person asleep in bed, a wall clock](docs/images/watch.png)
+
+There is no machine to command here. The flat itself watches an older person living alone —
+floor sensors in each room, a bed sensor, temperature and humidity, the lock, the doorphone —
+and writes what it sees into a diary a family member reads from another city.
+
+**No cameras indoors.** The person being watched did not ask to be; the only camera is the
+doorphone, and it faces the street. It also turns out to be the better sensor: three
+unanswered callers on a day she did not get up is corroboration a motion sensor cannot give.
+
+> *"how is she doing?"*
+> *"what has she done today?"*
+> *"has anyone been to the door?"*
+> *"it feels stuffy in there, can you do something?"*
+
+### `pet` — a camera that has to aim, not just drive
+
+![A flat with a ginger cat on the windowsill and the P1 on its dock](docs/images/pet.png)
+
+The opposite case, and the one that shows why the flat above has no camera. Here the only
+human is the one holding the phone, in their own home, looking for their own cat — so a camera
+is the right instrument, and the demo is about aiming it.
+
+The cat's four usual places are at four different heights: under the sofa, the windowsill, the
+cat tree, the top of the bookshelf. A fixed forward-facing lens finds none of them.
+
+> *"where is the cat?"*
+> *"have you seen her anywhere?"*
+> *"look around the flat"*
+> *"point the camera upwards a bit"*
+
+### `mars` — driving by camera alone
+
+![The R1 rover beside its lander on the Martian surface](docs/images/mars.png)
+
+The clearest demonstration of mapless navigation: there is no map of Mars in the robot, and
+the targets are found by looking. Six wheels, a camera mast, and a channel to follow.
+
+> *"drive to the sample"*
+> *"head over to that rock"*
+> *"how steep is the ground?"*
+
+### `orchard` — four legs and a load
+
+![The Q1 quadruped standing by the shed, an apple tree behind](docs/images/orchard.png)
+
+Walks the rows on four legs and carries a crate. Where the wheeled robots need a surface, this
+one handles the ground an orchard actually has.
+
+> *"fetch the crate of apples"*
+> *"take them to the shed"*
+> *"what are you carrying?"*
+
+### `hotel` — cleans rooms and rides the lift
+
+![The H1 humanoid in a hotel corridor, the lift ahead](docs/images/hotel.png)
+
+Two floors, guest rooms, and a lift the robot has to call, board and ride. The multi-storey
+case: getting somewhere is a task in itself, not just a drive.
+
+> *"clean the rooms on both floors"*
+> *"clean this corridor"*
+> *"which floor are you on?"*
 
 ---
 

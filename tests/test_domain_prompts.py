@@ -43,3 +43,62 @@ def test_every_domain_is_english_only(key: str):
     for name, words in domain.objects.items():
         for word in words:
             assert not japanese.search(word), f"{key}.{name}: {word!r}"
+
+
+def test_every_example_in_the_readme_gallery_reaches_an_action():
+    """A README that promises a phrase the robot ignores is worse than one that promises none.
+
+    Checked against the command lists, which is the WEAKER reader -- the model is the default
+    and handles all of these, but it needs a 5.5 GB download that CI will not have. So this
+    asserts that most of the gallery works even without the model, and names the ones that
+    genuinely need it rather than pretending they do not exist.
+
+    If that set grows, the gallery is drifting towards phrasings only the model can follow,
+    which is worth knowing: command-mode users read the same README.
+    """
+    # Examples that only the language model resolves. Deliberately listed rather than removed:
+    # they are the ones that show what reading a sentence buys you.
+    NEEDS_THE_MODEL = {
+        ("pet", "have you seen her anywhere?"),
+        ("pet", "point the camera upwards a bit"),
+        ("mars", "head over to that rock"),
+    }
+    import pathlib
+    import re
+
+    from pyunto_robotics.brain.domains import DomainRulePlanner
+
+    text = pathlib.Path("README.md").read_text(encoding="utf-8")
+    start = text.index("## The robots")
+    section = text[start:text.index("## Writing in your own words", start)]
+
+    robot, checked, unroutable = None, 0, []
+    for line in section.splitlines():
+        heading = re.match(r"### `(\w+)`", line)
+        if heading:
+            robot = heading.group(1)
+            assert robot in DOMAINS, f"README names a robot that does not exist: {robot}"
+            continue
+        quoted = re.match(r'> \*"(.+)"\*', line)
+        if quoted and robot:
+            checked += 1
+            if not DomainRulePlanner(DOMAINS[robot]).plan(quoted.group(1)).steps:
+                unroutable.append((robot, quoted.group(1)))
+
+    assert checked >= 15, f"only found {checked} examples; has the gallery moved?"
+    surprises = set(unroutable) - NEEDS_THE_MODEL
+    assert not surprises, f"examples that reach no action at all: {sorted(surprises)}"
+    assert len(unroutable) <= len(NEEDS_THE_MODEL) + 2, (
+        f"{len(unroutable)} of {checked} gallery examples need the model; "
+        "the README is drifting away from command-mode readers"
+    )
+
+
+def test_the_gallery_pictures_exist():
+    """The README shows a picture per robot. A broken image is the first thing a reader sees."""
+    import pathlib
+    import re
+
+    text = pathlib.Path("README.md").read_text(encoding="utf-8")
+    for path in re.findall(r"!\[[^\]]*\]\((docs/images/[^)]+)\)", text):
+        assert pathlib.Path(path).is_file(), f"README shows a missing image: {path}"

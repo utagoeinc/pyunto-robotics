@@ -32,6 +32,9 @@
     <headlight ambient="0.20 0.20 0.23" diffuse="0.25 0.25 0.25" specular="0.05 0.05 0.05"/>
     <map znear="0.02" zfar="120"/>
     <quality shadowsize="8192"/>
+    <!-- Big enough for an offscreen render: the default 640x480 framebuffer refuses any
+         larger image, which blocks documentation shots and any test that wants to look. -->
+    <global offwidth="1600" offheight="1200"/>
   </visual>
 
   <asset>
