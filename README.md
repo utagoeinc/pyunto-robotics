@@ -1,6 +1,9 @@
 # Pyunto Robotics
 
-Message a robot from the Pyunto diary app, and watch it act.
+Message a robot from the Pyunto mobile app, and watch it act.
+
+[**Pyunto for iPhone and iPad**](https://apps.apple.com/app/id6755097890) ·
+[**Pyunto for Android**](https://play.google.com/store/apps/details?id=com.pyunto.app)
 
 ```bash
 pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
