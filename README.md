@@ -7,7 +7,7 @@ Message a robot from the Pyunto mobile app, and watch it act.
 [**pyunto-agent**](https://github.com/utagoeinc/pyunto-agent) — the same idea, with Claude at
 the other end instead of a robot
 
-Install it, scan a square with the app, and a window opens on a robot parked in a carport with
+Install it, scan the QR code with the app, and a window opens on a robot parked in a carport with
 a solar panel on its back. Write "go and find some sunlight, and bring back power" in the diary
 on your phone, and it drives out, finds sunlight by measuring what the panel receives, charges,
 comes home, and turns the house lights on with what it collected.
@@ -32,14 +32,14 @@ Then three commands, and the only one to remember is the first:
 ```bash
 pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
 python -m pyunto_robotics.download_model   # so the robot reads what you write (~5.5 GB, once)
-pyunto-robotics showqr                     # a square appears in the terminal
+pyunto-robotics showqr                     # a QR code appears in the terminal
 ```
 
 Not on PyPI yet, so the install comes from git — one command either way. It brings
 [`pyunto-agent`](https://github.com/utagoeinc/pyunto-agent), which carries the encrypted
 transport and the pairing, with it.
 
-Scan that square with the Pyunto app. The app asks which diary to let the robot into and shows
+Scan that QR code with the Pyunto app. The app asks which diary to let the robot into and shows
 who runs it; when you approve, the terminal asks which robot to open and starts it — no second
 command, nothing to copy back.
 

@@ -67,7 +67,7 @@ def main() -> int:
     connection = connect(display_name="My Robot")
     print(f"robot: {connection.identity.display_name} ({connection.user_id})")
 
-    # Pairing is a square somebody scans. Drawing it and waiting is the whole handshake:
+    # Pairing is a QR code somebody scans. Drawing the QR code and waiting is the whole handshake:
     # scanning IS the approval, so there is nothing else to type at either end.
     payload = pairing_payload(
         user_id=connection.user_id,

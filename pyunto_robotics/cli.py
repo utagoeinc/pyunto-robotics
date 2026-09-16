@@ -1,6 +1,6 @@
 """`pyunto-robotics` on the command line.
 
-    pyunto-robotics showqr                 # show a square to scan, then open the robot
+    pyunto-robotics showqr                 # show a QR code to scan, then open the robot
     pyunto-robotics demo                   # open the robot (already paired)
     pyunto-robotics robots                 # what machines are installed
     pyunto-robotics whoami                 # this robot's account and spaces
@@ -204,10 +204,10 @@ def main(argv: list[str] | None = None) -> int:
     p_qr.add_argument("--operator", default="",
                       help="who runs this robot; shown to the person before they approve")
     p_qr.add_argument("--big", action="store_true",
-                      help="draw the square larger; use it when a phone will not scan")
+                      help="draw the QR code larger; use it when a phone will not scan")
     p_qr.add_argument("--robot", help="skip the question and open this machine once paired")
     p_qr.add_argument("--no-run", action="store_true",
-                      help="draw the square and exit, instead of opening the robot once paired")
+                      help="draw the QR code and exit, instead of opening the robot once paired")
     p_qr.add_argument("--command-mode", action="store_true",
                       help="match a fixed command list instead of reading what you wrote")
     p_qr.add_argument("--no-window", action="store_true")
@@ -276,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
             print("    pip install qrcode")
             print()
             print("Then run `pyunto-robotics showqr` again. The raw pairing payload is")
-            print("below; it is what the square would encode, and nothing in it is secret.")
+            print("below; it is what the QR code would encode, and nothing in it is secret.")
             print()
             print(text)
         print()
@@ -289,9 +289,9 @@ def main(argv: list[str] | None = None) -> int:
             print("Afterwards, open that space in the app once so the robot is given the key.")
             return 0
 
-        # Wait for the scan, then open the robot. Drawing a square and exiting made the
+        # Wait for the scan, then open the robot. Drawing a QR code and exiting made the
         # person run a second command, and gave them no way to tell whether the scan had
-        # worked -- the square just sat there either way. Scanning IS the approval.
+        # worked -- the QR code just sat there either way. Scanning IS the approval.
         from pyunto_agent.pairing import wait_for_scan
 
         print()

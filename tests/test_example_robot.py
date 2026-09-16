@@ -33,7 +33,7 @@ def fake_connection():
 
 
 def test_it_mentions_no_pairing_code():
-    """Pairing is a square somebody scans; there is no code to type."""
+    """Pairing is a QR code somebody scans; there is no code to type."""
     text = EXAMPLE.read_text(encoding="utf-8")
     for gone in ("--pair", "K3F9QZ", "pairing code"):
         assert gone not in text, f"the example still refers to {gone!r}"

@@ -1,4 +1,4 @@
-"""The square has to draw itself.
+"""The QR code has to draw itself.
 
 `showqr` is the documented first step, and the whole flow is "scan this". Without `qrcode`
 it printed a JSON payload instead -- correct, unscannable, and a dead end for somebody

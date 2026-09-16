@@ -99,7 +99,7 @@ def run_demo(
         print(f"pairing : already a member of \"{spaces[0].get('name')}\"")
     else:
         print("pairing : not in any shared space yet.")
-        print("          Run `pyunto-robotics showqr` and scan the square with the app.")
+        print("          Run `pyunto-robotics showqr` and scan the QR code with the app.")
 
     # A robot without a scene has no body to simulate.
     #
