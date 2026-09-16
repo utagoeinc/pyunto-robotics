@@ -205,6 +205,9 @@ def main(argv: list[str] | None = None) -> int:
                       help="who runs this robot; shown to the person before they approve")
     p_qr.add_argument("--big", action="store_true",
                       help="draw the QR code larger; use it when a phone will not scan")
+    p_qr.add_argument("--image", metavar="FILE",
+                      help="write the QR code to a file (.svg or .png) to hand out at a demo "
+                           "or send to a customer; exits instead of opening a robot")
     p_qr.add_argument("--robot", help="skip the question and open this machine once paired")
     p_qr.add_argument("--no-run", action="store_true",
                       help="draw the QR code and exit, instead of opening the robot once paired")
@@ -247,7 +250,12 @@ def main(argv: list[str] | None = None) -> int:
         # The same payload and renderer the agent uses, so one scanner path in the app
         # handles both. A robot is not a different kind of guest -- it is another program
         # asking to be let into a diary, and the person answers the same question.
-        from pyunto_agent.pairing import encode_payload, pairing_payload, render_qr
+        from pyunto_agent.pairing import (
+            encode_payload,
+            pairing_payload,
+            render_qr,
+            save_qr,
+        )
 
         try:
             connection = connect()
@@ -263,6 +271,30 @@ def main(argv: list[str] | None = None) -> int:
             runtime="self_hosted",
         )
         text = encode_payload(payload)
+
+        if args.image:
+            # Handing the robot round a room: a QR on a slide, a printed card at a stand, a
+            # link in an email to a customer who will try it later. The same image works for
+            # everyone, because the payload names the account asking and carries no secret --
+            # each person approves it into their own diary. Waiting at this terminal makes no
+            # sense for that, so it writes the file and stops.
+            try:
+                written = save_qr(text, args.image)
+            except RuntimeError as e:
+                print(f"\nERROR: {e}")
+                return 1
+            print()
+            name = connection.identity.display_name
+            print(f"Written to {written}")
+            print()
+            print(f"Hand it to anyone who should be able to reach {name}. Each person who")
+            print("scans it lets the robot into their own diary, and sees who runs it before")
+            print("they approve. The same image works for everyone.")
+            print()
+            print("Then open the robot here:")
+            print("    pyunto-robotics demo --robot solar")
+            return 0
+
         qr = render_qr(text, big=args.big)
         print()
         if qr:

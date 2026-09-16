@@ -159,3 +159,56 @@ def test_declining_at_the_question_leaves_the_robot_paired(capsys):
         assert cli.main(["showqr"]) == 0
     assert not run_demo.called
     assert "stays paired" in capsys.readouterr().out
+
+
+class TestHandingOutTheQRCode:
+    """A robot maker demonstrating to a room needs the code as a file, not in their terminal.
+
+    A QR on a slide, a printed card at a stand, a link emailed to a customer who will try it
+    next week. The same image serves everyone, because the payload names the account asking
+    and carries no secret -- each person approves it into their own diary.
+    """
+
+    def _connection(self):
+        connection = mock.Mock()
+        connection.identity.display_name = "🤖 Robot"
+        connection.identity_store.public_key_b64 = "AAAA"
+        connection.user_id = "00000000-0000-0000-0000-000000000000"
+        return connection
+
+    def test_it_writes_the_file_and_does_not_open_a_robot(self, tmp_path, capsys):
+        target = tmp_path / "demo-qr.svg"
+        with mock.patch.object(cli, "connect", return_value=self._connection()), \
+             mock.patch("pyunto_robotics.demo.run_demo") as run_demo:
+            assert cli.main(["showqr", "--image", str(target)]) == 0
+
+        assert target.is_file(), "no QR file was written"
+        assert not run_demo.called, "--image must not also open a simulator"
+        assert str(target) in capsys.readouterr().out
+
+    def test_it_does_not_also_print_a_terminal_qr(self, tmp_path, capsys):
+        """Asked for a file; filling the terminal with a code nobody will scan is noise."""
+        with mock.patch.object(cli, "connect", return_value=self._connection()):
+            cli.main(["showqr", "--image", str(tmp_path / "q.svg")])
+        printed = capsys.readouterr().out
+        assert "█" not in printed and "▄" not in printed
+
+    def test_an_unwritable_format_is_reported_not_raised(self, tmp_path, capsys):
+        with mock.patch.object(cli, "connect", return_value=self._connection()):
+            assert cli.main(["showqr", "--image", str(tmp_path / "card.jpg")]) == 1
+        assert "ERROR" in capsys.readouterr().out
+
+    def test_the_payload_in_the_file_carries_no_secret(self, tmp_path):
+        """The claim that one image serves every client rests on this."""
+        import json
+
+        from pyunto_agent.pairing import encode_payload, pairing_payload
+
+        payload = json.loads(encode_payload(pairing_payload(
+            user_id="u", display_name="🤖 Robot", public_key="AAAA",
+            operator="Utagoe Robotics", runtime="self_hosted",
+        )))
+        assert set(payload) == {
+            "type", "version", "user_id", "display_name",
+            "public_key", "operator", "runtime",
+        }, "an unexpected field appeared in a payload that is handed out publicly"

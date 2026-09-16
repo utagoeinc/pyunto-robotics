@@ -84,6 +84,28 @@ pyunto-robotics demo --robot watch      # if already paired
 pyunto-robotics whoami                  # this robot's account and its spaces
 ```
 
+### Showing it to other people
+
+Demonstrating to a room, or leaving something with a customer to try later? Write the QR code
+to a file instead of the terminal:
+
+```bash
+pyunto-robotics showqr --operator "Utagoe Robotics" --image demo-qr.png
+```
+
+Put it on a slide, print it for a stand, or email it. **The same image works for everyone.**
+The code names the account asking and carries nothing secret — each person who scans it lets
+the robot into *their own* diary, and sees who is running it before they approve. Nobody has
+to hand you their phone, and nothing is sent to anybody's device.
+
+One running robot answers one diary at a time. That is deliberate: this machine moves, and two
+people driving it from separate rooms is not a demonstration, it is a collision. For a room
+full of people, put them in **one shared space** and let them all write there — everyone sees
+every instruction and every photograph the robot posts back, which is a better demonstration
+anyway.
+
+`.svg` needs nothing extra and scales for print; `.png` needs Pillow (`pip install pillow`).
+
 ---
 
 ## The robots
