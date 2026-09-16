@@ -45,6 +45,33 @@ def _reexec_under_mjpython_if_needed(wants_window: bool) -> None:
     os.execv(str(launcher), [str(launcher), "-m", "pyunto_robotics.cli", *sys.argv[1:]])
 
 
+def _print_what_to_try(robot_name: str) -> None:
+    """After pairing, say what to write and which other robots exist.
+
+    Pairing succeeds and then the window opens, which is the moment somebody has no idea what
+    to type. The examples are read from the registry rather than written here, so they cannot
+    drift from what the robots actually answer.
+    """
+    from . import registry
+
+    setup = registry.get(robot_name)
+    print()
+    print(f"Opening {setup.name}. Write one of these in the diary on your phone:")
+    for example in setup.examples or ("where are you?",):
+        print(f'    "{example}"')
+
+    others = [key for key in registry.names() if key != robot_name]
+    if others:
+        print()
+        print("Other robots, once you have stopped this one with Ctrl-C:")
+        for key in others:
+            other = registry.get(key)
+            example = (other.examples or ("",))[0]
+            line = f"    pyunto-robotics demo --robot {key}"
+            print(f'{line:<42}# "{example}"' if example else line)
+    print()
+
+
 def _understanding(command_mode: bool) -> bool:
     """Whether the robot reads sentences, or matches a fixed list of commands.
 
@@ -212,11 +239,18 @@ def main(argv: list[str] | None = None) -> int:
 
         print()
         print("waiting for the scan… (Ctrl-C to stop)")
-        space_id = wait_for_scan(connection.client)
+        try:
+            space_id = wait_for_scan(connection.client)
+        except KeyboardInterrupt:
+            # Stopping on purpose is not a crash. A traceback here reads as one, and it is
+            # the last thing somebody sees after following the README.
+            print("\nStopped. Run `pyunto-robotics showqr` again when you are ready.")
+            return 0
         if space_id is None:
             print("Nobody scanned it. Run this again when you are ready.")
             return 1
-        print("paired — opening the robot.\n")
+        print("paired ✓")
+        _print_what_to_try(args.robot)
         return run_demo(
             robot_name=args.robot,
             pair=None,

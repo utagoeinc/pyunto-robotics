@@ -79,3 +79,22 @@ def test_the_readme_warns_before_the_commands_not_after():
     install = text.index("pip install 'pyunto-robotics[llm]", quick_start)
     warning = text.index("3.11 or 3.12", quick_start)
     assert warning < install, "the Python version must be stated before the install command"
+
+
+def test_pairing_says_what_to_write_next(capsys):
+    """Pairing succeeds, the window opens, and somebody has no idea what to type.
+
+    The examples come from the registry rather than the print statement, so they cannot drift
+    from what the robots actually answer.
+    """
+    from pyunto_robotics import registry
+    from pyunto_robotics.cli import _print_what_to_try
+
+    _print_what_to_try("solar")
+    printed = capsys.readouterr().out
+
+    solar = registry.get("solar")
+    assert solar.examples[0] in printed, "the robot's own example is not shown"
+    for key in registry.names():
+        if key != "solar":
+            assert f"--robot {key}" in printed, f"{key} is not offered as an alternative"
