@@ -377,7 +377,7 @@ none, for real hardware), and which skills to use — see
 - macOS on Apple silicon (Windows and Linux are not verified yet)
 - Python 3.11 or newer — but not 3.13+ if you want the language model, which `mlx-vlm` does
   not build for yet
-- The Pyunto app, and a premium space to invite the robot into
+- The Pyunto app. A free account can invite one agent or robot in total; a Pyunto+ space holds one agent and one robot of its own
 
 The simulator window is owned by `mjpython` on macOS; `pyunto-robotics` re-executes itself under
 it automatically, so the command above works as typed.
