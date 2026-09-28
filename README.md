@@ -35,9 +35,9 @@ python -m pyunto_robotics.download_model   # so the robot reads what you write (
 pyunto-robotics showqr                     # a QR code appears in the terminal
 ```
 
-Not on PyPI yet, so the install comes from git — one command either way. It brings
-[`pyunto-agent`](https://github.com/utagoeinc/pyunto-agent), which carries the encrypted
-transport and the pairing, with it.
+pyunto-robotics is not on PyPI yet, so it installs from git — one command either way. It
+brings [`pyunto-agent`](https://pypi.org/project/pyunto-agent/) from PyPI, which carries the
+encrypted transport and the pairing.
 
 Scan that QR code with the Pyunto app. The app asks which diary to let the robot into and shows
 who runs it; when you approve, the terminal asks which robot to open and starts it — no second
@@ -384,8 +384,8 @@ it automatically, so the command above works as typed.
 
 ### Installing
 
-Neither package is published to PyPI yet, so both come from git — that is the line in
-[Quick start](#quick-start), and it brings `pyunto-agent` with it.
+pyunto-robotics is not published to PyPI yet, so it comes from git — that is the line in
+[Quick start](#quick-start). It brings `pyunto-agent` with it, from PyPI.
 
 The `[llm]` extra is what lets the robot read sentences rather than match commands, and it
 installs nothing at all off Apple silicon, so the same line is safe everywhere. Drop it if you
