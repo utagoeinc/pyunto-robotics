@@ -36,7 +36,10 @@ def supported() -> tuple[bool, str]:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         return False, (
             f"The local model runs on Apple Silicon; this is {platform.system()} "
-            f"{platform.machine()}. The robots will use keyword matching instead."
+            f"{platform.machine()}. To let the robots read sentences here, run a model server "
+            "(Ollama: `ollama pull gemma4:e2b`) and pass `--llm http --llm-url "
+            "http://localhost:11434/v1 --llm-model gemma4:e2b`, or use `--llm claude-api`. "
+            "Without either, the robots match commands instead."
         )
     if sys.version_info >= (3, 13):
         # Say what to do, not only what is wrong. Reaching this message means an environment
@@ -49,8 +52,7 @@ def supported() -> tuple[bool, str]:
             "\n"
             "Build the environment on 3.11 or 3.12 instead:\n"
             "    python3.12 -m venv .venv && source .venv/bin/activate\n"
-            "    pip install 'pyunto-robotics[llm] @ "
-            "git+https://github.com/utagoeinc/pyunto-robotics'\n"
+            "    pip install 'pyunto-robotics[llm]'\n"
             "\n"
             "The robots still run here without it, matching commands instead of reading "
             "sentences. See `--command-mode` in the README."

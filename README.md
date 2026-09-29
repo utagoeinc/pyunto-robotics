@@ -19,9 +19,11 @@ robot does — the diary is end-to-end encrypted, and decryption happens on your
 
 ## Quick start
 
-**Use Python 3.11 or 3.12.** `mlx-vlm`, which runs the language model, has no build for 3.13
-or newer — and on those versions the install below quietly skips it rather than failing, so
-the first sign of trouble is the second command refusing to run.
+Runs on Linux, Windows and macOS. **On a Mac, use Python 3.11 or 3.12.** `mlx-vlm`, which runs
+the built-in language model, has no build for 3.13 or newer — and on those versions the install
+below quietly skips it rather than failing, so the first sign of trouble is the second command
+refusing to run. On Linux and Windows, any Python from 3.11 works, and the robot reads sentences
+through a model server instead (see [Writing in your own words](#writing-in-your-own-words)).
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
@@ -209,11 +211,24 @@ None of those are in any list, and that is the point: a keyword table only match
 phrasings somebody thought to write down, and every miss needs another pattern, in every
 language the product ships in. There is no end to that table.
 
-The model runs on your machine, so the diary is never sent anywhere to be understood. This is
-the default and needs no flag — run `python -m pyunto_robotics.download_model` once.
+Where the model runs is your choice:
 
-It needs Apple silicon. Everywhere else, and until that download has run, the robot matches
-commands instead and says so in one line at startup rather than refusing to open.
+| Where | How | Where the instruction goes |
+|---|---|---|
+| **Apple silicon** (default) | `python -m pyunto_robotics.download_model` once; no flag | nowhere: Gemma 4 runs in the process |
+| **Linux, Windows, Intel Mac** | a local model server: [Ollama](https://ollama.com) (`ollama pull gemma4:e2b`), llama.cpp's `llama-server`, LM Studio or vLLM, then `--llm http --llm-url http://localhost:11434/v1 --llm-model gemma4:e2b` | to that server, which is on your machine or network |
+| **Anywhere, no local model** | `--llm claude-api` with `ANTHROPIC_API_KEY` set | to Anthropic's API |
+
+```bash
+ollama pull gemma4:e2b
+pyunto-robotics showqr --llm http --llm-url http://localhost:11434/v1 --llm-model gemma4:e2b
+```
+
+The robot names the model it is using in one line at start-up. If the model cannot be used —
+no download yet, the server is not running — it says so in one line and matches commands
+instead, rather than refusing to open. Small models vary: a 7B model that is not trained to
+follow instructions closely can answer with an empty plan, and the robot then falls back to
+the command list. Gemma 4 E2B (the default on a Mac) and larger Gemma 4 models plan reliably.
 
 ---
 
@@ -336,6 +351,23 @@ That is the whole contract. You get the encrypted transport, space membership, m
 handling, planning and replies; you write what your machine does. It works for real hardware,
 for another simulator (Newton, Isaac, Gazebo), or for a robot that is only an HTTP API.
 
+### Starting from a URDF
+
+MuJoCo reads URDF directly, so a robot described for ROS can be simulated without converting
+it. [`examples/urdf_robot.py`](https://github.com/utagoeinc/pyunto-robotics/blob/main/examples/urdf_robot.py)
+loads a URDF, adds a position motor to each joint (URDF describes joints, not motors), and
+exposes raise, lower, wave and report to the diary:
+
+```bash
+python examples/urdf_robot.py --check                          # offline: run each skill once
+python examples/urdf_robot.py --urdf path/to/your_robot.urdf   # pair it and message it
+```
+
+Three things trip up a first URDF: `package://` mesh paths from ROS do not resolve (use paths
+relative to the URDF), a fixed base's collision shape can pin the first joint (MuJoCo merges a
+fixed base into the world body, whose contacts are not filtered), and the motor gains need
+tuning for your robot's masses. The example's docstring covers each.
+
 A runnable version is in [`examples/my_robot.py`](https://github.com/utagoeinc/pyunto-robotics/blob/main/examples/my_robot.py) — about forty lines.
 The full contract, including the optional `RobotBody` interface for driving your own machine
 with our mapless navigation, is documented in
@@ -394,9 +426,11 @@ none, for real hardware), and which skills to use — see
 
 ## Requirements
 
-- macOS on Apple silicon (Windows and Linux are not verified yet)
-- Python 3.11 or newer — but not 3.13+ if you want the language model, which `mlx-vlm` does
-  not build for yet
+- Linux, Windows or macOS. The test suite runs on all three in CI (`.github/workflows/tests.yml`)
+- Python 3.11 or newer — on a Mac, not 3.13+ if you want the built-in language model, which
+  `mlx-vlm` does not build for yet
+- On a Linux machine with no display, render with MuJoCo's software renderer:
+  `MUJOCO_GL=osmesa` (install `libosmesa6`) or `MUJOCO_GL=egl`, and run with `--no-window`
 - The Pyunto app. A free account can invite one agent or robot in total; a Pyunto+ space holds one agent and one robot of its own
 
 The simulator window is owned by `mjpython` on macOS; `pyunto-robotics` re-executes itself under
@@ -430,8 +464,8 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[llm,dev]'
 
 | Command | What it does | Options |
 |---|---|---|
-| `showqr` | Shows a QR code; the person who scans it lets the robot into a diary. Then asks which robot to open and starts it | `--operator NAME` (shown to the person before they approve), `--robot NAME` (skip the question), `--image FILE.png\|.svg` (write the code to a file and exit), `--big` (larger terminal QR), `--no-run` (exit after showing the code), plus `--command-mode`, `--no-window`, `--speed`, `--no-photos` as for `demo` |
-| `demo` | Opens a robot and answers the diaries it is in | `--robot NAME` (default `solar`), `--command-mode` (fixed command list instead of the language model), `--commands FILE.json` (your own command list; implies `--command-mode`), `--no-window` (headless), `--speed X` (simulation playback, 1.0 = real time), `--no-photos` (report in words only) |
+| `showqr` | Shows a QR code; the person who scans it lets the robot into a diary. Then asks which robot to open and starts it | `--operator NAME` (shown to the person before they approve), `--robot NAME` (skip the question), `--image FILE.png\|.svg` (write the code to a file and exit), `--big` (larger terminal QR), `--no-run` (exit after showing the code), plus `--llm`, `--llm-url`, `--llm-model`, `--command-mode`, `--no-window`, `--speed`, `--no-photos` as for `demo` |
+| `demo` | Opens a robot and answers the diaries it is in | `--robot NAME` (default `solar`), `--llm auto\|mlx\|http\|claude-api`, `--llm-url URL`, `--llm-model NAME` (where the language model runs; see [Writing in your own words](#writing-in-your-own-words)), `--command-mode` (fixed command list instead of the language model), `--commands FILE.json` (your own command list; implies `--command-mode`), `--no-window` (headless), `--speed X` (simulation playback, 1.0 = real time), `--no-photos` (report in words only) |
 | `robots` | Lists the installed robots, including plugins | |
 | `whoami` | This robot's account and the spaces it is in | |
 
@@ -443,6 +477,8 @@ Configuration, from the environment or a `.env` file:
 | `PYUNTO_ROBOT_DIR` | where its account and keys live (default `~/.pyunto-robot`) |
 | `PYUNTO_EMAIL`, `PYUNTO_PASSWORD` | sign in as a registered account instead of the robot's own. Refused unless `PYUNTO_ROBOT_ACCOUNT=1`: a robot ignores its own posts, so signed in as the person it serves it would ignore everything they write |
 | `PYUNTO_ROBOT_ACCOUNT` | `1` = the account above really is a separate account for the robot |
+| `PYUNTO_LLM`, `PYUNTO_LLM_URL`, `PYUNTO_LLM_MODEL` | defaults for `--llm`, `--llm-url`, `--llm-model` |
+| `ANTHROPIC_API_KEY` | for `--llm claude-api` |
 | `PYUNTO_BASE_URL` | API server (default `https://api.pyunto.com`) |
 | `PYUNTO_NO_REEXEC` | `1` = do not re-launch under `mjpython` on macOS (set automatically) |
 

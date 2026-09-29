@@ -29,7 +29,11 @@ class FakeVersion(tuple):
 
 @pytest.mark.parametrize("minor", [13, 14, 15])
 def test_download_model_refuses_new_pythons_with_a_way_forward(minor: int):
-    with mock.patch.object(download_model.sys, "version_info", FakeVersion(3, minor)):
+    # The version check is the Apple-silicon branch; pin the machine so this runs the same on
+    # a Linux or Windows CI runner (where supported() stops earlier, at "not Apple silicon").
+    with mock.patch.object(download_model.sys, "version_info", FakeVersion(3, minor)), \
+         mock.patch.object(download_model.platform, "system", lambda: "Darwin"), \
+         mock.patch.object(download_model.platform, "machine", lambda: "arm64"):
         ok, message = download_model.supported()
     assert not ok
     assert f"3.{minor}" in message
@@ -47,6 +51,7 @@ def test_the_cli_does_not_send_a_314_user_to_a_command_that_refuses(capsys):
         return real_import(name, *args, **kwargs)
 
     with mock.patch.object(cli.sys, "version_info", FakeVersion(3, 14)), \
+         mock.patch.object(cli.sys, "platform", "darwin"), \
          mock.patch("builtins.__import__", without_mlx):
         assert cli._understanding(False) is False
     printed = capsys.readouterr().out

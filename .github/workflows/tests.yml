@@ -1,8 +1,8 @@
 # The whole test suite, on the three systems robot makers actually use.
 #
 # The simulator renders camera frames, which needs an OpenGL context even with no window.
-# Linux runners have no GPU or display, so MuJoCo's software renderer (OSMesa) is used there.
-# Windows and macOS runners have a display adapter, which GLFW can use.
+# None of the hosted runners has a GPU. Linux renders through EGL on Mesa's llvmpipe, Windows
+# uses Mesa's llvmpipe, and the macOS VM cannot render at all (see the step below).
 # The `llm` tests need the local Gemma weights and are left to a Mac.
 name: Tests
 
@@ -23,16 +23,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Software OpenGL (Linux)
+      - name: Headless OpenGL (Linux, Mesa EGL)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libosmesa6 libgl1
-          echo "MUJOCO_GL=osmesa" >> "$GITHUB_ENV"
-          echo "PYOPENGL_PLATFORM=osmesa" >> "$GITHUB_ENV"
+          sudo apt-get install -y libegl1 libgl1 libegl-mesa0 libgles2
+          echo "MUJOCO_GL=egl" >> "$GITHUB_ENV"
+          echo "PYOPENGL_PLATFORM=egl" >> "$GITHUB_ENV"
+      - name: Software OpenGL (Windows)
+        # The hosted Windows VM has only the basic display driver (OpenGL 1.1), which MuJoCo
+        # cannot use: gladLoadGL fails. Mesa's llvmpipe provides a full OpenGL on the CPU.
+        if: runner.os == 'Windows'
+        uses: ssciwr/setup-mesa-dist-win@v3
+      - name: No OpenGL on the macOS VM
+        # GitHub's macOS runners have no GPU and CGL refuses a pixel format. Rendering tests
+        # that fail for that reason are reported as skipped (tests/conftest.py); the rest run.
+        # They run with rendering on real Macs.
+        if: runner.os == 'macOS'
+        run: echo "PYUNTO_TEST_NO_GL=1" >> "$GITHUB_ENV"
       - name: Install
         run: python -m pip install -e ".[dev]"
       - name: Test
-        run: python -m pytest -q -m "not llm"
+        timeout-minutes: 40
+        run: python -m pytest -q -m "not llm" --durations=15
       - name: URDF example
         run: python examples/urdf_robot.py --check
