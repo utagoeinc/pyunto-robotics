@@ -12,6 +12,10 @@ a solar panel on its back. Write "go and find some sunlight, and bring back powe
 on your phone, and it drives out, finds sunlight by measuring what the panel receives, charges,
 comes home, and turns the house lights on with what it collected.
 
+<a href="https://pyunto.com/media/solar-demo.mp4"><img src="https://raw.githubusercontent.com/utagoeinc/pyunto-robotics/main/docs/images/solar-demo.gif" alt="Left: the Pyunto diary on an iPhone, where a person writes to the robot. Right: the simulated robot driving out to find sunlight, reporting back with photos, and coming home to turn the house lights on." width="800"></a>
+
+*A real run, sped up where the robot is driving. [Watch the full 100-second video](https://pyunto.com/media/solar-demo.mp4).*
+
 The robot runs on **your** computer. Pyunto never sees the room, the camera, or anything the
 robot does — the diary is end-to-end encrypted, and decryption happens on your machine.
 
