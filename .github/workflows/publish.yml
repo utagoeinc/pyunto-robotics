@@ -1,0 +1,48 @@
+# Publishes to PyPI when a GitHub release is published.
+# Uses PyPI Trusted Publishing: no API token is stored in this repository. PyPI trusts this
+# workflow file, in this repository, running in the `pypi` environment -- nothing else.
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test
+        # Fast tests only. The `slow` ones drive the full simulator for about five minutes and
+        # render camera frames, which needs an OpenGL context the runner does not have; `llm`
+        # needs the local Gemma weights. Run both on a Mac before tagging a release.
+        run: |
+          python -m pip install '.[dev]'
+          python -m pytest -q -m "not slow and not llm"
+      - name: Build
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pyunto-robotics
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

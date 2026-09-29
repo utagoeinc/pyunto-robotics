@@ -2,8 +2,22 @@
 name = "pyunto-robotics"
 version = "0.1.0"
 description = "Talk to a robot from the Pyunto diary app. Simulated robots included; bring your own with one interface."
-readme = "README.md"
+readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.11"
+authors = [{name = "Utagoe Inc."}]
+keywords = ["pyunto", "robotics", "robot", "mujoco", "simulation", "llm", "e2ee", "diary"]
+# No licence has been granted yet: the code is all rights reserved (see README, "Licence").
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: Other/Proprietary License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 
 dependencies = [
     # Pyunto transport, E2EE identity and the message bridge. Deliberately a dependency rather
@@ -17,8 +31,10 @@ dependencies = [
     # cannot be scanned by anything. An extra is right for the agent, where pairing is one
     # feature among several; for the robot SDK it is the way in.
     "pyunto-agent[qr]>=0.1.0",
-    # Simulation
-    "mujoco>=3.11.0",
+    # Simulation. Capped below 3.13: from 3.13 the pet robot can no longer reach the cat
+    # tree (tests/test_pet_watch.py::test_it_can_reach_every_place_including_the_kitchen,
+    # 2026-09-29). Lift the cap once the navigation is re-tuned against the newer physics.
+    "mujoco>=3.11.0,<3.13",
     "numpy>=2.0",
     # Imaging
     "pillow>=10.3",
@@ -48,18 +64,17 @@ report = [
     "imageio-ffmpeg>=0.5",
 ]
 
+[project.urls]
+Homepage = "https://pyunto.com"
+Repository = "https://github.com/utagoeinc/pyunto-robotics"
+Issues = "https://github.com/utagoeinc/pyunto-robotics/issues"
+
 [project.scripts]
 pyunto-robotics = "pyunto_robotics.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-# Required for the git dependency above. Hatch refuses direct references unless asked,
-# which is the right default -- a URL in a dependency list cannot be resolved by a version
-# solver -- but it is what we need until both packages are on PyPI.
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["pyunto_robotics"]
@@ -68,6 +83,7 @@ artifacts = ["pyunto_robotics/assets/**"]
 
 [tool.hatch.build.targets.sdist]
 include = ["pyunto_robotics", "examples", "README.md"]
+exclude = ["**/__pycache__"]
 
 [tool.ruff]
 line-length = 100

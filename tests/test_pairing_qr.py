@@ -40,6 +40,6 @@ def test_the_dependency_is_declared_with_the_qr_extra():
     """Guard the declaration too: an import test passes in a dev venv that has it anyway."""
     text = pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
     dependencies = text[text.index("dependencies = ["):text.index("[project.optional-dependencies]")]
-    assert re.search(r'"pyunto-agent\[qr\] @', dependencies), (
+    assert re.search(r'"pyunto-agent\[qr\][ @>=~]', dependencies), (
         "pyunto-agent must be depended on with its [qr] extra, or `showqr` prints JSON"
     )

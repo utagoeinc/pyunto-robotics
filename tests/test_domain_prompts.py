@@ -108,8 +108,11 @@ def test_the_gallery_pictures_are_committed():
 
     text = pathlib.Path("README.md").read_text(encoding="utf-8")
     # Both spellings: markdown for the gallery, an <img> tag where a width is needed.
-    shown = re.findall(r"!\[[^\]]*\]\((docs/images/[^)]+)\)", text)
-    shown += re.findall(r'<img\s+src="(docs/images/[^"]+)"', text)
+    # Absolute raw.githubusercontent.com URLs so the pictures also render on PyPI, which cannot
+    # resolve a path relative to the repository; they still point at these committed files.
+    raw = r"(?:https://raw\.githubusercontent\.com/utagoeinc/pyunto-robotics/main/)?"
+    shown = re.findall(r"!\[[^\]]*\]\(" + raw + r"(docs/images/[^)]+)\)", text)
+    shown += re.findall(r'<img\s+src="' + raw + r'(docs/images/[^"]+)"', text)
     assert shown, "the README gallery shows no images at all"
 
     tracked = set(

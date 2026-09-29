@@ -115,7 +115,7 @@ opens, rendered from the simulator itself.
 
 ### `solar` — fetches its own energy
 
-![The S1 parked under a carport, solar panel on its back](docs/images/solar.png)
+![The S1 parked under a carport, solar panel on its back](https://raw.githubusercontent.com/utagoeinc/pyunto-robotics/main/docs/images/solar.png)
 
 The demonstration the SDK leads with, and the only one where the robot finds something by
 measuring rather than by being told where it is. It drives out, reads what the panel is
@@ -128,7 +128,7 @@ and turns the house lights on with what it collected.
 
 ### `watch` — a house that watches, with no robot in it
 
-![A one-bedroom flat seen from above, an older person asleep in bed, a wall clock](docs/images/watch.png)
+![A one-bedroom flat seen from above, an older person asleep in bed, a wall clock](https://raw.githubusercontent.com/utagoeinc/pyunto-robotics/main/docs/images/watch.png)
 
 There is no machine to command here. The flat itself watches an older person living alone —
 floor sensors in each room, a bed sensor, temperature and humidity, the lock, the doorphone —
@@ -145,7 +145,7 @@ unanswered callers on a day she did not get up is corroboration a motion sensor 
 
 ### `pet` — a camera that has to aim, not just drive
 
-![A flat with a ginger cat on the windowsill and the P1 on its dock](docs/images/pet.png)
+![A flat with a ginger cat on the windowsill and the P1 on its dock](https://raw.githubusercontent.com/utagoeinc/pyunto-robotics/main/docs/images/pet.png)
 
 The opposite case, and the one that shows why the flat above has no camera. Here the only
 human is the one holding the phone, in their own home, looking for their own cat — so a camera
@@ -161,7 +161,7 @@ cat tree, the top of the bookshelf. A fixed forward-facing lens finds none of th
 
 ### `mars` — driving by camera alone
 
-![The R1 rover beside its lander on the Martian surface](docs/images/mars.png)
+![The R1 rover beside its lander on the Martian surface](https://raw.githubusercontent.com/utagoeinc/pyunto-robotics/main/docs/images/mars.png)
 
 The clearest demonstration of mapless navigation: there is no map of Mars in the robot, and
 the targets are found by looking. Six wheels, a camera mast, and a channel to follow.
@@ -172,7 +172,7 @@ the targets are found by looking. Six wheels, a camera mast, and a channel to fo
 
 ### `orchard` — four legs and a load
 
-![The Q1 quadruped standing by the shed, an apple tree behind](docs/images/orchard.png)
+![The Q1 quadruped standing by the shed, an apple tree behind](https://raw.githubusercontent.com/utagoeinc/pyunto-robotics/main/docs/images/orchard.png)
 
 Walks the rows on four legs and carries a crate. Where the wheeled robots need a surface, this
 one handles the ground an orchard actually has.
@@ -183,7 +183,7 @@ one handles the ground an orchard actually has.
 
 ### `hotel` — cleans rooms and rides the lift
 
-![The H1 humanoid in a hotel corridor, the lift ahead](docs/images/hotel.png)
+![The H1 humanoid in a hotel corridor, the lift ahead](https://raw.githubusercontent.com/utagoeinc/pyunto-robotics/main/docs/images/hotel.png)
 
 Two floors, guest rooms, and a lift the robot has to call, board and ride. The multi-storey
 case: getting somewhere is a task in itself, not just a drive.
@@ -248,7 +248,7 @@ not have is refused at startup, naming what it does have, rather than becoming a
 can never fire.
 
 `--command-mode` on its own uses the built-in lists without the model. A runnable example is
-in [`examples/commands.example.json`](examples/commands.example.json).
+in [`examples/commands.example.json`](https://github.com/utagoeinc/pyunto-robotics/blob/main/examples/commands.example.json).
 
 ---
 
@@ -260,7 +260,7 @@ instruction arrived in.
 
 This is a real thread, on a phone, after writing "move to the sunlight":
 
-<img src="docs/images/app-thread.png" alt="A Pyunto thread: the robot repeats what it
+<img src="https://raw.githubusercontent.com/utagoeinc/pyunto-robotics/main/docs/images/app-thread.png" alt="A Pyunto thread: the robot repeats what it
 understood, reports the step with its measurements, and posts a photograph from its own
 camera" width="380">
 
@@ -316,10 +316,10 @@ That is the whole contract. You get the encrypted transport, space membership, m
 handling, planning and replies; you write what your machine does. It works for real hardware,
 for another simulator (Newton, Isaac, Gazebo), or for a robot that is only an HTTP API.
 
-A runnable version is in [`examples/my_robot.py`](examples/my_robot.py) — about forty lines.
+A runnable version is in [`examples/my_robot.py`](https://github.com/utagoeinc/pyunto-robotics/blob/main/examples/my_robot.py) — about forty lines.
 The full contract, including the optional `RobotBody` interface for driving your own machine
 with our mapless navigation, is documented in
-[`pyunto_robotics/api.py`](pyunto_robotics/api.py).
+[`pyunto_robotics/api.py`](https://github.com/utagoeinc/pyunto-robotics/blob/main/pyunto_robotics/api.py).
 
 ### Shipping it as a package
 
@@ -368,7 +368,7 @@ taking the others down with it.
 
 `RobotSetup` is the small record that says what your robot is called, which scene to open (or
 none, for real hardware), and which skills to use — see
-[`pyunto_robotics/registry.py`](pyunto_robotics/registry.py).
+[`pyunto_robotics/registry.py`](https://github.com/utagoeinc/pyunto-robotics/blob/main/pyunto_robotics/registry.py).
 
 ---
 
