@@ -67,6 +67,7 @@ def run_demo(
     view: bool = True,
     speed: float = 1.0,
     send_images: bool = True,
+    text_model: object | None = None,
 ) -> int:
     setup = registry.get(robot_name)
     if commands:
@@ -122,7 +123,7 @@ def run_demo(
     planner = (
         setup.planner(use_llm)
         if setup.planner is not None
-        else _domain_planner(setup, use_llm)
+        else _domain_planner(setup, use_llm, text_model)
     )
     try:
         skills = setup.skills(robot, grounder, planner=planner)
@@ -197,7 +198,9 @@ def _idle_hook(viewer, skills):  # noqa: ANN001
     return idle
 
 
-def _domain_planner(setup, use_llm: bool):
+def _domain_planner(setup, use_llm: bool, text_model: object | None = None):
     from .brain.domains import DomainLLMPlanner, DomainRulePlanner
 
-    return DomainLLMPlanner(setup.domain) if use_llm else DomainRulePlanner(setup.domain)
+    if not use_llm:
+        return DomainRulePlanner(setup.domain)
+    return DomainLLMPlanner(setup.domain, model=text_model)

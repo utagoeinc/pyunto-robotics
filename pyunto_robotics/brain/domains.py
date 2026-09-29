@@ -200,60 +200,34 @@ class DomainRulePlanner:
 
 
 class DomainLLMPlanner:
-    """Plans with a local Gemma 4 model against a domain's prompt, falling back to rules.
+    """Plans with a language model against a domain's prompt, falling back to rules.
 
-    Shares the general LLMPlanner's design and its reasons: load through mlx_vlm rather than
-    mlx_lm because Gemma 4 is multimodal, use the 8-bit build because the per-layer embeddings
-    quantise badly at 4-bit, and never let a model failure stop the robot -- a bad generation
-    degrades to a worse plan, not to no plan.
+    The model is anything with ``generate(prompt, max_tokens) -> str`` (see text_model.py):
+    Gemma 4 on this Mac by default, or a local server / the Claude API elsewhere. Whatever it
+    is, a model failure never stops the robot -- a bad generation degrades to a worse plan,
+    not to no plan.
     """
 
     def __init__(
         self,
         domain: Domain,
-        model_id: str = "lmstudio-community/gemma-4-E2B-it-MLX-8bit",
+        model_id: str | None = None,
         max_tokens: int = 220,
         fallback: DomainRulePlanner | None = None,
+        model: object | None = None,
     ):
         self.domain = domain
-        self.model_id = model_id
         self.max_tokens = max_tokens
         self.fallback = fallback or DomainRulePlanner(domain)
-        self._model = None
-        self._tokenizer = None
-        self._config = None
+        if model is None:
+            from .text_model import DEFAULT_MLX_MODEL, MLXModel  # noqa: PLC0415
 
-    def _load(self) -> None:
-        if self._model is not None:
-            return
-        try:
-            from mlx_vlm import load  # noqa: PLC0415 - optional heavy dependency
-            from mlx_vlm.utils import load_config  # noqa: PLC0415
-        except ImportError as e:  # pragma: no cover
-            raise RuntimeError(
-                "mlx-vlm is not installed. Install the extra: uv pip install -e '.[llm]'"
-            ) from e
-        log.info("loading planner model %s (first run downloads weights)", self.model_id)
-        self._model, self._tokenizer = load(self.model_id)
-        self._config = load_config(self.model_id)
+            model = MLXModel(model_id or DEFAULT_MLX_MODEL)
+        self.model = model
 
     def plan(self, message: str) -> Plan:
         try:
-            self._load()
-            from mlx_vlm import generate  # noqa: PLC0415
-            from mlx_vlm.prompt_utils import apply_chat_template  # noqa: PLC0415
-
-            prompt = apply_chat_template(
-                self._tokenizer,
-                self._config,
-                self.domain.full_prompt(message),
-                num_images=0,
-            )
-            reply = generate(
-                self._model, self._tokenizer, prompt, [],
-                max_tokens=self.max_tokens, verbose=False,
-            )
-            text = reply if isinstance(reply, str) else getattr(reply, "text", str(reply))
+            text = self.model.generate(self.domain.full_prompt(message), self.max_tokens)
             steps = parse_plan(text, allowed=tuple(action for action, _ in self.domain.verbs))
             if steps:
                 return Plan(steps)
@@ -285,10 +259,6 @@ class DomainLLMPlanner:
         out; one that is told what the robot can see and what just went wrong usually can.
         """
         try:
-            self._load()
-            from mlx_vlm import generate  # noqa: PLC0415
-            from mlx_vlm.prompt_utils import apply_chat_template  # noqa: PLC0415
-
             question = _REPLAN_PROMPT.format(
                 actions="\n".join(
                     f"  {action}" for action, _ in self.domain.verbs
@@ -299,12 +269,7 @@ class DomainLLMPlanner:
                 remaining=", ".join(remaining) or "(nothing)",
                 view=view or "(nothing in particular)",
             )
-            prompt = apply_chat_template(self._tokenizer, self._config, question, num_images=0)
-            reply = generate(
-                self._model, self._tokenizer, prompt, [],
-                max_tokens=self.max_tokens, verbose=False,
-            )
-            text = reply if isinstance(reply, str) else getattr(reply, "text", str(reply))
+            text = self.model.generate(question, self.max_tokens)
             steps = parse_plan(text, allowed=tuple(a for a, _ in self.domain.verbs))
             return steps or None
         except Exception as e:  # noqa: BLE001 - recovery must never itself be fatal

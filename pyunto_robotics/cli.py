@@ -153,8 +153,9 @@ def _understanding(command_mode: bool) -> bool:
         print("planner : command mode — matching the command list, not reading sentences.")
         return False
     if sys.platform != "darwin":
-        print("note    : the local model needs Apple silicon, so this robot is matching")
-        print("          commands instead of reading sentences. See `--command-mode`.")
+        print("note    : the built-in model needs Apple silicon, so this robot is matching")
+        print("          commands instead of reading sentences. To let it read sentences here:")
+        _print_other_models()
         return False
     try:
         import mlx_vlm  # noqa: F401, PLC0415
@@ -171,8 +172,66 @@ def _understanding(command_mode: bool) -> bool:
         else:
             print("          To let it read what you write:")
             print("              python -m pyunto_robotics.download_model")
+        print("          Or use a model server instead:")
+        _print_other_models()
         return False
     return True
+
+
+def _print_other_models() -> None:
+    print("              --llm http --llm-url http://localhost:11434/v1 --llm-model gemma4:e2b")
+    print("                (Ollama; llama.cpp's llama-server, LM Studio and vLLM work the same way)")
+    print("              --llm claude-api   (needs ANTHROPIC_API_KEY; instructions go to Anthropic)")
+
+
+def _language_model(command_mode: bool, llm: str = "auto", url: str | None = None,
+                    model: str | None = None):
+    """The model that reads instructions, or None to match commands.
+
+    `auto` uses a model server when a URL is given, otherwise Gemma on Apple silicon. Anything
+    that cannot start is said in one line and the robot opens anyway in command mode -- the
+    same rule as for a missing download.
+    """
+    from .brain.text_model import (  # noqa: PLC0415
+        ClaudeModel,
+        DEFAULT_CLAUDE_MODEL,
+        DEFAULT_MLX_MODEL,
+        MLXModel,
+        OpenAICompatibleModel,
+    )
+
+    if command_mode:
+        _understanding(True)
+        return None
+    if llm == "auto":
+        llm = "http" if url else "mlx"
+    try:
+        if llm == "http":
+            chosen = OpenAICompatibleModel(url or "http://localhost:11434/v1", model)
+            chosen.check()
+        elif llm == "claude-api":
+            chosen = ClaudeModel(model or DEFAULT_CLAUDE_MODEL)
+        else:
+            if not _understanding(False):
+                return None
+            chosen = MLXModel(model or DEFAULT_MLX_MODEL)
+    except Exception as e:  # noqa: BLE001 - one line, then command mode
+        print(f"note    : could not use the {llm} model ({e}),")
+        print("          so this robot is matching commands instead of reading sentences.")
+        return None
+    print(f"planner : {chosen.description}")
+    return chosen
+
+
+def _add_llm_arguments(parser) -> None:  # noqa: ANN001
+    parser.add_argument("--llm", choices=["auto", "mlx", "http", "claude-api"],
+                        default=os.environ.get("PYUNTO_LLM", "auto"),
+                        help="where the model that reads instructions runs (default: a model "
+                             "server if --llm-url is given, else Gemma on Apple silicon)")
+    parser.add_argument("--llm-url", default=os.environ.get("PYUNTO_LLM_URL"),
+                        help="OpenAI-compatible server, e.g. http://localhost:11434/v1 (Ollama)")
+    parser.add_argument("--llm-model", default=os.environ.get("PYUNTO_LLM_MODEL"),
+                        help="model name on that server, or the Claude / MLX model id")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -195,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     p_demo.add_argument("--speed", type=float, default=1.0, help="playback speed (1.0 = real time)")
     p_demo.add_argument("--no-photos", dest="send_images", action="store_false",
                         help="report in words only; do not post camera pictures to the diary")
+    _add_llm_arguments(p_demo)
 
     sub.add_parser("robots", help="list the installed machines")
     sub.add_parser("whoami", help="show this robot's account and the spaces it is in")
@@ -216,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     p_qr.add_argument("--no-window", action="store_true")
     p_qr.add_argument("--speed", type=float, default=1.0)
     p_qr.add_argument("--no-photos", action="store_true")
+    _add_llm_arguments(p_qr)
 
     args = ap.parse_args(argv)
     logging.basicConfig(
@@ -351,9 +412,11 @@ def main(argv: list[str] | None = None) -> int:
         _reexec_under_mjpython_if_needed(not args.no_window)
         from .demo import run_demo
 
+        text_model = _language_model(args.command_mode, args.llm, args.llm_url, args.llm_model)
         return run_demo(
             robot_name=robot_name,
-            use_llm=_understanding(args.command_mode),
+            use_llm=text_model is not None,
+            text_model=text_model,
             view=not args.no_window,
             speed=args.speed,
             send_images=not args.no_photos,
@@ -363,9 +426,12 @@ def main(argv: list[str] | None = None) -> int:
         _reexec_under_mjpython_if_needed(args.view)
         from .demo import run_demo
 
+        text_model = _language_model(args.command_mode or bool(args.commands),
+                                     args.llm, args.llm_url, args.llm_model)
         return run_demo(
             robot_name=args.robot,
-            use_llm=_understanding(args.command_mode or bool(args.commands)),
+            use_llm=text_model is not None,
+            text_model=text_model,
             commands=args.commands,
             view=args.view,
             speed=args.speed,

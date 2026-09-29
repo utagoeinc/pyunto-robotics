@@ -1,0 +1,38 @@
+# The whole test suite, on the three systems robot makers actually use.
+#
+# The simulator renders camera frames, which needs an OpenGL context even with no window.
+# Linux runners have no GPU or display, so MuJoCo's software renderer (OSMesa) is used there.
+# Windows and macOS runners have a display adapter, which GLFW can use.
+# The `llm` tests need the local Gemma weights and are left to a Mac.
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Software OpenGL (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libosmesa6 libgl1
+          echo "MUJOCO_GL=osmesa" >> "$GITHUB_ENV"
+          echo "PYOPENGL_PLATFORM=osmesa" >> "$GITHUB_ENV"
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Test
+        run: python -m pytest -q -m "not llm"
+      - name: URDF example
+        run: python examples/urdf_robot.py --check

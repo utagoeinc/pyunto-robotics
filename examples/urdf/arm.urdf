@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!-- A two-joint arm on a fixed base. Replace this file with your own robot's URDF. -->
+<robot name="demo_arm">
+  <link name="base">
+    <inertial><mass value="2.0"/><inertia ixx="0.02" iyy="0.02" izz="0.02" ixy="0" ixz="0" iyz="0"/></inertial>
+    <visual><geometry><cylinder radius="0.08" length="0.1"/></geometry></visual>
+    <!-- No <collision> on the base: MuJoCo merges a fixed base into its world body, and unlike
+         parent/child pairs, contacts with the world body are not filtered, so a base collision
+         that touches the first link pins the joint. -->
+  </link>
+  <link name="upper_arm">
+    <inertial><origin xyz="0 0 0.15"/><mass value="0.6"/><inertia ixx="0.005" iyy="0.005" izz="0.001" ixy="0" ixz="0" iyz="0"/></inertial>
+    <visual><origin xyz="0 0 0.15"/><geometry><cylinder radius="0.03" length="0.3"/></geometry></visual>
+    <collision><origin xyz="0 0 0.15"/><geometry><cylinder radius="0.03" length="0.3"/></geometry></collision>
+  </link>
+  <link name="forearm">
+    <inertial><origin xyz="0 0 0.125"/><mass value="0.4"/><inertia ixx="0.003" iyy="0.003" izz="0.001" ixy="0" ixz="0" iyz="0"/></inertial>
+    <visual><origin xyz="0 0 0.125"/><geometry><cylinder radius="0.025" length="0.25"/></geometry></visual>
+    <collision><origin xyz="0 0 0.125"/><geometry><cylinder radius="0.025" length="0.25"/></geometry></collision>
+  </link>
+  <joint name="shoulder" type="revolute">
+    <parent link="base"/><child link="upper_arm"/>
+    <origin xyz="0 0 0.05"/><axis xyz="0 1 0"/>
+    <limit lower="-1.57" upper="1.57" effort="20" velocity="2"/>
+  </joint>
+  <joint name="elbow" type="revolute">
+    <parent link="upper_arm"/><child link="forearm"/>
+    <origin xyz="0 0 0.3"/><axis xyz="0 1 0"/>
+    <limit lower="-2.0" upper="2.0" effort="10" velocity="2"/>
+  </joint>
+</robot>

@@ -7,7 +7,7 @@ is handled for you.
 
 Run it:
 
-    pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
+    pip install 'pyunto-robotics[llm]'
     python examples/my_robot.py
 
 A QR code appears. Scan it with the Pyunto app, choose a diary, and the robot starts
@@ -99,7 +99,9 @@ def main() -> int:
         def __init__(self, skills):
             self.skills = skills
 
-        def execute(self, text: str):
+        # `report` is passed by RobotBackend (a narrator, or None). Without the parameter every
+        # entry raised TypeError inside the Bridge and the robot never answered.
+        def execute(self, text: str, report=None):  # noqa: ANN001
             verb, _, rest = text.strip().partition(" ")
             result = self.skills.run(verb.lower(), rest.strip() or None)
             return type("Execution", (), {"reply": lambda _self=None, r=result: r.message})()
