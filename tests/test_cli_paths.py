@@ -212,3 +212,45 @@ class TestHandingOutTheQRCode:
             "type", "version", "user_id", "display_name",
             "public_key", "operator", "runtime",
         }, "an unexpected field appeared in a payload that is handed out publicly"
+
+
+def test_showqr_hands_the_scanned_diary_to_the_robot():
+    """The robot must answer in the diary it was just scanned into, not in whichever diary
+    the server happens to list first."""
+    fake_connection = mock.Mock()
+    fake_connection.identity.display_name = "🤖 Test"
+    fake_connection.identity_store.public_key_b64 = "AAAA"
+    fake_connection.user_id = "00000000-0000-0000-0000-000000000000"
+
+    with mock.patch.object(cli, "connect", return_value=fake_connection), \
+         mock.patch("pyunto_agent.pairing.wait_for_scan", return_value="scanned-space"), \
+         mock.patch.object(cli, "_reexec_under_mjpython_if_needed"), \
+         mock.patch("pyunto_robotics.demo.run_demo", return_value=0) as run_demo:
+        cli.main(["showqr", "--robot", "solar", "--command-mode"])
+
+    assert run_demo.call_args.kwargs["space"] == "scanned-space"
+    assert "PYUNTO_PAIRED_SPACE" not in cli.os.environ, "must not leak into the next command"
+
+
+def test_after_the_relaunch_showqr_does_not_ask_for_the_scan_again(monkeypatch):
+    monkeypatch.setenv("PYUNTO_PAIRED_SPACE", "scanned-space")
+    monkeypatch.setenv("PYUNTO_PAIRED_ROBOT", "pet")
+    with mock.patch("pyunto_agent.pairing.wait_for_scan") as wait, \
+         mock.patch.object(cli, "connect") as connect, \
+         mock.patch("pyunto_robotics.demo.run_demo", return_value=0) as run_demo:
+        cli.main(["showqr", "--command-mode"])
+    assert not wait.called and not connect.called
+    assert run_demo.call_args.kwargs["space"] == "scanned-space"
+    assert run_demo.call_args.kwargs["robot_name"] == "pet"
+
+
+def test_a_diary_is_chosen_by_name_or_id():
+    from pyunto_robotics.demo import choose_space
+
+    spaces = [{"uuid": "fccb6e55-aaaa", "name": "Robotics Demo"},
+              {"uuid": "3124f1b8-bbbb", "name": "ロボットテスト"}]
+    assert choose_space(spaces, None)["name"] == "Robotics Demo"
+    assert choose_space(spaces, "ロボットテスト")["uuid"] == "3124f1b8-bbbb"
+    assert choose_space(spaces, "robotics demo")["uuid"] == "fccb6e55-aaaa"
+    assert choose_space(spaces, "3124f1b8")["name"] == "ロボットテスト"
+    assert choose_space(spaces, "nowhere") is None

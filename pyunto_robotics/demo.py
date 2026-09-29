@@ -60,6 +60,21 @@ def _wait_for_key(connection: Connection, space_id: str, timeout: float = 300.0)
     return False
 
 
+def choose_space(spaces: list[dict], wanted: str | None) -> dict | None:
+    """The diary to answer in: `wanted` by name or id (or its first characters, as `whoami`
+    prints them), else the first -- the server lists the most recently active first."""
+    if not spaces:
+        return None
+    if not wanted:
+        return spaces[0]
+    key = wanted.strip().lower()
+    for s in spaces:
+        if str(s.get("uuid", "")).lower().startswith(key) or \
+                str(s.get("name", "")).strip().lower() == key:
+            return s
+    return None
+
+
 def run_demo(
     robot_name: str = "solar",
     use_llm: bool = False,
@@ -68,6 +83,7 @@ def run_demo(
     speed: float = 1.0,
     send_images: bool = True,
     text_model: object | None = None,
+    space: str | None = None,
 ) -> int:
     setup = registry.get(robot_name)
     if commands:
@@ -91,13 +107,24 @@ def run_demo(
     print(f"done ({connection.identity.display_name})")
 
     space_id: str | None = None
+    # Server order: the diary with the most recent activity first.
     spaces = [
         s for s in connection.client.list_spaces()
         if not (s.get("is_self") or s.get("isSelf"))
     ]
-    if spaces:
-        space_id = str(spaces[0].get("uuid"))
-        print(f"pairing : already a member of \"{spaces[0].get('name')}\"")
+    chosen = choose_space(spaces, space)
+    if space and spaces and chosen is None:
+        names = ", ".join(f'"{s.get("name")}"' for s in spaces)
+        print(f'ERROR: this robot is not in a diary called "{space}". It is in: {names}.')
+        return 1
+    if chosen:
+        space_id = str(chosen.get("uuid"))
+        print(f"pairing : answering in \"{chosen.get('name')}\"")
+        if len(spaces) > 1 and not space:
+            # One running robot answers one diary at a time (see README). Say which, and how
+            # to pick another, instead of leaving the person to guess why a diary is silent.
+            others = ", ".join(f'"{s.get("name")}"' for s in spaces if s is not chosen)
+            print(f"          also in {others}; choose with --space NAME")
     else:
         print("pairing : not in any shared space yet.")
         print("          Run `pyunto-robotics showqr` and scan the QR code with the app.")

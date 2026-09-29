@@ -48,6 +48,10 @@ def _reexec_under_mjpython_if_needed(wants_window: bool) -> None:
 #: Which robot to offer first, and to fall back to when nobody can be asked.
 DEFAULT_ROBOT = "solar"
 
+# Carry the result of the scan across the re-launch under mjpython (see `showqr`).
+_PAIRED_SPACE = "PYUNTO_PAIRED_SPACE"
+_PAIRED_ROBOT = "PYUNTO_PAIRED_ROBOT"
+
 
 def _choose_robot(preselected: str | None) -> str | None:
     """Ask which robot to open. Returns None if the person changed their mind.
@@ -245,6 +249,9 @@ def main(argv: list[str] | None = None) -> int:
     # robot finding something by measurement rather than following a script. The old default
     # was "office", a robot that no longer exists -- so a bare `demo` raised KeyError.
     p_demo.add_argument("--robot", default=DEFAULT_ROBOT, help="which machine (see `robots`)")
+    p_demo.add_argument("--space", metavar="NAME|ID",
+                        help="which diary to answer in, when the robot is in more than one "
+                             "(default: the most recently active)")
     # Reading sentences is the default and needs no flag. See `_understanding`.
     p_demo.add_argument("--command-mode", action="store_true",
                         help="match a fixed command list instead of reading what you wrote")
@@ -306,6 +313,23 @@ def main(argv: list[str] | None = None) -> int:
             has = "yes" if connection.keys.has_key(sid) else "no"
             print(f"  - {space.get('name')}  {sid}  key={has}")
         return 0
+
+    if args.cmd == "showqr" and os.environ.get(_PAIRED_SPACE):
+        # The second half of `showqr`, after re-launching under mjpython for the window. The
+        # scan already happened in the first process; asking for it again would show a second
+        # QR code and, for an account already in a diary, a second "press Enter".
+        from .demo import run_demo
+
+        text_model = _language_model(args.command_mode, args.llm, args.llm_url, args.llm_model)
+        return run_demo(
+            robot_name=os.environ.get(_PAIRED_ROBOT) or DEFAULT_ROBOT,
+            use_llm=text_model is not None,
+            text_model=text_model,
+            view=not args.no_window,
+            speed=args.speed,
+            send_images=not args.no_photos,
+            space=os.environ[_PAIRED_SPACE],
+        )
 
     if args.cmd == "showqr":
         # The same payload and renderer the agent uses, so one scanner path in the app
@@ -409,7 +433,13 @@ def main(argv: list[str] | None = None) -> int:
         # Both of these belong to opening a robot, and `showqr` opens one now. Importing
         # inside the `demo` branch left this path calling a name that did not exist, and
         # skipping the re-exec would have opened no window on macOS even once it did.
+        # The re-launched process resumes from here (see the top of this branch).
+        os.environ[_PAIRED_SPACE] = space_id
+        os.environ[_PAIRED_ROBOT] = robot_name
         _reexec_under_mjpython_if_needed(not args.no_window)
+        # Still here: no re-launch happened, so this process carries on itself.
+        os.environ.pop(_PAIRED_SPACE, None)
+        os.environ.pop(_PAIRED_ROBOT, None)
         from .demo import run_demo
 
         text_model = _language_model(args.command_mode, args.llm, args.llm_url, args.llm_model)
@@ -420,6 +450,7 @@ def main(argv: list[str] | None = None) -> int:
             view=not args.no_window,
             speed=args.speed,
             send_images=not args.no_photos,
+            space=space_id,
         )
 
     if args.cmd == "demo":
@@ -436,6 +467,7 @@ def main(argv: list[str] | None = None) -> int:
             view=args.view,
             speed=args.speed,
             send_images=args.send_images,
+            space=args.space,
         )
 
     return 1
