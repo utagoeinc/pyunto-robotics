@@ -94,4 +94,5 @@ testpaths = ["tests"]
 markers = [
     "slow: drives the full simulator end to end (deselect with -m 'not slow')",
     "llm: needs the local Gemma weights on disk",
+    "needs_gl: renders camera frames and cannot pass without an OpenGL context (skipped when PYUNTO_TEST_NO_GL=1)",
 ]

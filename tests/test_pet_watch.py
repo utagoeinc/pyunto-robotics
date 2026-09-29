@@ -28,6 +28,7 @@ def flat(keyframe: str = "dock") -> tuple[Robot, PetWatchSkills]:
 WHERE = {"dock": "sofa", "sill": "sill", "shelf": "shelf", "tree": "tree"}
 
 
+@pytest.mark.needs_gl
 @pytest.mark.slow
 @pytest.mark.parametrize("keyframe,expected", sorted(WHERE.items()))
 def test_it_finds_her_at_every_height(keyframe: str, expected: str):
@@ -76,6 +77,7 @@ def test_it_can_reach_every_place_including_the_kitchen():
         robot.close()
 
 
+@pytest.mark.needs_gl
 @pytest.mark.slow
 def test_the_camera_is_what_finds_her_not_the_wheels():
     """Aimed at the right place from the right spot, she is in frame; level, she is not.
@@ -98,6 +100,7 @@ def test_the_camera_is_what_finds_her_not_the_wheels():
         robot.close()
 
 
+@pytest.mark.needs_gl
 def test_the_renderer_is_not_built_until_it_is_used():
     """The demo builds skills AFTER opening the viewer.
 
@@ -115,6 +118,7 @@ def test_the_renderer_is_not_built_until_it_is_used():
         robot.close()
 
 
+@pytest.mark.needs_gl
 @pytest.mark.slow
 def test_a_broken_camera_is_not_reported_as_an_empty_flat():
     """The owner is out. "She is not in any of her usual places" would send them home."""

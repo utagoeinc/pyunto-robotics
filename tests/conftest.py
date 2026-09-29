@@ -27,6 +27,17 @@ def _is_gl_context_error(exc: BaseException | None) -> bool:
     return False
 
 
+def pytest_collection_modifyitems(config, items):  # noqa: ANN001
+    """Tests that catch the renderer's error themselves (the robot reports "my camera has
+    stopped working") fail as ordinary assertions, so they are marked needs_gl instead."""
+    if not os.environ.get("PYUNTO_TEST_NO_GL"):
+        return
+    skip = pytest.mark.skip(reason="needs an OpenGL context; this machine has none")
+    for item in items:
+        if "needs_gl" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_call(item):  # noqa: ANN001, ANN201
     try:

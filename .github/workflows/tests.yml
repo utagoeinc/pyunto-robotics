@@ -10,8 +10,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"   # the full suite, weekly
 
 jobs:
+  # Every push: the fast tests on all three systems. Software OpenGL is enough for them.
   test:
     strategy:
       fail-fast: false
@@ -44,7 +47,30 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
       - name: Test
-        timeout-minutes: 40
-        run: python -m pytest -q -m "not llm" --durations=15
+        timeout-minutes: 30
+        run: python -m pytest -q -m "not slow and not llm" --durations=10
       - name: URDF example
         run: python examples/urdf_robot.py --check
+
+  # The slow tests drive whole errands and render every camera frame on the CPU, which takes
+  # hours with software OpenGL (minutes on a Mac GPU). Weekly and on demand, Linux only.
+  full:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Headless OpenGL (Mesa EGL)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libegl-mesa0 libgles2
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Full suite
+        timeout-minutes: 300
+        env:
+          MUJOCO_GL: egl
+          PYOPENGL_PLATFORM: egl
+        run: python -m pytest -q -m "not llm" --durations=15
