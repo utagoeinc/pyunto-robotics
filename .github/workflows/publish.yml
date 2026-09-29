@@ -6,6 +6,8 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  # Manual dry run: builds and smoke-tests, never publishes.
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,18 +17,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Test
-        # Fast tests only. The `slow` ones drive the full simulator for about five minutes and
-        # render camera frames, which needs an OpenGL context the runner does not have; `llm`
-        # needs the local Gemma weights. Run both on a Mac before tagging a release.
-        run: |
-          python -m pip install '.[dev]'
-          python -m pytest -q -m "not slow and not llm"
       - name: Build
         run: |
           python -m pip install build twine
           python -m build
           python -m twine check dist/*
+      - name: Smoke-test the built wheel
+        # The test suite is not run here: even the fast tests render camera frames, and MuJoCo
+        # aborts without an OpenGL context, which the runner does not have (v0.1.0's first run
+        # died this way). Run `pytest -m "not llm"` (and the llm tests) on a Mac before tagging.
+        # What this does check: the wheel installs from PyPI-style metadata, the CLI starts,
+        # and every bundled robot and its scene files are in the package.
+        run: |
+          python -m pip install dist/*.whl
+          pyunto-robotics --help
+          pyunto-robotics robots | tee robots.txt
+          for r in solar watch pet mars orchard hotel; do grep -q "$r" robots.txt || { echo "missing robot: $r"; exit 1; }; done
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -34,6 +40,7 @@ jobs:
 
   publish:
     needs: build
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment:
       name: pypi
