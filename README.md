@@ -30,14 +30,13 @@ python3.12 -m venv .venv && source .venv/bin/activate
 Then three commands, and the only one to remember is the first:
 
 ```bash
-pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'
+pip install 'pyunto-robotics[llm]'
 python -m pyunto_robotics.download_model   # so the robot reads what you write (~5.5 GB, once)
 pyunto-robotics showqr                     # a QR code appears in the terminal
 ```
 
-pyunto-robotics is not on PyPI yet, so it installs from git — one command either way. It
-brings [`pyunto-agent`](https://pypi.org/project/pyunto-agent/) from PyPI, which carries the
-encrypted transport and the pairing.
+It brings [`pyunto-agent`](https://pypi.org/project/pyunto-agent/), which carries the
+encrypted transport and the pairing, with it.
 
 Scan that QR code with the Pyunto app. The app asks which diary to let the robot into and shows
 who runs it; when you approve, the terminal asks which robot to open and starts it — no second
@@ -384,15 +383,16 @@ it automatically, so the command above works as typed.
 
 ### Installing
 
-pyunto-robotics is not published to PyPI yet, so it comes from git — that is the line in
-[Quick start](#quick-start). It brings `pyunto-agent` with it, from PyPI.
+Both packages are on PyPI — that is the line in [Quick start](#quick-start), and it brings
+`pyunto-agent` with it. For the latest unreleased version, install from git instead:
+`pip install 'pyunto-robotics[llm] @ git+https://github.com/utagoeinc/pyunto-robotics'`.
 
 The `[llm]` extra is what lets the robot read sentences rather than match commands, and it
 installs nothing at all off Apple silicon, so the same line is safe everywhere. Drop it if you
 only ever want [command mode](#command-mode):
 
 ```bash
-pip install 'pyunto-robotics @ git+https://github.com/utagoeinc/pyunto-robotics'
+pip install pyunto-robotics
 ```
 
 To work on the SDK itself, clone it and install in place:
