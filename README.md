@@ -417,4 +417,4 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[llm,dev]'
 
 ## Licence
 
-The Pyunto robots, scenes and SDK code are ours. MuJoCo (Apache-2.0) is a dependency.
+Apache-2.0, like [pyunto-agent](https://github.com/utagoeinc/pyunto-agent). See [LICENSE](https://github.com/utagoeinc/pyunto-robotics/blob/main/LICENSE). MuJoCo (Apache-2.0) is a dependency.
