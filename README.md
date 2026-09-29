@@ -426,7 +426,14 @@ none, for real hardware), and which skills to use — see
 
 ## Requirements
 
-- Linux, Windows or macOS. The test suite runs on all three in CI (`.github/workflows/tests.yml`)
+- Linux, Windows or macOS. Every push runs the fast tests and the URDF example on all three in
+  CI; the full suite, which drives whole errands with software rendering, runs weekly on Linux
+  (`.github/workflows/tests.yml`)
+- **Windows on ARM** (including Windows in Parallels on an Apple silicon Mac): MuJoCo publishes
+  no ARM64 wheel for Windows. Install the **x64** build of Python from python.org; Windows 11 runs
+  it under emulation and pip then uses MuJoCo's x64 wheel
+- **Intel Macs**: the last MuJoCo with an Intel Mac wheel is 3.10, and this package needs 3.11 or
+  newer, so Intel Macs are not supported at the moment
 - Python 3.11 or newer — on a Mac, not 3.13+ if you want the built-in language model, which
   `mlx-vlm` does not build for yet
 - On a Linux machine with no display, render with MuJoCo's software renderer:

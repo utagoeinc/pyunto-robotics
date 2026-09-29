@@ -1,6 +1,6 @@
 [project]
 name = "pyunto-robotics"
-version = "0.1.1"
+version = "0.2.0"
 description = "Talk to a robot from the Pyunto diary app. Simulated robots included; bring your own with one interface."
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.11"
