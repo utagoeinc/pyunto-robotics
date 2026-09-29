@@ -294,7 +294,13 @@ class RobotAgent:
         if self.client is None:
             return
         try:
-            self.client.send(message.chat_space_id, text, thread_id=message.thread_id)
+            # Addressed to whoever gave the instruction, like the Bridge path does. Posted to the
+            # room, a short reply ("I did not understand that") reads as an entry for everyone,
+            # and a text agent in the same diary would answer it.
+            self.client.send(
+                message.chat_space_id, text, thread_id=message.thread_id,
+                notify_users=[message.sender_uuid] if message.sender_uuid else None,
+            )
             log.info("-> %s", text)
         except Exception:  # noqa: BLE001 - a send failure must not kill the robot
             log.exception("could not send reply")

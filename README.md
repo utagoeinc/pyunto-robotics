@@ -295,6 +295,27 @@ Add `--no-photos` to report in words only.
 ---
 
 
+## Who the robot listens to
+
+A robot that moves cannot share a text agent's threshold for answering, so it has two
+refusals of its own:
+
+* **It takes instructions only from people.** Entries written by an agent or another robot
+  are ignored, however they are phrased. That is what makes it safe to keep Claude and a robot
+  in the same diary: a check-in from the agent never sets the robot moving, and the two cannot
+  talk each other into a loop. Whether a sender is a program comes from the server
+  (`users.is_agent`), not from a display name anyone could change.
+* **It acts only when addressed.** Mention it by name (`@S1`; `@🤖 S1` from the app's picker
+  works too) or send the entry to it. A person thinking aloud in a shared diary does not set it
+  walking.
+
+Its plan, progress reports and short replies are all sent to the person who gave the
+instruction, so their phone tells them the robot answered, and a text agent in the same diary
+does not mistake them for entries meant for everyone.
+
+Every member sees in the app who runs the robot (`--operator`) and that it runs on the
+operator's machine.
+
 ## Bringing your own robot
 
 The SDK is not six robots; it is a way to attach *any* robot to a diary. One class, one method:
@@ -404,6 +425,28 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[llm,dev]'
 ```
 
 ---
+
+## Reference
+
+| Command | What it does | Options |
+|---|---|---|
+| `showqr` | Shows a QR code; the person who scans it lets the robot into a diary. Then asks which robot to open and starts it | `--operator NAME` (shown to the person before they approve), `--robot NAME` (skip the question), `--image FILE.png\|.svg` (write the code to a file and exit), `--big` (larger terminal QR), `--no-run` (exit after showing the code), plus `--command-mode`, `--no-window`, `--speed`, `--no-photos` as for `demo` |
+| `demo` | Opens a robot and answers the diaries it is in | `--robot NAME` (default `solar`), `--command-mode` (fixed command list instead of the language model), `--commands FILE.json` (your own command list; implies `--command-mode`), `--no-window` (headless), `--speed X` (simulation playback, 1.0 = real time), `--no-photos` (report in words only) |
+| `robots` | Lists the installed robots, including plugins | |
+| `whoami` | This robot's account and the spaces it is in | |
+
+Configuration, from the environment or a `.env` file:
+
+| Variable | Meaning |
+|---|---|
+| `PYUNTO_ROBOT_NAME` | display name of the robot's account; the 🤖 marker is added if missing |
+| `PYUNTO_ROBOT_DIR` | where its account and keys live (default `~/.pyunto-robot`) |
+| `PYUNTO_EMAIL`, `PYUNTO_PASSWORD` | sign in as a registered account instead of the robot's own. Refused unless `PYUNTO_ROBOT_ACCOUNT=1`: a robot ignores its own posts, so signed in as the person it serves it would ignore everything they write |
+| `PYUNTO_ROBOT_ACCOUNT` | `1` = the account above really is a separate account for the robot |
+| `PYUNTO_BASE_URL` | API server (default `https://api.pyunto.com`) |
+| `PYUNTO_NO_REEXEC` | `1` = do not re-launch under `mjpython` on macOS (set automatically) |
+
+Changes in each version are in [Releases](https://github.com/utagoeinc/pyunto-robotics/releases).
 
 ## What is private, and what is not
 

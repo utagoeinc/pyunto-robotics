@@ -1,6 +1,6 @@
 [project]
 name = "pyunto-robotics"
-version = "0.1.0"
+version = "0.1.1"
 description = "Talk to a robot from the Pyunto diary app. Simulated robots included; bring your own with one interface."
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.11"
@@ -30,7 +30,7 @@ dependencies = [
     # flow is "scan this square" -- and without qrcode it prints a JSON blob instead, which
     # cannot be scanned by anything. An extra is right for the agent, where pairing is one
     # feature among several; for the robot SDK it is the way in.
-    "pyunto-agent[qr]>=0.1.0",
+    "pyunto-agent[qr]>=0.1.4",
     # Simulation. Capped below 3.13: from 3.13 the pet robot can no longer reach the cat
     # tree (tests/test_pet_watch.py::test_it_can_reach_every_place_including_the_kitchen,
     # 2026-09-29). Lift the cap once the navigation is re-tuned against the newer physics.
